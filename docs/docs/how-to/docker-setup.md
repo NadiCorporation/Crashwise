@@ -110,7 +110,32 @@ fuzzforge workflow run secret_detection ./codebase
 
 ### Manual Worker Management
 
-Start specific workers when needed:
+**Quick Reference - Workflow to Worker Mapping:**
+
+| Workflow | Worker Service | Docker Command |
+|----------|----------------|----------------|
+| `security_assessment`, `python_sast`, `llm_analysis`, `atheris_fuzzing` | worker-python | `docker compose up -d worker-python` |
+| `android_static_analysis` | worker-android | `docker compose up -d worker-android` |
+| `cargo_fuzzing` | worker-rust | `docker compose up -d worker-rust` |
+| `ossfuzz_campaign` | worker-ossfuzz | `docker compose up -d worker-ossfuzz` |
+| `llm_secret_detection`, `trufflehog_detection`, `gitleaks_detection` | worker-secrets | `docker compose up -d worker-secrets` |
+
+FuzzForge CLI provides convenient commands for managing workers:
+
+```bash
+# List all workers and their status
+ff worker list
+ff worker list --all  # Include stopped workers
+
+# Start a specific worker
+ff worker start python
+ff worker start android --build  # Rebuild before starting
+
+# Stop all workers
+ff worker stop
+```
+
+You can also use Docker commands directly:
 
 ```bash
 # Start a single worker
@@ -122,6 +147,33 @@ docker compose --profile workers up -d
 # Stop a worker to free resources
 docker stop fuzzforge-worker-ossfuzz
 ```
+
+### Stopping Workers Properly
+
+The easiest way to stop workers is using the CLI:
+
+```bash
+# Stop all running workers (recommended)
+ff worker stop
+```
+
+This command safely stops all worker containers without affecting core services.
+
+Alternatively, you can use Docker commands:
+
+```bash
+# Stop individual worker
+docker stop fuzzforge-worker-python
+
+# Stop all workers using docker compose
+# Note: This requires the --profile flag because workers are in profiles
+docker compose down --profile workers
+```
+
+**Important:** Workers use Docker Compose profiles to prevent auto-starting. When using Docker commands directly:
+- `docker compose down` (without `--profile workers`) does NOT stop workers
+- Workers remain running unless explicitly stopped with the profile flag or `docker stop`
+- Use `ff worker stop` for the safest option that won't affect core services
 
 ### Resource Comparison
 
@@ -171,7 +223,7 @@ FuzzForge requires `volumes/env/.env` to start. This file contains API keys and 
 
 ```bash
 # Copy the example file
-cp volumes/env/.env.example volumes/env/.env
+cp volumes/env/.env.template volumes/env/.env
 
 # Edit to add your API keys (if using AI features)
 nano volumes/env/.env

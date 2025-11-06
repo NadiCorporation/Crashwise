@@ -10,5 +10,6 @@
 # Additional attribution and requirements are provided in the NOTICE file.
 
 from .file_scanner import FileScanner
+from .dependency_scanner import DependencyScanner
 
-__all__ = ["FileScanner"]
+__all__ = ["FileScanner", "DependencyScanner"]

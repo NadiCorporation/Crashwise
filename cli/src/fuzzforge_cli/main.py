@@ -19,6 +19,8 @@ from rich.traceback import install
 from typing import Optional, List
 import sys
 
+from .config import load_project_env
+
 from .commands import (
     workflows,
     workflow_exec,
@@ -27,12 +29,15 @@ from .commands import (
     config as config_cmd,
     ai,
     ingest,
+    worker,
 )
-from .constants import DEFAULT_VOLUME_MODE
 from .fuzzy import enhanced_command_not_found_handler
 
 # Install rich traceback handler
 install(show_locals=True)
+
+# Ensure environment variables are available before command execution
+load_project_env()
 
 # Create console for rich output
 console = Console()
@@ -184,10 +189,6 @@ def run_workflow(
         None, "--param-file", "-f",
         help="JSON file containing workflow parameters"
     ),
-    volume_mode: str = typer.Option(
-        DEFAULT_VOLUME_MODE, "--volume-mode", "-v",
-        help="Volume mount mode: ro (read-only) or rw (read-write)"
-    ),
     timeout: Optional[int] = typer.Option(
         None, "--timeout", "-t",
         help="Execution timeout in seconds"
@@ -234,7 +235,6 @@ def run_workflow(
         target_path=target,
         params=params,
         param_file=param_file,
-        volume_mode=volume_mode,
         timeout=timeout,
         interactive=interactive,
         wait=wait,
@@ -335,6 +335,7 @@ app.add_typer(finding_app, name="finding", help="🔍 View and analyze findings"
 app.add_typer(monitor.app, name="monitor", help="📊 Real-time monitoring")
 app.add_typer(ai.app, name="ai", help="🤖 AI integration features")
 app.add_typer(ingest.app, name="ingest", help="🧠 Ingest knowledge into AI")
+app.add_typer(worker.app, name="worker", help="🔧 Manage Temporal workers")
 
 # Help and utility commands
 @app.command()
@@ -410,7 +411,7 @@ def main():
                     'init', 'status', 'config', 'clean',
                     'workflows', 'workflow',
                     'findings', 'finding',
-                    'monitor', 'ai', 'ingest',
+                    'monitor', 'ai', 'ingest', 'worker',
                     'version'
                 ]
 

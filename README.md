@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSL%20%2B%20Apache-orange" alt="License: BSL + Apache"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"/></a>
   <a href="https://fuzzforge.ai"><img src="https://img.shields.io/badge/Website-fuzzforge.ai-blue" alt="Website"/></a>
-  <img src="https://img.shields.io/badge/version-0.7.0-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.7.3-green" alt="Version">
   <a href="https://github.com/FuzzingLabs/fuzzforge_ai/stargazers"><img src="https://img.shields.io/github/stars/FuzzingLabs/fuzzforge_ai?style=social" alt="GitHub Stars"></a>
   
 </p>
@@ -115,9 +115,11 @@ For containerized workflows, see the [Docker Installation Guide](https://docs.do
 For AI-powered workflows, configure your LLM API keys:
 
 ```bash
-cp volumes/env/.env.example volumes/env/.env
+cp volumes/env/.env.template volumes/env/.env
 # Edit volumes/env/.env and add your API keys (OpenAI, Anthropic, Google, etc.)
+# Add your key to LITELLM_GEMINI_API_KEY 
 ```
+> Dont change the OPENAI_API_KEY default value, as it is used for the LLM proxy. 
 
 This is required for:
 - `llm_secret_detection` workflow
@@ -150,7 +152,7 @@ git clone https://github.com/fuzzinglabs/fuzzforge_ai.git
 cd fuzzforge_ai
 
 # 2. Copy the default LLM env config
-cp volumes/env/.env.example volumes/env/.env
+cp volumes/env/.env.template volumes/env/.env
 
 # 3. Start FuzzForge with Temporal
 docker compose up -d
@@ -162,6 +164,16 @@ docker compose up -d worker-python
 > The first launch can take 2-3 minutes for services to initialize ☕
 >
 > Workers don't auto-start by default (saves RAM). Start the worker you need before running workflows.
+
+**Workflow-to-Worker Quick Reference:**
+
+| Workflow | Worker Required | Startup Command |
+|----------|----------------|-----------------|
+| `security_assessment`, `python_sast`, `llm_analysis`, `atheris_fuzzing` | worker-python | `docker compose up -d worker-python` |
+| `android_static_analysis` | worker-android | `docker compose up -d worker-android` |
+| `cargo_fuzzing` | worker-rust | `docker compose up -d worker-rust` |
+| `ossfuzz_campaign` | worker-ossfuzz | `docker compose up -d worker-ossfuzz` |
+| `llm_secret_detection`, `trufflehog_detection`, `gitleaks_detection` | worker-secrets | `docker compose up -d worker-secrets` |
 
 ```bash
 # 5. Run your first workflow (files are automatically uploaded)

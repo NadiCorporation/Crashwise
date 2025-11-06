@@ -1,6 +1,6 @@
 [project]
 name = "fuzzforge"
-version = "0.6.0"
+version = "0.7.3"
 description = "FuzzForge Platform - Complete fuzzing and security testing platform with AI capabilities"
 readme = "README.md"
 license = { text = "BSL-1.1" }

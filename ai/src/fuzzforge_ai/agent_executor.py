@@ -831,20 +831,9 @@ class FuzzForgeExecutor:
             async def submit_security_scan_mcp(
                 workflow_name: str,
                 target_path: str = "",
-                volume_mode: str = "",
                 parameters: Dict[str, Any] | None = None,
                 tool_context: ToolContext | None = None,
             ) -> Any:
-                # Normalise volume mode to supported values
-                normalised_mode = (volume_mode or "ro").strip().lower().replace("-", "_")
-                if normalised_mode in {"read_only", "readonly", "ro"}:
-                    normalised_mode = "ro"
-                elif normalised_mode in {"read_write", "readwrite", "rw"}:
-                    normalised_mode = "rw"
-                else:
-                    # Fall back to read-only if we can't recognise the input
-                    normalised_mode = "ro"
-
                 # Resolve the target path to an absolute path for validation
                 resolved_path = target_path or "."
                 try:
@@ -883,7 +872,6 @@ class FuzzForgeExecutor:
                 payload = {
                     "workflow_name": workflow_name,
                     "target_path": resolved_path,
-                    "volume_mode": normalised_mode,
                     "parameters": cleaned_parameters,
                 }
                 result = await _call_fuzzforge_mcp("submit_security_scan_mcp", payload)
@@ -1061,10 +1049,19 @@ class FuzzForgeExecutor:
             FunctionTool(get_task_list)
         ])
 
-        
-        # Create the agent
+
+        # Create the agent with LiteLLM configuration
+        llm_kwargs = {}
+        api_key = os.getenv('OPENAI_API_KEY') or os.getenv('LLM_API_KEY')
+        api_base = os.getenv('LLM_ENDPOINT') or os.getenv('LLM_API_BASE') or os.getenv('OPENAI_API_BASE')
+
+        if api_key:
+            llm_kwargs['api_key'] = api_key
+        if api_base:
+            llm_kwargs['api_base'] = api_base
+
         self.agent = LlmAgent(
-            model=LiteLlm(model=self.model),
+            model=LiteLlm(model=self.model, **llm_kwargs),
             name="fuzzforge_executor",
             description="Intelligent A2A orchestrator with memory",
             instruction=self._build_instruction(),
