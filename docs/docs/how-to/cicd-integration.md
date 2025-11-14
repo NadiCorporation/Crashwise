@@ -545,6 +545,6 @@ steps:
 
 ## Support
 
-- **Documentation**: [https://docs.fuzzforge.io](https://docs.fuzzforge.io)
+- **Documentation**: [https://docs.fuzzforge.ai](https://docs.fuzzforge.ai)
 - **Issues**: [GitHub Issues](https://github.com/FuzzingLabs/fuzzforge_ai/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/FuzzingLabs/fuzzforge_ai/discussions)

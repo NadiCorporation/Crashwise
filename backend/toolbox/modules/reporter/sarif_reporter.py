@@ -200,7 +200,7 @@ class SARIFReporter(BaseModule):
                         "driver": {
                             "name": tool_name,
                             "version": tool_version,
-                            "informationUri": "https://fuzzforge.io",
+                            "informationUri": "https://fuzzforge.ai",
                             "rules": rules
                         }
                     },
