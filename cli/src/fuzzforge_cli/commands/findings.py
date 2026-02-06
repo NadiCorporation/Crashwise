@@ -12,7 +12,6 @@ Findings and security results management commands.
 #
 # Additional attribution and requirements are provided in the NOTICE file.
 
-
 import json
 import csv
 from datetime import datetime
@@ -30,8 +29,10 @@ from rich import box
 from ..config import get_project_config, FuzzForgeConfig
 from ..database import get_project_db, ensure_project_db, FindingRecord
 from ..exceptions import (
-    retry_on_network_error, validate_run_id,
-    require_project, ValidationError
+    retry_on_network_error,
+    validate_run_id,
+    require_project,
+    ValidationError,
 )
 from fuzzforge_sdk import FuzzForgeClient
 
@@ -52,7 +53,7 @@ def severity_style(severity: str) -> str:
         "error": "bold red",
         "warning": "bold yellow",
         "note": "bold blue",
-        "info": "bold cyan"
+        "info": "bold cyan",
     }.get(severity.lower(), "white")
 
 
@@ -60,13 +61,11 @@ def severity_style(severity: str) -> str:
 def get_findings(
     run_id: str = typer.Argument(..., help="Run ID to get findings for"),
     save: bool = typer.Option(
-        True, "--save/--no-save",
-        help="Save findings to local database"
+        True, "--save/--no-save", help="Save findings to local database"
     ),
     format: str = typer.Option(
-        "table", "--format", "-f",
-        help="Output format: table, json, sarif"
-    )
+        "table", "--format", "-f", help="Output format: table, json, sarif"
+    ),
 ):
     """
     🔍 Retrieve and display security findings for a run
@@ -97,36 +96,44 @@ def get_findings(
                         "total_issues": len(results),
                         "by_severity": {},
                         "by_rule": {},
-                        "tools": []
+                        "tools": [],
                     }
 
                     for result in results:
                         level = result.get("level", "note")
                         rule_id = result.get("ruleId", "unknown")
 
-                        summary["by_severity"][level] = summary["by_severity"].get(level, 0) + 1
-                        summary["by_rule"][rule_id] = summary["by_rule"].get(rule_id, 0) + 1
+                        summary["by_severity"][level] = (
+                            summary["by_severity"].get(level, 0) + 1
+                        )
+                        summary["by_rule"][rule_id] = (
+                            summary["by_rule"].get(rule_id, 0) + 1
+                        )
 
                     # Extract tool info
                     tool = runs_data[0].get("tool", {})
                     driver = tool.get("driver", {})
                     if driver.get("name"):
-                        summary["tools"].append({
-                            "name": driver.get("name"),
-                            "version": driver.get("version"),
-                            "rules": len(driver.get("rules", []))
-                        })
+                        summary["tools"].append(
+                            {
+                                "name": driver.get("name"),
+                                "version": driver.get("version"),
+                                "rules": len(driver.get("rules", [])),
+                            }
+                        )
 
                 finding_record = FindingRecord(
                     run_id=run_id,
                     sarif_data=sarif_data,
                     summary=summary,
-                    created_at=datetime.now()
+                    created_at=datetime.now(),
                 )
                 db.save_findings(finding_record)
                 console.print("✅ Findings saved to local database", style="green")
             except Exception as e:
-                console.print(f"⚠️  Failed to save findings to database: {e}", style="yellow")
+                console.print(
+                    f"⚠️  Failed to save findings to database: {e}", style="yellow"
+                )
 
         # Display findings
         if format == "json":
@@ -141,9 +148,15 @@ def get_findings(
             display_findings_table(findings.sarif)
 
             # Suggest export command and show command
-            console.print(f"\n💡 View full details of a finding: [bold cyan]ff finding show {run_id} --rule <rule-id>[/bold cyan]")
-            console.print(f"💡 Export these findings: [bold cyan]ff findings export {run_id} --format sarif[/bold cyan]")
-            console.print("   Supported formats: [cyan]sarif[/cyan] (standard), [cyan]json[/cyan], [cyan]csv[/cyan], [cyan]html[/cyan]")
+            console.print(
+                f"\n💡 View full details of a finding: [bold cyan]ff finding show {run_id} --rule <rule-id>[/bold cyan]"
+            )
+            console.print(
+                f"💡 Export these findings: [bold cyan]ff findings export {run_id} --format sarif[/bold cyan]"
+            )
+            console.print(
+                "   Supported formats: [cyan]sarif[/cyan] (standard), [cyan]json[/cyan], [cyan]csv[/cyan], [cyan]html[/cyan]"
+            )
 
     except Exception as e:
         console.print(f"❌ Failed to get findings: {e}", style="red")
@@ -152,7 +165,9 @@ def get_findings(
 
 def show_finding(
     run_id: str = typer.Argument(..., help="Run ID to get finding from"),
-    rule_id: str = typer.Option(..., "--rule", "-r", help="Rule ID of the specific finding to show")
+    rule_id: str = typer.Option(
+        ..., "--rule", "-r", help="Rule ID of the specific finding to show"
+    ),
 ):
     """
     🔍 Show detailed information about a specific finding
@@ -196,7 +211,10 @@ def show_finding(
 
         if not matching_finding:
             console.print(f"❌ No finding found with rule ID: {rule_id}", style="red")
-            console.print(f"💡 Use [bold cyan]ff findings get {run_id}[/bold cyan] to see all findings", style="dim")
+            console.print(
+                f"💡 Use [bold cyan]ff findings get {run_id}[/bold cyan] to see all findings",
+                style="dim",
+            )
             raise typer.Exit(1)
 
         # Display detailed finding
@@ -242,15 +260,19 @@ def display_finding_detail(finding: Dict[str, Any], tool: Dict[str, Any], run_id
         "error": "red",
         "warning": "yellow",
         "note": "blue",
-        "info": "cyan"
+        "info": "cyan",
     }.get(level.lower(), "white")
 
     # Build detailed content
     content_lines = []
     content_lines.append(f"[bold]Rule ID:[/bold] {rule_id}")
-    content_lines.append(f"[bold]Severity:[/bold] [{severity_color}]{level.upper()}[/{severity_color}]")
+    content_lines.append(
+        f"[bold]Severity:[/bold] [{severity_color}]{level.upper()}[/{severity_color}]"
+    )
     content_lines.append(f"[bold]Location:[/bold] {location_str}")
-    content_lines.append(f"[bold]Tool:[/bold] {tool.get('name', 'Unknown')} v{tool.get('version', 'unknown')}")
+    content_lines.append(
+        f"[bold]Tool:[/bold] {tool.get('name', 'Unknown')} v{tool.get('version', 'unknown')}"
+    )
     content_lines.append(f"[bold]Run ID:[/bold] {run_id}")
     content_lines.append("")
     content_lines.append("[bold]Summary:[/bold]")
@@ -268,15 +290,19 @@ def display_finding_detail(finding: Dict[str, Any], tool: Dict[str, Any], run_id
 
     # Display in panel
     console.print()
-    console.print(Panel(
-        content,
-        title="🔍 Finding Detail",
-        border_style=severity_color,
-        box=box.ROUNDED,
-        padding=(1, 2)
-    ))
+    console.print(
+        Panel(
+            content,
+            title="🔍 Finding Detail",
+            border_style=severity_color,
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+    )
     console.print()
-    console.print(f"💡 Export this run: [bold cyan]ff findings export {run_id} --format sarif[/bold cyan]")
+    console.print(
+        f"💡 Export this run: [bold cyan]ff findings export {run_id} --format sarif[/bold cyan]"
+    )
 
 
 def display_findings_table(sarif_data: Dict[str, Any]):
@@ -322,7 +348,7 @@ def display_findings_table(sarif_data: Dict[str, Any]):
         Panel.fit(
             summary_table,
             title=f"📊 Summary ({len(results)} total issues)",
-            box=box.ROUNDED
+            box=box.ROUNDED,
         )
     )
 
@@ -331,7 +357,9 @@ def display_findings_table(sarif_data: Dict[str, Any]):
     results_table.add_column("Severity", width=12, justify="left", no_wrap=True)
     results_table.add_column("Rule", justify="left", style="bold cyan", no_wrap=True)
     results_table.add_column("Message", width=45, justify="left", no_wrap=True)
-    results_table.add_column("Location", width=20, justify="left", style="dim", no_wrap=True)
+    results_table.add_column(
+        "Location", width=20, justify="left", style="dim", no_wrap=True
+    )
 
     for result in results[:50]:  # Limit to first 50 results
         level = result.get("level", "note")
@@ -369,7 +397,7 @@ def display_findings_table(sarif_data: Dict[str, Any]):
             severity_text,
             rule_id,  # Pass string directly to show full UUID
             message_text,
-            location_text
+            location_text,
         )
 
     console.print("\n📋 [bold]Detailed Results[/bold]")
@@ -381,14 +409,18 @@ def display_findings_table(sarif_data: Dict[str, Any]):
 
 @app.command("history")
 def findings_history(
-    limit: int = typer.Option(20, "--limit", "-l", help="Maximum number of findings to show")
+    limit: int = typer.Option(
+        20, "--limit", "-l", help="Maximum number of findings to show"
+    ),
 ):
     """
     📚 Show findings history from local database
     """
     db = get_project_db()
     if not db:
-        console.print("❌ No FuzzForge project found. Run 'ff init' first.", style="red")
+        console.print(
+            "❌ No FuzzForge project found. Run 'ff init' first.", style="red"
+        )
         raise typer.Exit(1)
 
     try:
@@ -422,13 +454,15 @@ def findings_history(
                 str(by_severity.get("error", 0)),
                 str(by_severity.get("warning", 0)),
                 str(by_severity.get("note", 0)),
-                tool_names[:30] + "..." if len(tool_names) > 30 else tool_names
+                tool_names[:30] + "..." if len(tool_names) > 30 else tool_names,
             )
 
         console.print(f"\n📚 [bold]Findings History ({len(findings)})[/bold]\n")
         console.print(table)
 
-        console.print("\n💡 Use [bold cyan]fuzzforge finding <run-id>[/bold cyan] to view detailed findings")
+        console.print(
+            "\n💡 Use [bold cyan]fuzzforge finding <run-id>[/bold cyan] to view detailed findings"
+        )
 
     except Exception as e:
         console.print(f"❌ Failed to get findings history: {e}", style="red")
@@ -439,13 +473,17 @@ def findings_history(
 def export_findings(
     run_id: str = typer.Argument(..., help="Run ID to export findings for"),
     format: str = typer.Option(
-        "sarif", "--format", "-f",
-        help="Export format: sarif (standard), json, csv, html"
+        "sarif",
+        "--format",
+        "-f",
+        help="Export format: sarif (standard), json, csv, html",
     ),
     output: Optional[str] = typer.Option(
-        None, "--output", "-o",
-        help="Output file path (defaults to findings-<run-id>-<timestamp>.<format>)"
-    )
+        None,
+        "--output",
+        "-o",
+        help="Output file path (defaults to findings-<run-id>-<timestamp>.<format>)",
+    ),
 ):
     """
     📤 Export security findings in various formats
@@ -456,7 +494,9 @@ def export_findings(
     """
     db = get_project_db()
     if not db:
-        console.print("❌ No FuzzForge project found. Run 'ff init' first.", style="red")
+        console.print(
+            "❌ No FuzzForge project found. Run 'ff init' first.", style="red"
+        )
         raise typer.Exit(1)
 
     try:
@@ -479,13 +519,13 @@ def export_findings(
 
         # Export based on format
         if format == "sarif":
-            with open(output_path, 'w') as f:
+            with open(output_path, "w") as f:
                 json.dump(sarif_data, f, indent=2)
 
         elif format == "json":
             # Simplified JSON format
             simplified_data = extract_simplified_findings(sarif_data)
-            with open(output_path, 'w') as f:
+            with open(output_path, "w") as f:
                 json.dump(simplified_data, f, indent=2)
 
         elif format == "csv":
@@ -518,18 +558,17 @@ def extract_simplified_findings(sarif_data: Dict[str, Any]) -> Dict[str, Any]:
     simplified = {
         "tool": {
             "name": tool.get("name", "Unknown"),
-            "version": tool.get("version", "Unknown")
+            "version": tool.get("version", "Unknown"),
         },
-        "summary": {
-            "total_issues": len(results),
-            "by_severity": {}
-        },
-        "findings": []
+        "summary": {"total_issues": len(results), "by_severity": {}},
+        "findings": [],
     }
 
     for result in results:
         level = result.get("level", "note")
-        simplified["summary"]["by_severity"][level] = simplified["summary"]["by_severity"].get(level, 0) + 1
+        simplified["summary"]["by_severity"][level] = (
+            simplified["summary"]["by_severity"].get(level, 0) + 1
+        )
 
         # Extract location
         location_info = {}
@@ -542,15 +581,17 @@ def extract_simplified_findings(sarif_data: Dict[str, Any]) -> Dict[str, Any]:
             location_info = {
                 "file": artifact_location.get("uri", ""),
                 "line": region.get("startLine"),
-                "column": region.get("startColumn")
+                "column": region.get("startColumn"),
             }
 
-        simplified["findings"].append({
-            "rule_id": result.get("ruleId", "unknown"),
-            "severity": level,
-            "message": result.get("message", {}).get("text", ""),
-            "location": location_info
-        })
+        simplified["findings"].append(
+            {
+                "rule_id": result.get("ruleId", "unknown"),
+                "severity": level,
+                "message": result.get("message", {}).get("text", ""),
+                "location": location_info,
+            }
+        )
 
     return simplified
 
@@ -563,8 +604,8 @@ def export_to_csv(sarif_data: Dict[str, Any], output_path: Path):
 
     results = runs[0].get("results", [])
 
-    with open(output_path, 'w', newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['rule_id', 'severity', 'message', 'file', 'line', 'column']
+    with open(output_path, "w", newline="", encoding="utf-8") as csvfile:
+        fieldnames = ["rule_id", "severity", "message", "file", "line", "column"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -579,15 +620,17 @@ def export_to_csv(sarif_data: Dict[str, Any], output_path: Path):
                 location_info = {
                     "file": artifact_location.get("uri", ""),
                     "line": region.get("startLine", ""),
-                    "column": region.get("startColumn", "")
+                    "column": region.get("startColumn", ""),
                 }
 
-            writer.writerow({
-                "rule_id": result.get("ruleId", ""),
-                "severity": result.get("level", "note"),
-                "message": result.get("message", {}).get("text", ""),
-                **location_info
-            })
+            writer.writerow(
+                {
+                    "rule_id": result.get("ruleId", ""),
+                    "severity": result.get("level", "note"),
+                    "message": result.get("message", {}).get("text", ""),
+                    **location_info,
+                }
+            )
 
 
 def export_to_html(sarif_data: Dict[str, Any], output_path: Path, run_id: str):
@@ -623,8 +666,8 @@ def export_to_html(sarif_data: Dict[str, Any], output_path: Path, run_id: str):
     <div class="header">
         <h1>Security Findings Report</h1>
         <p><strong>Run ID:</strong> {run_id}</p>
-        <p><strong>Tool:</strong> {tool.get('name', 'Unknown')} v{tool.get('version', 'Unknown')}</p>
-        <p><strong>Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        <p><strong>Tool:</strong> {tool.get("name", "Unknown")} v{tool.get("version", "Unknown")}</p>
+        <p><strong>Generated:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
     </div>
 
     <div class="summary">
@@ -682,55 +725,52 @@ def export_to_html(sarif_data: Dict[str, Any], output_path: Path, run_id: str):
 </html>
     """
 
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(html_content)
 
 
 @app.command("all")
 def all_findings(
     workflow: Optional[str] = typer.Option(
-        None, "--workflow", "-w",
-        help="Filter by workflow name"
+        None, "--workflow", "-w", help="Filter by workflow name"
     ),
     severity: Optional[str] = typer.Option(
-        None, "--severity", "-s",
-        help="Filter by severity levels (comma-separated: error,warning,note,info)"
+        None,
+        "--severity",
+        "-s",
+        help="Filter by severity levels (comma-separated: error,warning,note,info)",
     ),
     since: Optional[str] = typer.Option(
-        None, "--since",
-        help="Show findings since date (YYYY-MM-DD)"
+        None, "--since", help="Show findings since date (YYYY-MM-DD)"
     ),
     limit: Optional[int] = typer.Option(
-        None, "--limit", "-l",
-        help="Maximum number of findings to show"
+        None, "--limit", "-l", help="Maximum number of findings to show"
     ),
     export_format: Optional[str] = typer.Option(
-        None, "--export", "-e",
-        help="Export format: json, csv, html"
+        None, "--export", "-e", help="Export format: json, csv, html"
     ),
     output: Optional[str] = typer.Option(
-        None, "--output", "-o",
-        help="Output file for export"
+        None, "--output", "-o", help="Output file for export"
     ),
-    stats_only: bool = typer.Option(
-        False, "--stats",
-        help="Show statistics only"
-    ),
+    stats_only: bool = typer.Option(False, "--stats", help="Show statistics only"),
     show_findings: bool = typer.Option(
-        False, "--show-findings", "-f",
-        help="Show actual findings content, not just summary"
+        False,
+        "--show-findings",
+        "-f",
+        help="Show actual findings content, not just summary",
     ),
     max_findings: int = typer.Option(
-        50, "--max-findings",
-        help="Maximum number of individual findings to display"
-    )
+        50, "--max-findings", help="Maximum number of individual findings to display"
+    ),
 ):
     """
     📊 Show all findings for the entire project
     """
     db = get_project_db()
     if not db:
-        console.print("❌ No FuzzForge project found. Run 'ff init' first.", style="red")
+        console.print(
+            "❌ No FuzzForge project found. Run 'ff init' first.", style="red"
+        )
         raise typer.Exit(1)
 
     try:
@@ -744,7 +784,9 @@ def all_findings(
             try:
                 since_date = datetime.strptime(since, "%Y-%m-%d")
             except ValueError:
-                console.print(f"❌ Invalid date format: {since}. Use YYYY-MM-DD", style="red")
+                console.print(
+                    f"❌ Invalid date format: {since}. Use YYYY-MM-DD", style="red"
+                )
                 raise typer.Exit(1)
 
         # Get aggregated stats
@@ -755,23 +797,30 @@ def all_findings(
             # Create summary panel
             summary_text = f"""[bold]📊 Project Security Summary[/bold]
 
-[cyan]Total Findings Records:[/cyan] {stats['total_findings_records']}
-[cyan]Total Runs Analyzed:[/cyan] {stats['total_runs']}
-[cyan]Total Security Issues:[/cyan] {stats['total_issues']}
-[cyan]Recent Findings (7 days):[/cyan] {stats['recent_findings']}
+[cyan]Total Findings Records:[/cyan] {stats["total_findings_records"]}
+[cyan]Total Runs Analyzed:[/cyan] {stats["total_runs"]}
+[cyan]Total Security Issues:[/cyan] {stats["total_issues"]}
+[cyan]Recent Findings (7 days):[/cyan] {stats["recent_findings"]}
 
 [bold]Severity Distribution:[/bold]
-  🔴 Errors: {stats['severity_distribution'].get('error', 0)}
-  🟡 Warnings: {stats['severity_distribution'].get('warning', 0)}
-  🔵 Notes: {stats['severity_distribution'].get('note', 0)}
-  ℹ️  Info: {stats['severity_distribution'].get('info', 0)}
+  🔴 Errors: {stats["severity_distribution"].get("error", 0)}
+  🟡 Warnings: {stats["severity_distribution"].get("warning", 0)}
+  🔵 Notes: {stats["severity_distribution"].get("note", 0)}
+  ℹ️  Info: {stats["severity_distribution"].get("info", 0)}
 
 [bold]By Workflow:[/bold]"""
 
-            for wf_name, count in stats['workflows'].items():
+            for wf_name, count in stats["workflows"].items():
                 summary_text += f"\n  • {wf_name}: {count} findings"
 
-            console.print(Panel(summary_text, box=box.ROUNDED, title="FuzzForge Project Analysis", border_style="cyan"))
+            console.print(
+                Panel(
+                    summary_text,
+                    box=box.ROUNDED,
+                    title="FuzzForge Project Analysis",
+                    border_style="cyan",
+                )
+            )
 
         if stats_only:
             return
@@ -781,7 +830,7 @@ def all_findings(
             workflow=workflow,
             severity=severity_list,
             since_date=since_date,
-            limit=limit
+            limit=limit,
         )
 
         if not findings:
@@ -795,11 +844,15 @@ def all_findings(
                 output = f"all_findings_{timestamp}.{export_format}"
 
             export_all_findings(findings, export_format, output)
-            console.print(f"✅ Exported {len(findings)} findings to: {output}", style="green")
+            console.print(
+                f"✅ Exported {len(findings)} findings to: {output}", style="green"
+            )
             return
 
         # Display findings table
-        table = Table(box=box.ROUNDED, title=f"All Project Findings ({len(findings)} records)")
+        table = Table(
+            box=box.ROUNDED, title=f"All Project Findings ({len(findings)} records)"
+        )
         table.add_column("Run ID", style="bold cyan", width=36)  # Full UUID width
         table.add_column("Workflow", style="dim", width=20)
         table.add_column("Date", justify="center")
@@ -832,12 +885,14 @@ def all_findings(
 
             table.add_row(
                 run_id,  # Show full Run ID
-                workflow_name[:17] + "..." if len(workflow_name) > 20 else workflow_name,
+                workflow_name[:17] + "..."
+                if len(workflow_name) > 20
+                else workflow_name,
                 finding.created_at.strftime("%Y-%m-%d %H:%M"),
                 str(total_issues),
                 str(by_severity.get("error", 0)),
                 str(by_severity.get("warning", 0)),
-                str(by_severity.get("note", 0))
+                str(by_severity.get("note", 0)),
             )
 
         console.print(table)
@@ -846,10 +901,14 @@ def all_findings(
         if show_findings:
             display_detailed_findings(findings, max_findings)
 
-        console.print("\n💡 Use filters to refine results: --workflow, --severity, --since")
+        console.print(
+            "\n💡 Use filters to refine results: --workflow, --severity, --since"
+        )
         console.print("💡 Show findings content: --show-findings")
         console.print("💡 Export findings: --export json --output report.json")
-        console.print("💡 View specific findings: [bold cyan]fuzzforge finding <run-id>[/bold cyan]")
+        console.print(
+            "💡 View specific findings: [bold cyan]fuzzforge finding <run-id>[/bold cyan]"
+        )
 
     except Exception as e:
         console.print(f"❌ Failed to get all findings: {e}", style="red")
@@ -858,17 +917,23 @@ def all_findings(
 
 def display_detailed_findings(findings: List[FindingRecord], max_findings: int):
     """Display detailed findings content"""
-    console.print(f"\n📋 [bold]Detailed Findings Content[/bold] (showing up to {max_findings} findings)\n")
+    console.print(
+        f"\n📋 [bold]Detailed Findings Content[/bold] (showing up to {max_findings} findings)\n"
+    )
 
     findings_count = 0
 
     for finding_record in findings:
         if findings_count >= max_findings:
-            remaining = sum(len(run.get("results", []))
-                          for f in findings[findings.index(finding_record):]
-                          for run in f.sarif_data.get("runs", []))
+            remaining = sum(
+                len(run.get("results", []))
+                for f in findings[findings.index(finding_record) :]
+                for run in f.sarif_data.get("runs", [])
+            )
             if remaining > 0:
-                console.print(f"\n... and {remaining} more findings (use --max-findings to show more)")
+                console.print(
+                    f"\n... and {remaining} more findings (use --max-findings to show more)"
+                )
             break
 
         # Get run info for this finding
@@ -918,7 +983,7 @@ def display_detailed_findings(findings: List[FindingRecord], max_findings: int):
                     "ERROR": "bold red",
                     "WARNING": "bold yellow",
                     "NOTE": "bold blue",
-                    "INFO": "bold cyan"
+                    "INFO": "bold cyan",
                 }.get(level, "white")
 
                 # Create finding panel
@@ -931,17 +996,27 @@ def display_detailed_findings(findings: List[FindingRecord], max_findings: int):
 {message_text}"""
 
                 # Add code context if available
-                region = locations[0].get("physicalLocation", {}).get("region", {}) if locations else {}
+                region = (
+                    locations[0].get("physicalLocation", {}).get("region", {})
+                    if locations
+                    else {}
+                )
                 if region.get("snippet", {}).get("text"):
                     code_snippet = region["snippet"]["text"].strip()
-                    finding_content += f"\n\n[bold]Code:[/bold]\n[dim]{code_snippet}[/dim]"
+                    finding_content += (
+                        f"\n\n[bold]Code:[/bold]\n[dim]{code_snippet}[/dim]"
+                    )
 
-                console.print(Panel(
-                    finding_content,
-                    title=f"[{severity_style}]{level}[/{severity_style}] Finding #{findings_count}",
-                    border_style=severity_style.split()[-1] if " " in severity_style else severity_style,
-                    box=box.ROUNDED
-                ))
+                console.print(
+                    Panel(
+                        finding_content,
+                        title=f"[{severity_style}]{level}[/{severity_style}] Finding #{findings_count}",
+                        border_style=severity_style.split()[-1]
+                        if " " in severity_style
+                        else severity_style,
+                        box=box.ROUNDED,
+                    )
+                )
 
                 console.print()  # Add spacing between findings
 
@@ -960,22 +1035,28 @@ def export_all_findings(findings: List[FindingRecord], format: str, output_path:
                         result_entry = {
                             "run_id": finding.run_id,
                             "created_at": finding.created_at.isoformat(),
-                            **result
+                            **result,
                         }
                         all_results.append(result_entry)
 
-        with open(output_file, 'w') as f:
-            json.dump({
-                "total_findings": len(findings),
-                "export_date": datetime.now().isoformat(),
-                "results": all_results
-            }, f, indent=2)
+        with open(output_file, "w") as f:
+            json.dump(
+                {
+                    "total_findings": len(findings),
+                    "export_date": datetime.now().isoformat(),
+                    "results": all_results,
+                },
+                f,
+                indent=2,
+            )
 
     elif format == "csv":
         # Export to CSV
-        with open(output_file, 'w', newline='') as f:
+        with open(output_file, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["Run ID", "Date", "Severity", "Rule ID", "Message", "File", "Line"])
+            writer.writerow(
+                ["Run ID", "Date", "Severity", "Rule ID", "Message", "File", "Line"]
+            )
 
             for finding in findings:
                 if "runs" in finding.sarif_data:
@@ -987,15 +1068,17 @@ def export_all_findings(findings: List[FindingRecord], format: str, output_path:
                             artifact = physical.get("artifactLocation", {})
                             region = physical.get("region", {})
 
-                            writer.writerow([
-                                finding.run_id[:12],
-                                finding.created_at.strftime("%Y-%m-%d %H:%M"),
-                                result.get("level", "note"),
-                                result.get("ruleId", ""),
-                                result.get("message", {}).get("text", ""),
-                                artifact.get("uri", ""),
-                                region.get("startLine", "")
-                            ])
+                            writer.writerow(
+                                [
+                                    finding.run_id[:12],
+                                    finding.created_at.strftime("%Y-%m-%d %H:%M"),
+                                    result.get("level", "note"),
+                                    result.get("ruleId", ""),
+                                    result.get("message", {}).get("text", ""),
+                                    artifact.get("uri", ""),
+                                    region.get("startLine", ""),
+                                ]
+                            )
 
     elif format == "html":
         # Generate HTML report
@@ -1058,8 +1141,67 @@ def export_all_findings(findings: List[FindingRecord], format: str, output_path:
 </body>
 </html>"""
 
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             f.write(html_content)
+
+
+@app.command("triage")
+def findings_triage(
+    run_id: str = typer.Argument(..., help="Run ID to triage"),
+    provider: Optional[str] = typer.Option(
+        None,
+        "--provider",
+        "-p",
+        help="LLM provider (e.g., openai_codex, gemini_cli). Uses default if not specified.",
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="LLM model (e.g., gpt-4o). Uses default if not specified.",
+    ),
+    format: str = typer.Option(
+        "table", "--format", "-f", help="Output format: table, markdown, or sarif"
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output file path (auto-generated if not specified)",
+    ),
+    skip_llm: bool = typer.Option(
+        False, "--skip-llm", help="Skip LLM analysis, only cluster crashes"
+    ),
+):
+    """
+    🔍 Triage and analyze crash findings using LLM.
+
+    Automatically clusters similar crashes and uses LLM to generate
+    summaries, severity ratings, and root cause analysis.
+
+    Uses the secure LLM resolver (OAuth-first, policy-enforced).
+
+    Examples:
+        ff findings triage abc123                    # Table output
+        ff findings triage abc123 -f markdown        # Markdown report
+        ff findings triage abc123 -p openai_codex    # Use specific provider
+        ff findings triage abc123 --skip-llm         # Cluster only
+    """
+    from .triage import triage
+    from ..exceptions import handle_errors
+
+    @handle_errors
+    def _do_triage():
+        triage(
+            run_id=run_id,
+            provider=provider,
+            model=model,
+            format=format,
+            output=output,
+            skip_llm=skip_llm,
+        )
+
+    _do_triage()
 
 
 @app.callback(invoke_without_command=True)

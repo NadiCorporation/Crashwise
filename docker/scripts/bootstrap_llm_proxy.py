@@ -41,6 +41,7 @@ MAX_WAIT_SECONDS = int(os.getenv("LITELLM_PROXY_WAIT_SECONDS", "120"))
 @dataclass(frozen=True)
 class VirtualKeySpec:
     """Configuration for a virtual key to be provisioned."""
+
     env_var: str
     alias: str
     user_id: str
@@ -122,6 +123,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         "OPENROUTER_API_KEY",
         "LITELLM_OPENROUTER_API_KEY",
         ("LITELLM_OPENROUTER_API_KEY", "BIFROST_OPENROUTER_KEY"),
+    ),
+    ProviderSpec(
+        "openai_codex",
+        "OPENAI_CODEX_OAUTH_TOKEN",
+        "LITELLM_OPENAI_CODEX_OAUTH_TOKEN",
+        ("LITELLM_OPENAI_CODEX_OAUTH_TOKEN", "OPENAI_CODEX_OAUTH_TOKEN"),
+    ),
+    ProviderSpec(
+        "gemini_cli",
+        "GEMINI_CLI_OAUTH_TOKEN",
+        "LITELLM_GEMINI_CLI_OAUTH_TOKEN",
+        ("LITELLM_GEMINI_CLI_OAUTH_TOKEN", "GEMINI_CLI_OAUTH_TOKEN"),
     ),
 )
 
@@ -269,8 +282,10 @@ def gather_provider_keys(
     for spec in PROVIDERS:
         value: str | None = None
         for source_var in spec.source_env_vars:
-            candidate = env_map.get(source_var) or legacy_map.get(source_var) or os.getenv(
-                source_var
+            candidate = (
+                env_map.get(source_var)
+                or legacy_map.get(source_var)
+                or os.getenv(source_var)
             )
             if not candidate:
                 continue
@@ -326,11 +341,7 @@ def collect_default_models(env_map: Mapping[str, str]) -> list[str]:
     )
     models: list[str] = []
     if explicit:
-        models.extend(
-            model.strip()
-            for model in explicit.split(",")
-            if model.strip()
-        )
+        models.extend(model.strip() for model in explicit.split(",") if model.strip())
     if models:
         return sorted(dict.fromkeys(models))
 
@@ -360,7 +371,9 @@ def collect_default_models(env_map: Mapping[str, str]) -> list[str]:
     return sorted(dict.fromkeys(models))
 
 
-def fetch_existing_key_record(master_key: str, key_value: str) -> Mapping[str, object] | None:
+def fetch_existing_key_record(
+    master_key: str, key_value: str
+) -> Mapping[str, object] | None:
     encoded = urllib.parse.quote_plus(key_value)
     status, body = request_json(f"/key/info?key={encoded}", auth_token=master_key)
     if status != 200:
@@ -398,13 +411,21 @@ def generate_virtual_key(
     spec: VirtualKeySpec,
     env_map: Mapping[str, str],
 ) -> str:
-    budget_str = os.getenv(spec.budget_env_var) or env_map.get(spec.budget_env_var) or str(spec.default_budget)
+    budget_str = (
+        os.getenv(spec.budget_env_var)
+        or env_map.get(spec.budget_env_var)
+        or str(spec.default_budget)
+    )
     try:
         budget = float(budget_str)
     except ValueError:
         budget = spec.default_budget
 
-    duration = os.getenv(spec.duration_env_var) or env_map.get(spec.duration_env_var) or spec.default_duration
+    duration = (
+        os.getenv(spec.duration_env_var)
+        or env_map.get(spec.duration_env_var)
+        or spec.default_duration
+    )
 
     payload: dict[str, object] = {
         "key_alias": spec.alias,
@@ -426,14 +447,18 @@ def generate_virtual_key(
     if status == 400 and "already exists" in body.lower():
         # Key alias already exists but .env is out of sync (e.g., after docker prune)
         # Delete the old key and regenerate
-        log(f"Key alias '{spec.alias}' already exists in database but not in .env; deleting and regenerating")
+        log(
+            f"Key alias '{spec.alias}' already exists in database but not in .env; deleting and regenerating"
+        )
         # Try to delete by alias using POST /key/delete with key_aliases array
         delete_payload = {"key_aliases": [spec.alias]}
         delete_status, delete_body = request_json(
             "/key/delete", method="POST", payload=delete_payload, auth_token=master_key
         )
         if delete_status not in {200, 201}:
-            log(f"Warning: Could not delete existing key alias {spec.alias} ({delete_status}): {delete_body}")
+            log(
+                f"Warning: Could not delete existing key alias {spec.alias} ({delete_status}): {delete_body}"
+            )
             # Continue anyway and try to generate
         else:
             log(f"Deleted existing key alias {spec.alias}")
@@ -443,17 +468,25 @@ def generate_virtual_key(
             "/key/generate", method="POST", payload=payload, auth_token=master_key
         )
     if status not in {200, 201}:
-        raise RuntimeError(f"Failed to generate virtual key for {spec.alias} ({status}): {body}")
+        raise RuntimeError(
+            f"Failed to generate virtual key for {spec.alias} ({status}): {body}"
+        )
     try:
         data = json.loads(body)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Virtual key response for {spec.alias} was not valid JSON") from exc
+        raise RuntimeError(
+            f"Virtual key response for {spec.alias} was not valid JSON"
+        ) from exc
     if isinstance(data, Mapping):
         key_value = str(data.get("key") or data.get("token") or "").strip()
         if key_value:
-            log(f"Generated new LiteLLM virtual key for {spec.alias} (budget: ${budget}, duration: {duration})")
+            log(
+                f"Generated new LiteLLM virtual key for {spec.alias} (budget: ${budget}, duration: {duration})"
+            )
             return key_value
-    raise RuntimeError(f"Virtual key response for {spec.alias} did not include a key field")
+    raise RuntimeError(
+        f"Virtual key response for {spec.alias} did not include a key field"
+    )
 
 
 def update_virtual_key(
@@ -536,7 +569,9 @@ def ensure_models_registered(
             continue
         spec = PROVIDER_LOOKUP.get(provider)
         if not spec:
-            log(f"No provider spec registered for '{provider}'; skipping model '{model}'")
+            log(
+                f"No provider spec registered for '{provider}'; skipping model '{model}'"
+            )
             continue
         provider_secret = (
             env_map.get(spec.alias_env_var)
@@ -574,12 +609,9 @@ def ensure_models_registered(
             data = json.loads(body)
         except json.JSONDecodeError:
             data = body
-        error_message = (
-            data.get("error") if isinstance(data, Mapping) else str(data)
-        )
+        error_message = data.get("error") if isinstance(data, Mapping) else str(data)
         if status == 409 or (
-            isinstance(error_message, str)
-            and "already" in error_message.lower()
+            isinstance(error_message, str) and "already" in error_message.lower()
         ):
             log(f"Model '{model}' already present; skipping")
             continue

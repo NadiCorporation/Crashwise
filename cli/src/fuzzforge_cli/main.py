@@ -12,7 +12,6 @@ Main CLI application with improved command structure.
 #
 # Additional attribution and requirements are provided in the NOTICE file.
 
-
 import typer
 from rich.console import Console
 from rich.traceback import install
@@ -30,6 +29,7 @@ from .commands import (
     ai,
     ingest,
     worker,
+    oauth,
 )
 from .fuzzy import enhanced_command_not_found_handler
 
@@ -82,25 +82,30 @@ finding_app = typer.Typer(
 
 # === Top-level commands ===
 
+
 @app.command()
 def init(
     name: Optional[str] = typer.Option(
-        None, "--name", "-n",
-        help="Project name (defaults to current directory name)"
+        None, "--name", "-n", help="Project name (defaults to current directory name)"
     ),
     api_url: Optional[str] = typer.Option(
-        None, "--api-url", "-u",
-        help="FuzzForge API URL (defaults to http://localhost:8000)"
+        None,
+        "--api-url",
+        "-u",
+        help="FuzzForge API URL (defaults to http://localhost:8000)",
     ),
     force: bool = typer.Option(
-        False, "--force", "-f",
-        help="Force initialization even if project already exists"
-    )
+        False,
+        "--force",
+        "-f",
+        help="Force initialization even if project already exists",
+    ),
 ):
     """
     📁 Initialize a new FuzzForge project
     """
     from .commands.init import project
+
     project(name=name, api_url=api_url, force=force)
 
 
@@ -110,13 +115,14 @@ def status():
     📊 Show project and latest execution status
     """
     from .commands.status import show_status
+
     show_status()
 
 
 @app.command()
 def config(
     key: Optional[str] = typer.Argument(None, help="Configuration key"),
-    value: Optional[str] = typer.Argument(None, help="Configuration value to set")
+    value: Optional[str] = typer.Argument(None, help="Configuration value to set"),
 ):
     """
     ⚙️  Manage configuration (show all, get, or set values)
@@ -136,13 +142,11 @@ def config(
 @app.command()
 def clean(
     days: int = typer.Option(
-        90, "--days", "-d",
-        help="Remove data older than this many days"
+        90, "--days", "-d", help="Remove data older than this many days"
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run",
-        help="Show what would be deleted without actually deleting"
-    )
+        False, "--dry-run", help="Show what would be deleted without actually deleting"
+    ),
 ):
     """
     🧹 Clean old execution data and findings
@@ -158,7 +162,9 @@ def clean(
             raise typer.Exit(1)
 
         if dry_run:
-            console.print(f"🔍 [bold]Dry run:[/bold] Would clean data older than {days} days")
+            console.print(
+                f"🔍 [bold]Dry run:[/bold] Would clean data older than {days} days"
+            )
 
         deleted = db.cleanup_old_runs(keep_days=days)
 
@@ -180,47 +186,55 @@ workflow_app.command("retry")(workflow_exec.retry_workflow)
 workflow_app.command("info")(workflows.workflow_info)
 workflow_app.command("params")(workflows.workflow_parameters)
 
+
 @workflow_app.command("run")
 def run_workflow(
     workflow: str = typer.Argument(help="Workflow name"),
     target: str = typer.Argument(help="Target path"),
-    params: List[str] = typer.Argument(default=None, help="Parameters as key=value pairs"),
+    params: List[str] = typer.Argument(
+        default=None, help="Parameters as key=value pairs"
+    ),
     param_file: Optional[str] = typer.Option(
-        None, "--param-file", "-f",
-        help="JSON file containing workflow parameters"
+        None, "--param-file", "-f", help="JSON file containing workflow parameters"
     ),
     timeout: Optional[int] = typer.Option(
-        None, "--timeout", "-t",
-        help="Execution timeout in seconds"
+        None, "--timeout", "-t", help="Execution timeout in seconds"
     ),
     interactive: bool = typer.Option(
-        True, "--interactive/--no-interactive", "-i/-n",
-        help="Interactive parameter input for missing required parameters"
+        True,
+        "--interactive/--no-interactive",
+        "-i/-n",
+        help="Interactive parameter input for missing required parameters",
     ),
     wait: bool = typer.Option(
-        False, "--wait", "-w",
-        help="Wait for execution to complete"
+        False, "--wait", "-w", help="Wait for execution to complete"
     ),
     live: bool = typer.Option(
-        False, "--live", "-l",
-        help="Start live monitoring after execution (useful for fuzzing workflows)"
+        False,
+        "--live",
+        "-l",
+        help="Start live monitoring after execution (useful for fuzzing workflows)",
     ),
     auto_start: Optional[bool] = typer.Option(
-        None, "--auto-start/--no-auto-start",
-        help="Automatically start required worker if not running (default: from config)"
+        None,
+        "--auto-start/--no-auto-start",
+        help="Automatically start required worker if not running (default: from config)",
     ),
     auto_stop: Optional[bool] = typer.Option(
-        None, "--auto-stop/--no-auto-stop",
-        help="Automatically stop worker after execution completes (default: from config)"
+        None,
+        "--auto-stop/--no-auto-stop",
+        help="Automatically stop worker after execution completes (default: from config)",
     ),
     fail_on: Optional[str] = typer.Option(
-        None, "--fail-on",
-        help="Fail build if findings match SARIF level (error,warning,note,info,all,none). Use with --wait"
+        None,
+        "--fail-on",
+        help="Fail build if findings match SARIF level (error,warning,note,info,all,none). Use with --wait",
     ),
     export_sarif: Optional[str] = typer.Option(
-        None, "--export-sarif",
-        help="Export SARIF results to file after completion. Use with --wait"
-    )
+        None,
+        "--export-sarif",
+        help="Export SARIF results to file after completion. Use with --wait",
+    ),
 ):
     """
     🚀 Execute a security testing workflow
@@ -242,8 +256,9 @@ def run_workflow(
         auto_start=auto_start,
         auto_stop=auto_stop,
         fail_on=fail_on,
-        export_sarif=export_sarif
+        export_sarif=export_sarif,
     )
+
 
 @workflow_app.callback()
 def workflow_main():
@@ -260,15 +275,19 @@ def workflow_main():
 
 # === Finding commands (singular) ===
 
+
 @finding_app.command("show")
 def show_finding_detail(
     run_id: str = typer.Argument(..., help="Run ID to get finding from"),
-    rule_id: str = typer.Option(..., "--rule", "-r", help="Rule ID of the specific finding to show")
+    rule_id: str = typer.Option(
+        ..., "--rule", "-r", help="Rule ID of the specific finding to show"
+    ),
 ):
     """
     🔍 Show detailed information about a specific finding
     """
     from .commands.findings import show_finding
+
     show_finding(run_id=run_id, rule_id=rule_id)
 
 
@@ -290,7 +309,7 @@ def finding_main(
         return
 
     # Get remaining arguments for direct viewing
-    args = ctx.args if hasattr(ctx, 'args') else []
+    args = ctx.args if hasattr(ctx, "args") else []
     finding_id = args[0] if args else None
 
     # Direct viewing: fuzzforge finding [id]
@@ -310,7 +329,9 @@ def finding_main(
                     finding_id = recent_runs[0].run_id
                     console.print(f"🔍 Using most recent execution: {finding_id}")
                 else:
-                    console.print("⚠️  No findings found in project database", style="yellow")
+                    console.print(
+                        "⚠️  No findings found in project database", style="yellow"
+                    )
                     return
             else:
                 console.print("❌ No project database found", style="red")
@@ -336,6 +357,8 @@ app.add_typer(monitor.app, name="monitor", help="📊 Real-time monitoring")
 app.add_typer(ai.app, name="ai", help="🤖 AI integration features")
 app.add_typer(ingest.app, name="ingest", help="🧠 Ingest knowledge into AI")
 app.add_typer(worker.app, name="worker", help="🔧 Manage Temporal workers")
+app.add_typer(oauth.app, name="oauth", help="🔐 Setup OAuth for LLM providers")
+
 
 # Help and utility commands
 @app.command()
@@ -344,6 +367,7 @@ def version():
     📦 Show version information
     """
     from . import __version__
+
     console.print(f"FuzzForge CLI v{__version__}")
     console.print("Short command: ff")
 
@@ -352,8 +376,7 @@ def version():
 def main_callback(
     ctx: typer.Context,
     version: Optional[bool] = typer.Option(
-        None, "--version", "-v",
-        help="Show version information"
+        None, "--version", "-v", help="Show version information"
     ),
 ):
     """
@@ -366,6 +389,7 @@ def main_callback(
     """
     if version:
         from . import __version__
+
         console.print(f"FuzzForge CLI v{__version__}")
         raise typer.Exit()
 
@@ -376,12 +400,11 @@ def main():
     if len(sys.argv) > 1:
         args = sys.argv[1:]
 
-
         # Handle finding command with pattern recognition
-        if len(args) >= 2 and args[0] == 'finding':
-            finding_subcommands = ['show']
+        if len(args) >= 2 and args[0] == "finding":
+            finding_subcommands = ["show"]
             # Skip custom dispatching if help flags are present
-            if not any(arg in ['--help', '-h', '--version', '-v'] for arg in args):
+            if not any(arg in ["--help", "-h", "--version", "-v"] for arg in args):
                 if args[1] not in finding_subcommands:
                     # Direct finding display: ff finding <id>
                     from .commands.findings import get_findings
@@ -401,18 +424,26 @@ def main():
         app()
     except SystemExit as e:
         # Enhanced error handling for command not found
-        if hasattr(e, 'code') and e.code != 0 and len(sys.argv) > 1:
+        if hasattr(e, "code") and e.code != 0 and len(sys.argv) > 1:
             command_parts = sys.argv[1:]
-            clean_parts = [part for part in command_parts if not part.startswith('-')]
+            clean_parts = [part for part in command_parts if not part.startswith("-")]
 
             if clean_parts:
                 main_cmd = clean_parts[0]
                 valid_commands = [
-                    'init', 'status', 'config', 'clean',
-                    'workflows', 'workflow',
-                    'findings', 'finding',
-                    'monitor', 'ai', 'ingest', 'worker',
-                    'version'
+                    "init",
+                    "status",
+                    "config",
+                    "clean",
+                    "workflows",
+                    "workflow",
+                    "findings",
+                    "finding",
+                    "monitor",
+                    "ai",
+                    "ingest",
+                    "worker",
+                    "version",
                 ]
 
                 if main_cmd not in valid_commands:

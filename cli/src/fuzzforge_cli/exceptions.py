@@ -1,5 +1,15 @@
 """
-Enhanced exception handling and error utilities for FuzzForge CLI with rich context display.
+Enhanced exception handling for FuzzForge CLI.
+
+This module provides:
+1. CLI-specific exceptions (ProjectNotFoundError, DatabaseError, etc.)
+2. Re-exports from fuzzforge_sdk.exceptions for convenience
+3. Backward compatibility aliases
+
+Migration Path:
+- New code should import from fuzzforge_sdk.exceptions directly
+- CLI-specific exceptions remain in this module
+- All SDK exceptions are re-exported here for backward compatibility
 """
 # Copyright (c) 2025 FuzzingLabs
 #
@@ -12,9 +22,9 @@ Enhanced exception handling and error utilities for FuzzForge CLI with rich cont
 #
 # Additional attribution and requirements are provided in the NOTICE file.
 
-
 import time
 import functools
+import warnings
 from typing import Any, Callable, Optional, Union, List
 from pathlib import Path
 
@@ -25,36 +35,165 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.table import Table
 
-# Import SDK exceptions for rich handling
+# =============================================================================
+# Re-export SDK exceptions for backward compatibility
+# =============================================================================
+# These are the single source of truth from fuzzforge_sdk.exceptions
 from fuzzforge_sdk.exceptions import (
-    FuzzForgeError as SDKFuzzForgeError
+    ErrorContext,
+    FuzzForgeError as _SDKFuzzForgeError,
+    FuzzForgeHTTPError,
+    DeploymentError,
+    WorkflowExecutionError,
+    WorkflowNotFoundError,
+    RunNotFoundError,
+    ContainerError,
+    VolumeError,
+    ResourceLimitError,
+    ValidationError as _SDKValidationError,
+    ConnectionError as SDKConnectionError,
+    TimeoutError as SDKTimeoutError,
+    WebSocketError,
+    SSEError,
 )
+
+# Re-export all SDK exceptions for backward compatibility
+__all__ = [
+    # SDK exceptions (re-exported)
+    "ErrorContext",
+    "FuzzForgeError",
+    "FuzzForgeHTTPError",
+    "DeploymentError",
+    "WorkflowExecutionError",
+    "WorkflowNotFoundError",
+    "RunNotFoundError",
+    "ContainerError",
+    "VolumeError",
+    "ResourceLimitError",
+    "ValidationError",
+    "SDKConnectionError",
+    "SDKTimeoutError",
+    "WebSocketError",
+    "SSEError",
+    # CLI-specific exceptions
+    "ProjectNotFoundError",
+    "APIConnectionError",
+    "DatabaseError",
+    "FileOperationError",
+    # Utilities
+    "handle_errors",
+    "require_project",
+    "show_error",
+]
 
 console = Console()
 
 
-class FuzzForgeError(Exception):
-    """Base exception for FuzzForge CLI errors (legacy CLI-specific errors)"""
+# =============================================================================
+# Backward Compatibility: CLI FuzzForgeError
+# =============================================================================
+# Maintains compatibility with existing CLI code while delegating to SDK base
 
-    def __init__(self, message: str, hint: Optional[str] = None, exit_code: int = 1):
-        self.message = message
+
+class FuzzForgeError(_SDKFuzzForgeError):
+    """Base exception for FuzzForge CLI errors.
+
+    This class extends SDK FuzzForgeError to maintain backward compatibility
+    with existing CLI code that expects 'hint' and 'exit_code' attributes.
+
+    New code should use fuzzforge_sdk.exceptions.FuzzForgeError directly.
+
+    Attributes:
+        message: Error message
+        hint: Optional hint for fixing the error
+        exit_code: Exit code to use when exiting
+        context: Rich error context from SDK
+    """
+
+    def __init__(
+        self,
+        message: str,
+        hint: Optional[str] = None,
+        exit_code: int = 1,
+        context: Optional[ErrorContext] = None,
+        original_exception: Optional[Exception] = None,
+    ):
+        # Call SDK base class
+        super().__init__(
+            message=message,
+            context=context or ErrorContext(),
+            original_exception=original_exception,
+        )
+
+        # CLI-specific attributes for backward compatibility
         self.hint = hint
         self.exit_code = exit_code
-        super().__init__(message)
+
+    def __str__(self) -> str:
+        """Return string representation with hint if available."""
+        if self.hint:
+            return f"{self.message}\nHint: {self.hint}"
+        return self.message
+
+
+# =============================================================================
+# Backward Compatibility: CLI ValidationError
+# =============================================================================
+
+
+class ValidationError(_SDKValidationError):
+    """Validation error with CLI-specific formatting.
+
+    Extends SDK ValidationError to maintain backward compatibility.
+    New code should use fuzzforge_sdk.exceptions.ValidationError.
+    """
+
+    def __init__(
+        self,
+        field: str,
+        value: Any,
+        expected: str,
+        context: Optional[ErrorContext] = None,
+    ):
+        self.field = field
+        self.value = value
+        self.expected = expected
+
+        message = f"Invalid {field}: {value}"
+        hint = f"Expected: {expected}"
+
+        # Initialize SDK base
+        super().__init__(
+            message=message,
+            field=field,
+            value=str(value),
+            expected=expected,
+            context=context or ErrorContext(suggested_fixes=[hint]),
+        )
+
+        # Maintain backward compatibility
+        self.hint = hint
+
+
+# =============================================================================
+# CLI-Specific Exceptions
+# =============================================================================
+# These are specific to CLI operations and don't belong in SDK
 
 
 class ProjectNotFoundError(FuzzForgeError):
-    """Raised when no FuzzForge project is found in current directory"""
+    """Raised when no FuzzForge project is found in current directory."""
 
     def __init__(self):
         super().__init__(
-            "No FuzzForge project found in current directory",
-            "Run 'ff init' to initialize a new project"
+            message="No FuzzForge project found in current directory",
+            hint="Run 'ff init' to initialize a new project",
+            exit_code=1,
         )
 
 
 class APIConnectionError(FuzzForgeError):
-    """Legacy API connection error for backward compatibility"""
+    """Raised when connection to FuzzForge API fails."""
 
     def __init__(self, url: str, original_error: Exception):
         self.url = url
@@ -73,11 +212,13 @@ class APIConnectionError(FuzzForgeError):
             message = f"API connection error: {str(original_error)}"
             hint = "Check your network connection and API configuration"
 
-        super().__init__(message, hint)
+        super().__init__(
+            message=message, hint=hint, exit_code=1, original_exception=original_error
+        )
 
 
 class DatabaseError(FuzzForgeError):
-    """Raised when database operations fail"""
+    """Raised when database operations fail."""
 
     def __init__(self, operation: str, original_error: Exception):
         self.operation = operation
@@ -86,387 +227,118 @@ class DatabaseError(FuzzForgeError):
         message = f"Database error during {operation}: {str(original_error)}"
         hint = "The database may be corrupted. Try 'ff init --force' to reset"
 
-        super().__init__(message, hint)
-
-
-class ValidationError(FuzzForgeError):
-    """Legacy validation error for CLI-specific validation"""
-
-    def __init__(self, field: str, value: Any, expected: str):
-        self.field = field
-        self.value = value
-        self.expected = expected
-
-        message = f"Invalid {field}: {value}"
-        hint = f"Expected {expected}"
-
-        super().__init__(message, hint)
+        super().__init__(
+            message=message, hint=hint, exit_code=1, original_exception=original_error
+        )
 
 
 class FileOperationError(FuzzForgeError):
-    """Raised when file operations fail"""
+    """Raised when file operations fail."""
 
-    def __init__(self, operation: str, path: Union[str, Path], original_error: Exception):
+    def __init__(self, operation: str, path: Path, original_error: Exception):
         self.operation = operation
-        self.path = Path(path)
+        self.path = path
         self.original_error = original_error
 
-        if isinstance(original_error, FileNotFoundError):
-            message = f"File not found: {path}"
-            hint = "Check the path exists and you have permission to access it"
-        elif isinstance(original_error, PermissionError):
-            message = f"Permission denied: {path}"
-            hint = "Check file permissions or run with appropriate privileges"
-        else:
-            message = f"File operation failed ({operation}): {str(original_error)}"
-            hint = "Check the file path and permissions"
-
-        super().__init__(message, hint)
-
-
-def display_container_logs(diagnostics, title: str = "Container Logs"):
-    """Display container logs in a rich format."""
-    if not diagnostics or not diagnostics.logs:
-        return
-
-    # Show last 20 lines of logs
-    recent_logs = diagnostics.logs[-20:] if len(diagnostics.logs) > 20 else diagnostics.logs
-
-    log_content = []
-    for log_entry in recent_logs:
-        timestamp = log_entry.timestamp.strftime("%H:%M:%S")
-        level_color = {
-            'ERROR': 'red',
-            'WARNING': 'yellow',
-            'INFO': 'blue',
-            'DEBUG': 'dim white'
-        }.get(log_entry.level, 'white')
-
-        log_line = f"[dim]{timestamp}[/dim] [{level_color}]{log_entry.level}[/{level_color}] {log_entry.message}"
-        log_content.append(log_line)
-
-    if log_content:
-        logs_panel = Panel(
-            "\n".join(log_content),
-            title=title,
-            title_align="left",
-            border_style="dim",
-            expand=False
+        message = (
+            f"File operation '{operation}' failed for {path}: {str(original_error)}"
         )
-        console.print(logs_panel)
+        hint = f"Check permissions and that the path exists: {path}"
+
+        super().__init__(
+            message=message, hint=hint, exit_code=1, original_exception=original_error
+        )
 
 
-def display_container_diagnostics(diagnostics):
-    """Display comprehensive container diagnostics."""
-    if not diagnostics:
-        return
-
-    # Container Status Table
-    status_table = Table(title="Container Status", show_header=False, box=None)
-    status_table.add_column("Property", style="bold")
-    status_table.add_column("Value")
-
-    status_color = {
-        'running': 'green',
-        'exited': 'red',
-        'failed': 'red',
-        'created': 'yellow',
-        'unknown': 'dim'
-    }.get(diagnostics.status.lower(), 'white')
-
-    status_table.add_row("Status", f"[{status_color}]{diagnostics.status}[/{status_color}]")
-
-    if diagnostics.exit_code is not None:
-        exit_color = 'green' if diagnostics.exit_code == 0 else 'red'
-        status_table.add_row("Exit Code", f"[{exit_color}]{diagnostics.exit_code}[/{exit_color}]")
-
-    if diagnostics.error:
-        status_table.add_row("Error", f"[red]{diagnostics.error}[/red]")
-
-    # Resource Usage
-    if diagnostics.resource_usage:
-        memory_limit = diagnostics.resource_usage.get('memory_limit', 0)
-        if memory_limit > 0:
-            memory_mb = memory_limit // (1024 * 1024)
-            status_table.add_row("Memory Limit", f"{memory_mb} MB")
-
-    console.print(status_table)
-
-    # Volume Mounts
-    if diagnostics.volume_mounts:
-        console.print("\n[bold]Volume Mounts:[/bold]")
-        for mount in diagnostics.volume_mounts:
-            mount_info = f"  {mount['source']} → {mount['destination']} ([dim]{mount['mode']}[/dim])"
-            console.print(mount_info)
+# =============================================================================
+# Error Handling Utilities
+# =============================================================================
 
 
-def display_error_patterns(error_patterns):
-    """Display detected error patterns."""
-    if not error_patterns:
-        return
-
-    console.print("\n[bold red]🔍 Detected Issues:[/bold red]")
-
-    for error_type, messages in error_patterns.items():
-        # Format error type name
-        formatted_type = error_type.replace('_', ' ').title()
-        console.print(f"\n[bold yellow]• {formatted_type}:[/bold yellow]")
-
-        for message in messages[:3]:  # Show first 3 messages
-            console.print(f"  [dim]▸[/dim] {message}")
-
-        if len(messages) > 3:
-            console.print(f"  [dim]▸ ... and {len(messages) - 3} more similar messages[/dim]")
-
-
-def display_suggestions(suggestions: List[str]):
-    """Display actionable suggestions."""
-    if not suggestions:
-        return
-
-    console.print("\n[bold green]💡 Suggested Fixes:[/bold green]")
-
-    for i, suggestion in enumerate(suggestions[:6], 1):  # Show max 6 suggestions
-        console.print(f"  [bold green]{i}.[/bold green] {suggestion}")
-
-
-def handle_error(error: Exception, context: str = "") -> None:
-    """
-    Display comprehensive error messages with rich context and exit appropriately.
+def show_error(error: Exception, verbose: bool = False):
+    """Display an error with rich formatting.
 
     Args:
-        error: The exception that occurred
-        context: Additional context about where the error occurred
+        error: The exception to display
+        verbose: Whether to show detailed context
     """
-    # Handle SDK errors with rich context
-    if isinstance(error, SDKFuzzForgeError):
-        console.print()  # Add some spacing
+    if isinstance(error, _SDKFuzzForgeError):
+        # SDK exception with rich context
+        console.print(
+            Panel(
+                f"[bold red]Error:[/bold red] {error.message}",
+                title=error.__class__.__name__,
+                border_style="red",
+            )
+        )
 
-        # Main error message
-        error_title = f"❌ {error.__class__.__name__}"
-        if context:
-            error_title += f" during {context}"
+        if error.context and error.context.suggested_fixes:
+            console.print("\n[bold yellow]Suggested fixes:[/bold yellow]")
+            for fix in error.context.suggested_fixes:
+                console.print(f"  • {fix}")
 
-        console.print(Panel(
-            error.get_summary(),
-            title=error_title,
-            title_align="left",
-            border_style="red",
-            expand=False
-        ))
+        if verbose and error.context:
+            console.print("\n[dim]Detailed context:[/dim]")
+            console.print(error.get_detailed_info())
 
-        # Show detailed context if available
-        if hasattr(error, 'context') and error.context:
-            ctx = error.context
-
-            # Error patterns
-            if ctx.error_patterns:
-                display_error_patterns(ctx.error_patterns)
-
-            # API context
-            if ctx.url:
-                console.print(f"\n[dim]Request URL: {ctx.url}[/dim]")
-
-            if ctx.response_data and isinstance(ctx.response_data, dict) and 'raw' not in ctx.response_data:
-                console.print(f"[dim]API Response: {ctx.response_data}[/dim]")
-
-            # Suggestions
-            if ctx.suggested_fixes:
-                display_suggestions(ctx.suggested_fixes)
-
-        console.print()  # Add spacing before exit
-        raise typer.Exit(1)
-
-    # Handle legacy CLI errors
     elif isinstance(error, FuzzForgeError):
-        error_text = Text()
-        error_text.append("❌ ", style="red")
-        error_text.append(error.message, style="red")
-
-        if context:
-            error_text.append(f" ({context})", style="dim red")
-
-        console.print(error_text)
+        # CLI exception with hint
+        console.print(
+            Panel(
+                f"[bold red]{error.message}[/bold red]",
+                title=error.__class__.__name__,
+                border_style="red",
+            )
+        )
 
         if error.hint:
-            hint_text = Text()
-            hint_text.append("💡 ", style="yellow")
-            hint_text.append(error.hint, style="yellow")
-            console.print(hint_text)
-
-        raise typer.Exit(error.exit_code)
-
-    elif isinstance(error, KeyboardInterrupt):
-        console.print("\n⏹️  Operation cancelled by user", style="yellow")
-        raise typer.Exit(130)  # Standard exit code for SIGINT
-
+            console.print(f"\n[bold yellow]Hint:[/bold yellow] {error.hint}")
     else:
-        # Unexpected errors - show minimal info to user, log details
-        console.print()
-
-        error_panel = Panel(
-            f"An unexpected error occurred: {str(error)}",
-            title="❌ Unexpected Error",
-            title_align="left",
-            border_style="red",
-            expand=False
+        # Generic exception
+        console.print(
+            Panel(
+                f"[bold red]{str(error)}[/bold red]",
+                title=error.__class__.__name__,
+                border_style="red",
+            )
         )
 
-        if context:
-            error_panel.title += f" during {context}"
 
-        console.print(error_panel)
+def handle_errors(func: Callable) -> Callable:
+    """Decorator to handle and display errors consistently.
 
-        # Show error details for debugging
-        console.print(f"\n[dim yellow]Error type: {type(error).__name__}[/dim yellow]")
-        console.print("[dim yellow]Please report this issue if it persists[/dim yellow]")
-        console.print()
-
-        raise typer.Exit(1)
-
-
-def retry_on_network_error(max_retries: int = 3, delay: float = 1.0, backoff_multiplier: float = 2.0):
+    Usage:
+        @handle_errors
+        def my_command():
+            raise FuzzForgeError("Something went wrong")
     """
-    Decorator to retry network operations with exponential backoff.
 
-    Args:
-        max_retries: Maximum number of retry attempts
-        delay: Initial delay between retries in seconds
-        backoff_multiplier: Multiplier for exponential backoff
-    """
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_exception = None
-            current_delay = delay
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except FuzzForgeError as e:
+            show_error(e)
+            raise typer.Exit(e.exit_code)
+        except _SDKFuzzForgeError as e:
+            show_error(e)
+            raise typer.Exit(1)
+        except Exception as e:
+            console.print(f"[bold red]Unexpected error:[/bold red] {e}")
+            raise typer.Exit(1)
 
-            for attempt in range(max_retries + 1):
-                try:
-                    return func(*args, **kwargs)
-                except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
-                    last_exception = e
-
-                    if attempt < max_retries:
-                        console.print(
-                            f"🔄 Network error, retrying in {current_delay:.1f}s... "
-                            f"(attempt {attempt + 1}/{max_retries})",
-                            style="yellow"
-                        )
-                        time.sleep(current_delay)
-                        current_delay *= backoff_multiplier
-                    else:
-                        # Convert to our custom error type
-                        api_url = getattr(args[0], 'base_url', 'unknown') if args else 'unknown'
-                        raise APIConnectionError(str(api_url), e)
-
-            # Should never reach here, but just in case
-            if last_exception:
-                raise last_exception
-
-        return wrapper
-    return decorator
+    return wrapper
 
 
-def validate_path(path: Union[str, Path], must_exist: bool = True, must_be_file: bool = False,
-                 must_be_dir: bool = False) -> Path:
-    """
-    Validate file/directory paths with user-friendly error messages.
-
-    Args:
-        path: Path to validate
-        must_exist: Whether the path must exist
-        must_be_file: Whether the path must be a file
-        must_be_dir: Whether the path must be a directory
-
-    Returns:
-        Validated Path object
+def require_project():
+    """Ensure we're in a FuzzForge project directory.
 
     Raises:
-        ValidationError: If validation fails
+        ProjectNotFoundError: If no project found
     """
-    path_obj = Path(path)
+    from .config import get_project_config
 
-    if must_exist and not path_obj.exists():
-        raise ValidationError("path", str(path), "an existing path")
-
-    if must_be_file and path_obj.exists() and not path_obj.is_file():
-        raise ValidationError("path", str(path), "a file")
-
-    if must_be_dir and path_obj.exists() and not path_obj.is_dir():
-        raise ValidationError("path", str(path), "a directory")
-
-    return path_obj
-
-
-def validate_run_id(run_id: str) -> str:
-    """
-    Validate run ID format.
-
-    Args:
-        run_id: Run ID to validate
-
-    Returns:
-        Validated run ID
-
-    Raises:
-        ValidationError: If run ID format is invalid
-    """
-    if not run_id or len(run_id) < 8:
-        raise ValidationError("run_id", run_id, "at least 8 characters")
-
-    # Allow alphanumeric characters, hyphens, and underscores
-    if not run_id.replace('-', '').replace('_', '').isalnum():
-        raise ValidationError("run_id", run_id, "alphanumeric characters, hyphens, and underscores only")
-
-    return run_id
-
-
-def safe_json_load(file_path: Union[str, Path]) -> dict:
-    """
-    Safely load JSON file with proper error handling.
-
-    Args:
-        file_path: Path to JSON file
-
-    Returns:
-        Parsed JSON data
-
-    Raises:
-        FileOperationError: If file operation fails
-        ValidationError: If JSON is invalid
-    """
-    path_obj = Path(file_path)
-
-    try:
-        with open(path_obj, 'r', encoding='utf-8') as f:
-            import json
-            return json.load(f)
-    except FileNotFoundError as e:
-        raise FileOperationError("read", path_obj, e)
-    except PermissionError as e:
-        raise FileOperationError("read", path_obj, e)
-    except json.JSONDecodeError as e:
-        raise ValidationError("JSON file", str(path_obj), f"valid JSON format (error: {e})")
-    except Exception as e:
-        raise FileOperationError("read", path_obj, e)
-
-
-def require_project() -> Path:
-    """
-    Ensure we're in a FuzzForge project directory.
-
-    Returns:
-        Path to project root
-
-    Raises:
-        ProjectNotFoundError: If not in a project directory
-    """
-    current = Path.cwd()
-
-    # Look for .fuzzforge directory in current or parent directories
-    for path in [current] + list(current.parents):
-        fuzzforge_dir = path / ".fuzzforge"
-        if fuzzforge_dir.is_dir():
-            return path
-
-    raise ProjectNotFoundError()
+    config = get_project_config()
+    if config is None:
+        raise ProjectNotFoundError()
+    return config
