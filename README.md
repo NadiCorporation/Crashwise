@@ -235,4 +235,4 @@ Planned features and improvements:
 ## 📜 License
 
 Crashwise is released under the **MIT License**.  
-See [LICENSE](LICENSE) and [LICENSE-APACHE](LICENSE-APACHE) for details.
+See [LICENSE](LICENSE) for details.
