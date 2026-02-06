@@ -3,7 +3,7 @@ name = "crashwise"
 version = "0.7.3"
 description = "Crashwise Platform - Complete fuzzing and security testing platform with AI capabilities"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "BSL-1.1" }
 requires-python = ">=3.11"
 dependencies = [
     "crashwise-sdk",

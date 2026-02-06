@@ -3,7 +3,7 @@
 <p align="center"><strong>AI-powered workflow automation and AI Agents for AppSec, Fuzzing & Offensive Security</strong></p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSL%201.1-orange" alt="License: BSL 1.1"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"/></a>
   <img src="https://img.shields.io/badge/version-0.7.3-green" alt="Version">
   <a href="https://github.com/YahyaToubali/Crashwise/stargazers"><img src="https://img.shields.io/github/stars/YahyaToubali/Crashwise?style=social" alt="GitHub Stars"></a>
@@ -233,5 +233,6 @@ and community for the foundation.
 
 ## 📜 License
 
-Crashwise is released under the **MIT License**.  
-See [LICENSE](LICENSE) for details.
+Crashwise is released under the **Business Source License 1.1 (BSL)**.
+Production use requires a commercial license until the change date, when Apache 2.0 applies.  
+See [LICENSE](LICENSE) and [LICENSE-APACHE](LICENSE-APACHE) for details.

@@ -1,21 +1,49 @@
-MIT License
+License text copyright (c) 2025 FuzzingLabs, All Rights Reserved.
+"Business Source License" is a trademark of MariaDB Corporation Ab.
 
-Copyright (c) 2026 Crashwise
+Parameters
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Licensor:             FuzzingLabs
+Licensed Work:        FuzzForge version 0.6.0 or later. The Licensed Work is (c) 2025 FuzzingLabs.
+Additional Use Grant: You may make non-production use of the Licensed Work, including
+                      research, academic, educational, personal, or internal evaluation purposes. 
+                      Production use of the Licensed Work requires a commercial license from FuzzingLabs.
+Change Date:          Four years from the date the Licensed Work is published.
+Change License:       Apache License, Version 2.0
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+For information about alternative licensing arrangements for the Licensed Work,
+please contact licensing@fuzzinglabs.com.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Notice
+
+Business Source License 1.1
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative
+works, redistribute, and make non-production use of the Licensed Work. The
+Licensor may make an Additional Use Grant, above, permitting limited production use.
+
+Effective on the Change Date, or the fourth anniversary of the first publicly
+available distribution of a specific version of the Licensed Work under this
+License, whichever comes first, the Licensor hereby grants you rights under the
+terms of the Change License, and the rights granted in the paragraph above
+terminate.
+
+If your use of the Licensed Work does not comply with the requirements currently
+in effect as described in this License, you must purchase a commercial license
+from the Licensor, its affiliates, or authorized resellers, or you must refrain
+from further use of the Licensed Work.
+
+All copies of the Licensed Work must preserve any copyright notices.
+
+This License does not grant you rights to use any trademarks or logos of the
+Licensor or its affiliates, except as expressly permitted in writing.
+
+If you violate the terms of this License, your rights under this License will
+terminate immediately.
+
+No license is granted for any patent claims, except as expressly provided in
+this License or the Change License.
+
+This License is governed by the laws of the applicable jurisdiction.
