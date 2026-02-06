@@ -8,7 +8,7 @@ import asyncio
 
 async def main():
     # Clean import!
-    from fuzzforge_ai.a2a_wrapper import send_agent_task
+    from crashwise_ai.a2a_wrapper import send_agent_task
 
     print("Sending task to agent at http://127.0.0.1:10900...")
 

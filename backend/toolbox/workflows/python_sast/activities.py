@@ -173,7 +173,7 @@ async def generate_python_sast_sarif_activity(
         reporter_config = {
             **config,
             "findings": all_findings,
-            "tool_name": "FuzzForge Python SAST",
+            "tool_name": "Crashwise Python SAST",
             "tool_version": "1.0.0"
         }
 

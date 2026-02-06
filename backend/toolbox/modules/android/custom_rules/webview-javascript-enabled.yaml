@@ -5,7 +5,7 @@ rules:
     message: "WebView with JavaScript enabled can be dangerous if loading untrusted content."
     metadata:
       authors:
-        - Guerric ELOI (FuzzingLabs)
+        - Guerric ELOI (Crashwise)
       owasp-mobile: M7
       category: webview
       area: ui

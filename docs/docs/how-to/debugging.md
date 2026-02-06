@@ -1,6 +1,6 @@
 # Debugging Workflows and Modules
 
-This guide shows you how to debug FuzzForge workflows and modules using Temporal's powerful debugging features.
+This guide shows you how to debug Crashwise workflows and modules using Temporal's powerful debugging features.
 
 ---
 
@@ -11,7 +11,7 @@ When something goes wrong:
 1. **Check worker logs** - `docker-compose -f docker-compose.yml logs worker-rust -f`
 2. **Check Temporal UI** - http://localhost:8080 (visual execution history)
 3. **Check MinIO console** - http://localhost:9001 (inspect uploaded files)
-4. **Check backend logs** - `docker-compose -f docker-compose.yml logs fuzzforge-backend -f`
+4. **Check backend logs** - `docker-compose -f docker-compose.yml logs crashwise-backend -f`
 
 ---
 
@@ -25,17 +25,17 @@ When something goes wrong:
 
 1. **Check if worker can see the workflow:**
    ```bash
-   docker exec fuzzforge-worker-rust ls /app/toolbox/workflows/
+   docker exec crashwise-worker-rust ls /app/toolbox/workflows/
    ```
 
 2. **Check metadata.yaml exists:**
    ```bash
-   docker exec fuzzforge-worker-rust cat /app/toolbox/workflows/my_workflow/metadata.yaml
+   docker exec crashwise-worker-rust cat /app/toolbox/workflows/my_workflow/metadata.yaml
    ```
 
 3. **Verify vertical field matches:**
    ```bash
-   docker exec fuzzforge-worker-rust grep "vertical:" /app/toolbox/workflows/my_workflow/metadata.yaml
+   docker exec crashwise-worker-rust grep "vertical:" /app/toolbox/workflows/my_workflow/metadata.yaml
    ```
    Should output: `vertical: rust`
 
@@ -145,7 +145,7 @@ docker-compose -f docker-compose.yml logs worker-rust | grep "activity"
 
 **Using MinIO Console:**
 1. Open http://localhost:9001
-2. Login: `fuzzforge` / `fuzzforge123`
+2. Login: `crashwise` / `crashwise123`
 3. Click "Buckets" → "targets"
 4. Look for your `target_id` (UUID format)
 5. Click to download and inspect locally
@@ -156,17 +156,17 @@ docker-compose -f docker-compose.yml logs worker-rust | grep "activity"
 curl http://localhost:9000
 
 # List backend logs for upload
-docker-compose -f docker-compose.yml logs fuzzforge-backend | grep "upload"
+docker-compose -f docker-compose.yml logs crashwise-backend | grep "upload"
 ```
 
 ### Check Worker Cache
 
 ```bash
 # List cached targets
-docker exec fuzzforge-worker-rust ls -lh /cache/
+docker exec crashwise-worker-rust ls -lh /cache/
 
 # Check specific target
-docker exec fuzzforge-worker-rust ls -lh /cache/548193a1-f73f-4ec1-8068-19ec2660b8e4
+docker exec crashwise-worker-rust ls -lh /cache/548193a1-f73f-4ec1-8068-19ec2660b8e4
 ```
 
 ---
@@ -177,7 +177,7 @@ docker exec fuzzforge-worker-rust ls -lh /cache/548193a1-f73f-4ec1-8068-19ec2660
 
 ```bash
 # Open shell in worker container
-docker exec -it fuzzforge-worker-rust bash
+docker exec -it crashwise-worker-rust bash
 
 # Now you can:
 # - Check filesystem
@@ -201,7 +201,7 @@ ls -lh /cache/
 
 ```bash
 # Enter worker container
-docker exec -it fuzzforge-worker-rust bash
+docker exec -it crashwise-worker-rust bash
 
 # Navigate to module
 cd /app/toolbox/modules/scanner
@@ -290,7 +290,7 @@ docker-compose -f docker-compose.yml restart worker-rust
 **Solution:**
 - Worker may have crashed - restart it
 - Activity may be hanging - check for infinite loops or stuck network calls
-- Check worker resource limits: `docker stats fuzzforge-worker-rust`
+- Check worker resource limits: `docker stats crashwise-worker-rust`
 
 ### Issue: Import errors in workflow
 
@@ -298,12 +298,12 @@ docker-compose -f docker-compose.yml restart worker-rust
 1. Check worker logs for full error trace
 2. Check if module file exists:
    ```bash
-   docker exec fuzzforge-worker-rust ls /app/toolbox/modules/my_module/
+   docker exec crashwise-worker-rust ls /app/toolbox/modules/my_module/
    ```
 
 **Solution:**
 - Ensure module is in correct directory
-- Check for syntax errors: `docker exec fuzzforge-worker-rust python3 -m py_compile /app/toolbox/modules/my_module/my_module.py`
+- Check for syntax errors: `docker exec crashwise-worker-rust python3 -m py_compile /app/toolbox/modules/my_module/my_module.py`
 - Verify imports are correct
 
 ### Issue: Target file not found in worker
@@ -334,7 +334,7 @@ docker-compose -f docker-compose.yml restart worker-rust
 
 ```bash
 # Monitor worker resource usage
-docker stats fuzzforge-worker-rust
+docker stats crashwise-worker-rust
 
 # Check worker logs for memory warnings
 docker-compose -f docker-compose.yml logs worker-rust | grep -i "memory\|oom"
@@ -383,26 +383,26 @@ docker-compose -f docker-compose.yml restart worker-rust
 
 ```bash
 # Install Temporal CLI
-docker exec fuzzforge-temporal tctl
+docker exec crashwise-temporal tctl
 
 # List workflows
-docker exec fuzzforge-temporal tctl workflow list
+docker exec crashwise-temporal tctl workflow list
 
 # Describe workflow
-docker exec fuzzforge-temporal tctl workflow describe -w security_assessment-abc123
+docker exec crashwise-temporal tctl workflow describe -w security_assessment-abc123
 
 # Show workflow history
-docker exec fuzzforge-temporal tctl workflow show -w security_assessment-abc123
+docker exec crashwise-temporal tctl workflow show -w security_assessment-abc123
 ```
 
 ### Check Network Connectivity
 
 ```bash
 # From worker to Temporal
-docker exec fuzzforge-worker-rust ping temporal
+docker exec crashwise-worker-rust ping temporal
 
 # From worker to MinIO
-docker exec fuzzforge-worker-rust curl http://minio:9000
+docker exec crashwise-worker-rust curl http://minio:9000
 
 # From host to services
 curl http://localhost:8080  # Temporal UI
@@ -431,7 +431,7 @@ If you're still stuck:
 1. **Collect diagnostic info:**
    ```bash
    # Save all logs
-   docker-compose -f docker-compose.yml logs > fuzzforge-logs.txt
+   docker-compose -f docker-compose.yml logs > crashwise-logs.txt
 
    # Check service status
    docker-compose -f docker-compose.yml ps > service-status.txt

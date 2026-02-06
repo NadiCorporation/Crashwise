@@ -2,7 +2,7 @@ name: llm_secret_detection
 version: "1.0.0"
 vertical: secrets
 description: "AI-powered secret detection using LLM semantic analysis"
-author: "FuzzForge Team"
+author: "Crashwise Team"
 tags:
   - "secrets"
   - "llm"
@@ -16,7 +16,7 @@ parameters:
   properties:
     agent_url:
       type: string
-      default: "http://fuzzforge-task-agent:8000/a2a/litellm_agent"
+      default: "http://crashwise-task-agent:8000/a2a/litellm_agent"
 
     llm_model:
       type: string

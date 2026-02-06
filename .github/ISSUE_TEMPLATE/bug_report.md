@@ -1,6 +1,6 @@
 ---
 name: 🐛 Bug Report
-about: Create a report to help us improve FuzzForge
+about: Create a report to help us improve Crashwise
 title: "[BUG] "
 labels: bug
 assignees: ''
@@ -14,7 +14,7 @@ Please provide details about your environment:
 - **OS**: (e.g., macOS 14.0, Ubuntu 22.04, Windows 11)
 - **Python version**: (e.g., 3.9.7)
 - **Docker version**: (e.g., 24.0.6)
-- **FuzzForge version**: (e.g., 0.6.0)
+- **Crashwise version**: (e.g., 0.6.0)
 
 ## Steps to Reproduce
 Clear steps to recreate the issue:

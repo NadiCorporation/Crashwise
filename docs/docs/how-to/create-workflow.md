@@ -1,6 +1,6 @@
-# How to Create a Custom Workflow in FuzzForge
+# How to Create a Custom Workflow in Crashwise
 
-This guide will walk you through the process of creating a custom security analysis workflow in FuzzForge. Workflows orchestrate modules, define the analysis pipeline, and enable you to automate complex security checks for your codebase or application.
+This guide will walk you through the process of creating a custom security analysis workflow in Crashwise. Workflows orchestrate modules, define the analysis pipeline, and enable you to automate complex security checks for your codebase or application.
 
 ---
 
@@ -8,7 +8,7 @@ This guide will walk you through the process of creating a custom security analy
 
 Before you start, make sure you have:
 
-- A working FuzzForge development environment (see [Contributing](/reference/contributing.md))
+- A working Crashwise development environment (see [Contributing](/reference/contributing.md))
 - Familiarity with Python (async/await), Docker, and Temporal
 - At least one custom or built-in module to use in your workflow
 
@@ -16,7 +16,7 @@ Before you start, make sure you have:
 
 ## Step 1: Understand Workflow Architecture
 
-A FuzzForge workflow is a Temporal workflow that:
+A Crashwise workflow is a Temporal workflow that:
 
 - Runs inside a long-lived vertical worker container (pre-built with toolchains)
 - Orchestrates one or more analysis modules (scanner, analyzer, reporter, etc.)
@@ -46,7 +46,7 @@ Example:
 name: dependency_analysis
 version: "1.0.0"
 description: "Analyzes project dependencies for security vulnerabilities"
-author: "FuzzingLabs Security Team"
+author: "Crashwise Security Team"
 category: "comprehensive"
 vertical: "web"  # REQUIRED: Which vertical worker to use (rust, android, web, etc.)
 tags:
@@ -116,7 +116,7 @@ See the [Workspace Isolation](/docs/concept/workspace-isolation) guide for detai
 
 ## Step 3: Add Live Statistics to Your Workflow 🚦
 
-Want real-time progress and stats for your workflow? FuzzForge supports live statistics reporting using Temporal workflow logging. This lets users (and the platform) monitor workflow progress, see live updates, and stream stats via API or WebSocket.
+Want real-time progress and stats for your workflow? Crashwise supports live statistics reporting using Temporal workflow logging. This lets users (and the platform) monitor workflow progress, see live updates, and stream stats via API or WebSocket.
 
 ### 1. Import Required Dependencies
 
@@ -269,7 +269,7 @@ async def security_scan_activity(target_path: str, config: Dict[str, Any]):
     return await scanner.execute(config, target_path, stats_callback=stats_callback)
 ```
 
-With these steps, your workflow will provide rich, real-time feedback to users and the FuzzForge platform—making automation more transparent and interactive!
+With these steps, your workflow will provide rich, real-time feedback to users and the Crashwise platform—making automation more transparent and interactive!
 
 ---
 
@@ -396,7 +396,7 @@ class DependencyAnalysisWorkflow:
 ### Using the CLI
 
 ```bash
-# Start FuzzForge with Temporal
+# Start Crashwise with Temporal
 docker-compose -f docker-compose.yml up -d
 
 # Wait for services to initialize
@@ -404,7 +404,7 @@ sleep 10
 
 # Submit workflow with file upload
 cd test_projects/vulnerable_app/
-fuzzforge workflow run dependency_analysis .
+crashwise workflow run dependency_analysis .
 
 # CLI automatically:
 # - Creates tarball of current directory
@@ -416,10 +416,10 @@ fuzzforge workflow run dependency_analysis .
 ### Using Python SDK
 
 ```python
-from fuzzforge_sdk import FuzzForgeClient
+from crashwise_sdk import CrashwiseClient
 from pathlib import Path
 
-client = FuzzForgeClient(base_url="http://localhost:8000")
+client = CrashwiseClient(base_url="http://localhost:8000")
 
 # Submit with automatic upload
 response = client.submit_workflow_with_upload(

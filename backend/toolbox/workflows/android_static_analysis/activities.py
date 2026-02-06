@@ -8,16 +8,9 @@ Activities for the Android security testing workflow:
 - generate_android_sarif_activity: Generate combined SARIF report
 """
 
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 import logging
 import sys
@@ -189,7 +182,7 @@ async def generate_android_sarif_activity(
         reporter_config = {
             **(config or {}),
             "findings": all_findings,
-            "tool_name": "FuzzForge Android Static Analysis",
+            "tool_name": "Crashwise Android Static Analysis",
             "tool_version": "1.0.0",
             "metadata": {
                 "jadx_version": "1.5.0",

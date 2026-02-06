@@ -1,4 +1,4 @@
-# FuzzForge Temporal Architecture - Quick Start Guide
+# Crashwise Temporal Architecture - Quick Start Guide
 
 This guide walks you through starting and testing the new Temporal-based architecture.
 
@@ -12,7 +12,7 @@ This guide walks you through starting and testing the new Temporal-based archite
 
 ```bash
 # From project root
-cd /path/to/fuzzforge_ai
+cd /path/to/Crashwise
 
 # Start core services (Temporal, MinIO, Backend)
 docker-compose up -d
@@ -27,11 +27,11 @@ docker-compose ps
 **Expected output:**
 ```
 NAME                          STATUS    PORTS
-fuzzforge-minio               healthy   0.0.0.0:9000-9001->9000-9001/tcp
-fuzzforge-temporal            healthy   0.0.0.0:7233->7233/tcp
-fuzzforge-temporal-postgresql healthy   5432/tcp
-fuzzforge-backend             healthy   0.0.0.0:8000->8000/tcp
-fuzzforge-minio-setup         exited (0)
+crashwise-minio               healthy   0.0.0.0:9000-9001->9000-9001/tcp
+crashwise-temporal            healthy   0.0.0.0:7233->7233/tcp
+crashwise-temporal-postgresql healthy   5432/tcp
+crashwise-backend             healthy   0.0.0.0:8000->8000/tcp
+crashwise-minio-setup         exited (0)
 # Workers NOT running (will start on-demand)
 ```
 
@@ -42,13 +42,13 @@ fuzzforge-minio-setup         exited (0)
 Check worker logs to ensure workflows are discovered:
 
 ```bash
-docker logs fuzzforge-worker-rust
+docker logs crashwise-worker-rust
 ```
 
 **Expected output:**
 ```
 ============================================================
-FuzzForge Vertical Worker: rust
+Crashwise Vertical Worker: rust
 ============================================================
 Temporal Address: temporal:7233
 Task Queue: rust-queue
@@ -77,16 +77,16 @@ Workers start on-demand when workflows need them:
 
 ```bash
 # Check worker status (should show Exited or not running)
-docker ps -a --filter "name=fuzzforge-worker"
+docker ps -a --filter "name=crashwise-worker"
 
 # Run a workflow - worker starts automatically
 ff workflow run ossfuzz_campaign . project_name=zlib
 
 # Worker is now running
-docker ps --filter "name=fuzzforge-worker-ossfuzz"
+docker ps --filter "name=crashwise-worker-ossfuzz"
 ```
 
-**Configuration** (`.fuzzforge/config.yaml`):
+**Configuration** (`.crashwise/config.yaml`):
 ```yaml
 workers:
   auto_start_workers: true    # Default: auto-start
@@ -111,7 +111,7 @@ ff workflow run ossfuzz_campaign . --wait --auto-stop
 
 ### MinIO Console
 - URL: http://localhost:9001
-- Login: `fuzzforge` / `fuzzforge123`
+- Login: `crashwise` / `crashwise123`
 - View uploaded targets and results
 
 ## Step 4: Test Workflow Execution
@@ -175,8 +175,8 @@ async def main():
     s3 = boto3.client(
         's3',
         endpoint_url='http://localhost:9000',
-        aws_access_key_id='fuzzforge',
-        aws_secret_access_key='fuzzforge123',
+        aws_access_key_id='crashwise',
+        aws_secret_access_key='crashwise123',
         region_name='us-east-1'
     )
 
@@ -234,16 +234,16 @@ python upload_and_run.py
 
 ```bash
 # Worker logs (shows activity execution)
-docker logs -f fuzzforge-worker-rust
+docker logs -f crashwise-worker-rust
 
 # Temporal server logs
-docker logs -f fuzzforge-temporal
+docker logs -f crashwise-temporal
 ```
 
 ### Check MinIO Storage
 
 1. Open http://localhost:9001
-2. Login: `fuzzforge` / `fuzzforge123`
+2. Login: `crashwise` / `crashwise123`
 3. Browse buckets:
    - `targets/` - Uploaded target files
    - `results/` - Workflow results (if uploaded)
@@ -268,7 +268,7 @@ docker-compose -f docker-compose.temporal.yaml logs worker-rust
 **Issue**: Worker logs show "No workflows found for vertical: rust"
 
 **Solution**:
-1. Check toolbox mount: `docker exec fuzzforge-worker-rust ls /app/toolbox/workflows`
+1. Check toolbox mount: `docker exec crashwise-worker-rust ls /app/toolbox/workflows`
 2. Verify metadata.yaml exists and has `vertical: rust`
 3. Check workflow.py has `@workflow.defn` decorator
 
@@ -298,10 +298,10 @@ docker-compose -f docker-compose.temporal.yaml restart temporal
 docker ps | grep minio
 
 # Check buckets exist
-docker exec fuzzforge-minio mc ls fuzzforge/
+docker exec crashwise-minio mc ls crashwise/
 
 # Verify target was uploaded
-docker exec fuzzforge-minio mc ls fuzzforge/targets/
+docker exec crashwise-minio mc ls crashwise/targets/
 ```
 
 ### Workflow Hangs
@@ -309,7 +309,7 @@ docker exec fuzzforge-minio mc ls fuzzforge/targets/
 **Issue**: Workflow starts but never completes
 
 **Check**:
-1. Worker logs for errors: `docker logs fuzzforge-worker-rust`
+1. Worker logs for errors: `docker logs crashwise-worker-rust`
 2. Activity timeouts in workflow code
 3. Target file actually exists in MinIO
 
@@ -376,13 +376,13 @@ docker-compose -f docker-compose.temporal.yaml restart worker-rust
 docker-compose -f docker-compose.temporal.yaml ps
 
 # Execute command in worker
-docker exec -it fuzzforge-worker-rust bash
+docker exec -it crashwise-worker-rust bash
 
 # View worker Python environment
-docker exec fuzzforge-worker-rust pip list
+docker exec crashwise-worker-rust pip list
 
 # Check workflow discovery manually
-docker exec fuzzforge-worker-rust python -c "
+docker exec crashwise-worker-rust python -c "
 from pathlib import Path
 import yaml
 for w in Path('/app/toolbox/workflows').iterdir():

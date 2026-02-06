@@ -35,7 +35,7 @@ class OssfuzzCampaignWorkflow:
     @workflow.run
     async def run(
         self,
-        target_id: str,  # Required by FuzzForge (not used, OSS-Fuzz downloads from Google)
+        target_id: str,  # Required by Crashwise (not used, OSS-Fuzz downloads from Google)
         project_name: str,  # Required: OSS-Fuzz project name (e.g., "curl", "sqlite3")
         campaign_duration_hours: int = 1,
         override_engine: Optional[str] = None,  # Override engine from project.yaml
@@ -46,7 +46,7 @@ class OssfuzzCampaignWorkflow:
         Main workflow execution.
 
         Args:
-            target_id: UUID of uploaded target (not used, required by FuzzForge)
+            target_id: UUID of uploaded target (not used, required by Crashwise)
             project_name: Name of OSS-Fuzz project (e.g., "curl", "sqlite3", "libxml2")
             campaign_duration_hours: How many hours to fuzz (default: 1)
             override_engine: Override fuzzing engine from project.yaml

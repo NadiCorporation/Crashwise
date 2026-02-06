@@ -2,16 +2,9 @@
 SARIF Reporter Module - Generates SARIF-formatted security reports
 """
 
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 import logging
 from pathlib import Path
@@ -46,7 +39,7 @@ class SARIFReporter(BaseModule):
             name="sarif_reporter",
             version="1.0.0",
             description="Generates SARIF-formatted security reports",
-            author="FuzzForge Team",
+            author="Crashwise Team",
             category="reporter",
             tags=["reporting", "sarif", "output"],
             input_schema={
@@ -58,7 +51,7 @@ class SARIFReporter(BaseModule):
                 "tool_name": {
                     "type": "string",
                     "description": "Name of the tool",
-                    "default": "FuzzForge Security Assessment"
+                    "default": "Crashwise Security Assessment"
                 },
                 "tool_version": {
                     "type": "string",
@@ -101,7 +94,7 @@ class SARIFReporter(BaseModule):
         self.validate_config(config)
 
         # Get configuration
-        tool_name = config.get("tool_name", "FuzzForge Security Assessment")
+        tool_name = config.get("tool_name", "Crashwise Security Assessment")
         tool_version = config.get("tool_version", "1.0.0")
         include_code_flows = config.get("include_code_flows", False)
 
@@ -200,7 +193,7 @@ class SARIFReporter(BaseModule):
                         "driver": {
                             "name": tool_name,
                             "version": tool_version,
-                            "informationUri": "https://fuzzforge.ai",
+                            "informationUri": "https://crashwise.ai",
                             "rules": rules
                         }
                     },

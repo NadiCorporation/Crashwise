@@ -5,7 +5,7 @@ rules:
     message: "Sensitive data may be copied to the clipboard."
     metadata:
       authors:
-        - Guerric ELOI (FuzzingLabs)
+        - Guerric ELOI (Crashwise)
       category: security
       area: clipboard
       verification-level: [L1]

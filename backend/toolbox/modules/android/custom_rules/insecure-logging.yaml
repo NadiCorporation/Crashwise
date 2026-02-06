@@ -5,7 +5,7 @@ rules:
     message: "Sensitive data logged via Android Log API."
     metadata:
       authors:
-        - Guerric ELOI (FuzzingLabs)
+        - Guerric ELOI (Crashwise)
       owasp-mobile: M2
       category: logging
       verification-level: [L1]

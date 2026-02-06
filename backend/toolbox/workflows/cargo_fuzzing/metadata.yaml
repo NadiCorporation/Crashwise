@@ -2,7 +2,7 @@ name: cargo_fuzzing
 version: "1.0.0"
 vertical: rust
 description: "Fuzz Rust code using cargo-fuzz with real-time monitoring. Automatically discovers and fuzzes fuzz_target!() functions in user code."
-author: "FuzzForge Team"
+author: "Crashwise Team"
 tags:
   - "fuzzing"
   - "cargo-fuzz"

@@ -3,16 +3,9 @@ LLM Secret Detection Module
 
 This module uses an LLM to detect secrets and sensitive information via semantic understanding.
 """
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 
 import logging
@@ -40,7 +33,7 @@ class LLMSecretDetectorModule(BaseModule):
             name="llm_secret_detector",
             version="1.0.0",
             description="AI-powered secret detection using LLM semantic analysis",
-            author="FuzzForge Team",
+            author="Crashwise Team",
             category="secret_detection",
             tags=["secrets", "llm", "ai", "semantic"],
             input_schema={
@@ -48,7 +41,7 @@ class LLMSecretDetectorModule(BaseModule):
                 "properties": {
                     "agent_url": {
                         "type": "string",
-                        "default": "http://fuzzforge-task-agent:8000/a2a/litellm_agent",
+                        "default": "http://crashwise-task-agent:8000/a2a/litellm_agent",
                         "description": "A2A agent endpoint URL"
                     },
                     "llm_model": {
@@ -100,10 +93,10 @@ class LLMSecretDetectorModule(BaseModule):
         """Validate module configuration"""
         # Lazy import to avoid Temporal sandbox restrictions
         try:
-            from fuzzforge_ai.a2a_wrapper import send_agent_task  # noqa: F401
+            from crashwise_ai.a2a_wrapper import send_agent_task  # noqa: F401
         except ImportError:
             raise RuntimeError(
-                "A2A wrapper not available. Ensure fuzzforge_ai module is accessible."
+                "A2A wrapper not available. Ensure crashwise_ai module is accessible."
             )
 
         agent_url = config.get("agent_url")
@@ -259,7 +252,7 @@ class LLMSecretDetectorModule(BaseModule):
 
         # Call LLM via A2A wrapper
         try:
-            from fuzzforge_ai.a2a_wrapper import send_agent_task
+            from crashwise_ai.a2a_wrapper import send_agent_task
 
             result = await send_agent_task(
                 url=agent_url,

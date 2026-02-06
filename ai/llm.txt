@@ -1,7 +1,7 @@
-FuzzForge AI LLM Configuration Guide
+Crashwise AI LLM Configuration Guide
 ===================================
 
-This note summarises the environment variables and libraries that drive LiteLLM (via the Google ADK runtime) inside the FuzzForge AI module. For complete matrices and advanced examples, read `docs/advanced/configuration.md`.
+This note summarises the environment variables and libraries that drive LiteLLM (via the Google ADK runtime) inside the Crashwise AI module. For complete matrices and advanced examples, read `docs/advanced/configuration.md`.
 
 Core Libraries
 --------------
@@ -20,13 +20,13 @@ Add any provider-specific SDKs (for example `pip install anthropic groq`) on top
 
 Baseline Setup
 --------------
-Copy `.fuzzforge/.env.template` to `.fuzzforge/.env` and set the core fields:
+Copy `.crashwise/.env.template` to `.crashwise/.env` and set the core fields:
 
 ```
 LLM_PROVIDER=openai
 LITELLM_MODEL=gpt-5-mini
 OPENAI_API_KEY=sk-your-key
-FUZZFORGE_MCP_URL=http://localhost:8010/mcp
+CRASHWISE_MCP_URL=http://localhost:8010/mcp
 SESSION_PERSISTENCE=sqlite
 MEMORY_SERVICE=inmemory
 ```
@@ -85,7 +85,7 @@ LLM_COGNEE_API_KEY=sk-your-key
 Tracing & Debugging
 -------------------
 - Provide `AGENTOPS_API_KEY` to enable hosted traces for every conversation.
-- Set `FUZZFORGE_DEBUG=1` (and optionally `LOG_LEVEL=DEBUG`) for verbose executor output.
+- Set `CRASHWISE_DEBUG=1` (and optionally `LOG_LEVEL=DEBUG`) for verbose executor output.
 - Restart the agent after changing environment variables; LiteLLM loads configuration on boot.
 
 Further Reading

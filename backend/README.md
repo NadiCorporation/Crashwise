@@ -1,4 +1,4 @@
-# FuzzForge Backend
+# Crashwise Backend
 
 A stateless API server for security testing workflow orchestration using Temporal. This system dynamically discovers workflows, executes them in isolated worker environments, and returns findings in SARIF format.
 
@@ -40,9 +40,9 @@ This will start:
 - MinIO (S3 storage at http://localhost:9000, Console at http://localhost:9001)
 - PostgreSQL database (for Temporal state)
 - Vertical workers (worker-rust, worker-android, worker-web, etc.)
-- FuzzForge backend API (port 8000)
+- Crashwise backend API (port 8000)
 
-**Note**: MinIO console login: `fuzzforge` / `fuzzforge123`
+**Note**: MinIO console login: `crashwise` / `crashwise123`
 
 ## API Endpoints
 
@@ -80,7 +80,7 @@ toolbox/workflows/{workflow_name}/
 name: security_assessment
 version: "1.0.0"
 description: "Comprehensive security analysis workflow"
-author: "FuzzForge Team"
+author: "Crashwise Team"
 category: "comprehensive"
 vertical: "rust"  # Routes to worker-rust
 tags:

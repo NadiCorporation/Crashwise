@@ -2,7 +2,7 @@ name: android_static_analysis
 version: "1.0.0"
 vertical: android
 description: "Comprehensive Android application security testing using Jadx decompilation, OpenGrep static analysis, and MobSF mobile security framework"
-author: "FuzzForge Team"
+author: "Crashwise Team"
 tags:
   - "android"
   - "mobile"

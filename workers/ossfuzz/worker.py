@@ -1,5 +1,5 @@
 """
-FuzzForge Vertical Worker: OSS-Fuzz Campaigns
+Crashwise Vertical Worker: OSS-Fuzz Campaigns
 
 This worker:
 1. Discovers workflows for the 'ossfuzz' vertical from mounted toolbox
@@ -226,7 +226,7 @@ async def main():
     max_concurrent_activities = int(os.getenv("MAX_CONCURRENT_ACTIVITIES", "2"))
 
     logger.info("=" * 60)
-    logger.info(f"FuzzForge Vertical Worker: {vertical}")
+    logger.info(f"Crashwise Vertical Worker: {vertical}")
     logger.info("=" * 60)
     logger.info(f"Temporal Address: {temporal_address}")
     logger.info(f"Temporal Namespace: {temporal_namespace}")

@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from fuzzforge_cli.llm_resolver import (
+from crashwise_cli.llm_resolver import (
     get_llm_client,
     get_litellm_config,
     check_provider_available,
@@ -16,13 +16,13 @@ from fuzzforge_cli.llm_resolver import (
     _get_env_credential,
     _resolve_credentials,
 )
-from fuzzforge_cli.policy import Policy, ProviderPolicy, FallbackPolicy
+from crashwise_cli.policy import Policy, ProviderPolicy, FallbackPolicy
 
 
 class TestGetOAuthToken:
     """Test OAuth token retrieval."""
 
-    @patch("fuzzforge_cli.llm_resolver.get_storage")
+    @patch("crashwise_cli.llm_resolver.get_storage")
     def test_get_oauth_token_success(self, mock_get_storage):
         """Test successful OAuth token retrieval."""
         mock_storage = Mock()
@@ -34,7 +34,7 @@ class TestGetOAuthToken:
         assert token == "oauth_token_123"
         mock_storage.retrieve_token.assert_called_once_with("openai_codex_oauth")
 
-    @patch("fuzzforge_cli.llm_resolver.get_storage")
+    @patch("crashwise_cli.llm_resolver.get_storage")
     def test_get_oauth_token_not_found(self, mock_get_storage):
         """Test OAuth token not found."""
         mock_storage = Mock()
@@ -45,7 +45,7 @@ class TestGetOAuthToken:
 
         assert token is None
 
-    @patch("fuzzforge_cli.llm_resolver.get_storage")
+    @patch("crashwise_cli.llm_resolver.get_storage")
     def test_get_oauth_token_unknown_provider(self, mock_get_storage):
         """Test OAuth token for unknown provider."""
         token = _get_oauth_token("unknown_provider")
@@ -84,8 +84,8 @@ class TestGetEnvCredential:
 class TestResolveCredentials:
     """Test credential resolution."""
 
-    @patch("fuzzforge_cli.llm_resolver._get_oauth_token")
-    @patch("fuzzforge_cli.llm_resolver.get_policy")
+    @patch("crashwise_cli.llm_resolver._get_oauth_token")
+    @patch("crashwise_cli.llm_resolver.get_policy")
     def test_resolve_oauth_credentials(self, mock_get_policy, mock_get_oauth):
         """Test resolving OAuth credentials."""
         mock_get_oauth.return_value = "oauth_token_123"
@@ -99,9 +99,9 @@ class TestResolveCredentials:
         assert base_url is None
         assert auth_method == "oauth"
 
-    @patch("fuzzforge_cli.llm_resolver._get_oauth_token")
-    @patch("fuzzforge_cli.llm_resolver._get_env_credential")
-    @patch("fuzzforge_cli.llm_resolver.get_policy")
+    @patch("crashwise_cli.llm_resolver._get_oauth_token")
+    @patch("crashwise_cli.llm_resolver._get_env_credential")
+    @patch("crashwise_cli.llm_resolver.get_policy")
     def test_resolve_env_credentials(
         self, mock_get_policy, mock_get_env, mock_get_oauth
     ):
@@ -120,8 +120,8 @@ class TestResolveCredentials:
         assert base_url == "https://api.example.com"
         assert auth_method == "env"
 
-    @patch("fuzzforge_cli.llm_resolver._get_oauth_token")
-    @patch("fuzzforge_cli.llm_resolver.get_policy")
+    @patch("crashwise_cli.llm_resolver._get_oauth_token")
+    @patch("crashwise_cli.llm_resolver.get_policy")
     def test_oauth_blocked_by_policy(self, mock_get_policy, mock_get_oauth):
         """Test OAuth blocked by policy."""
         mock_get_oauth.return_value = "oauth_token"
@@ -134,9 +134,9 @@ class TestResolveCredentials:
 
         assert "blocked by policy" in str(exc_info.value)
 
-    @patch("fuzzforge_cli.llm_resolver._get_oauth_token")
-    @patch("fuzzforge_cli.llm_resolver._get_env_credential")
-    @patch("fuzzforge_cli.llm_resolver.get_policy")
+    @patch("crashwise_cli.llm_resolver._get_oauth_token")
+    @patch("crashwise_cli.llm_resolver._get_env_credential")
+    @patch("crashwise_cli.llm_resolver.get_policy")
     def test_env_fallback_blocked(self, mock_get_policy, mock_get_env, mock_get_oauth):
         """Test env fallback blocked by policy."""
         mock_get_oauth.return_value = None
@@ -150,8 +150,8 @@ class TestResolveCredentials:
 
         assert "not available" in str(exc_info.value)
 
-    @patch("fuzzforge_cli.llm_resolver._get_oauth_token")
-    @patch("fuzzforge_cli.llm_resolver._get_env_credential")
+    @patch("crashwise_cli.llm_resolver._get_oauth_token")
+    @patch("crashwise_cli.llm_resolver._get_env_credential")
     def test_no_credentials_found(self, mock_get_env, mock_get_oauth):
         """Test error when no credentials found."""
         mock_get_oauth.return_value = None
@@ -166,7 +166,7 @@ class TestResolveCredentials:
 class TestGetLLMClient:
     """Test main get_llm_client function."""
 
-    @patch("fuzzforge_cli.llm_resolver._resolve_credentials")
+    @patch("crashwise_cli.llm_resolver._resolve_credentials")
     def test_get_client_with_explicit_params(self, mock_resolve):
         """Test getting client with explicit parameters."""
         mock_resolve.return_value = ("api_key", None, "oauth")
@@ -181,7 +181,7 @@ class TestGetLLMClient:
         assert config["auth_method"] == "oauth"
         assert config["workspace"] == "test_workspace"
 
-    @patch("fuzzforge_cli.llm_resolver._resolve_credentials")
+    @patch("crashwise_cli.llm_resolver._resolve_credentials")
     def test_get_client_defaults_from_env(self, mock_resolve):
         """Test getting client with defaults from environment."""
         mock_resolve.return_value = ("api_key", None, "env")
@@ -194,7 +194,7 @@ class TestGetLLMClient:
         assert config["provider"] == "anthropic"
         assert config["model"] == "claude-3-opus"
 
-    @patch("fuzzforge_cli.llm_resolver._resolve_credentials")
+    @patch("crashwise_cli.llm_resolver._resolve_credentials")
     def test_get_client_provider_defaults(self, mock_resolve):
         """Test provider-specific model defaults."""
         mock_resolve.return_value = ("api_key", None, "oauth")
@@ -207,7 +207,7 @@ class TestGetLLMClient:
         config = get_llm_client(provider="anthropic")
         assert config["model"] == "claude-3-opus-20240229"
 
-    @patch("fuzzforge_cli.llm_resolver._resolve_credentials")
+    @patch("crashwise_cli.llm_resolver._resolve_credentials")
     def test_api_key_never_logged(self, mock_resolve, caplog):
         """Verify API key is not logged."""
         import logging
@@ -224,7 +224,7 @@ class TestGetLLMClient:
 class TestGetLiteLLMConfig:
     """Test LiteLLM-compatible configuration."""
 
-    @patch("fuzzforge_cli.llm_resolver._resolve_credentials")
+    @patch("crashwise_cli.llm_resolver._resolve_credentials")
     def test_litellm_config_format(self, mock_resolve):
         """Test LiteLLM configuration format."""
         mock_resolve.return_value = ("api_key", "https://api.example.com", "oauth")
@@ -235,7 +235,7 @@ class TestGetLiteLLMConfig:
         assert config["api_key"] == "api_key"
         assert config["api_base"] == "https://api.example.com"
 
-    @patch("fuzzforge_cli.llm_resolver._resolve_credentials")
+    @patch("crashwise_cli.llm_resolver._resolve_credentials")
     def test_litellm_config_no_base_url(self, mock_resolve):
         """Test LiteLLM config without base URL."""
         mock_resolve.return_value = ("api_key", None, "oauth")
@@ -249,7 +249,7 @@ class TestGetLiteLLMConfig:
 class TestCheckProviderAvailable:
     """Test provider availability checking."""
 
-    @patch("fuzzforge_cli.llm_resolver._get_oauth_token")
+    @patch("crashwise_cli.llm_resolver._get_oauth_token")
     def test_provider_available_via_oauth(self, mock_get_oauth):
         """Test provider available via OAuth."""
         mock_get_oauth.return_value = "oauth_token"
@@ -259,8 +259,8 @@ class TestCheckProviderAvailable:
         assert available
         assert reason is None
 
-    @patch("fuzzforge_cli.llm_resolver._get_oauth_token")
-    @patch("fuzzforge_cli.llm_resolver._get_env_credential")
+    @patch("crashwise_cli.llm_resolver._get_oauth_token")
+    @patch("crashwise_cli.llm_resolver._get_env_credential")
     def test_provider_available_via_env(self, mock_get_env, mock_get_oauth):
         """Test provider available via env vars."""
         mock_get_oauth.return_value = None
@@ -274,8 +274,8 @@ class TestCheckProviderAvailable:
         # But we can check that the function runs without error
         assert isinstance(available, bool)
 
-    @patch("fuzzforge_cli.llm_resolver._get_oauth_token")
-    @patch("fuzzforge_cli.llm_resolver._get_env_credential")
+    @patch("crashwise_cli.llm_resolver._get_oauth_token")
+    @patch("crashwise_cli.llm_resolver._get_env_credential")
     def test_provider_not_available(self, mock_get_env, mock_get_oauth):
         """Test provider not available."""
         mock_get_oauth.return_value = None
@@ -290,7 +290,7 @@ class TestCheckProviderAvailable:
 class TestListAvailableProviders:
     """Test listing available providers."""
 
-    @patch("fuzzforge_cli.llm_resolver.check_provider_available")
+    @patch("crashwise_cli.llm_resolver.check_provider_available")
     def test_list_providers(self, mock_check):
         """Test listing all providers."""
         mock_check.return_value = (True, None)
@@ -307,7 +307,7 @@ class TestListAvailableProviders:
         for provider_id, info in providers.items():
             assert "available" in info
 
-    @patch("fuzzforge_cli.llm_resolver.check_provider_available")
+    @patch("crashwise_cli.llm_resolver.check_provider_available")
     def test_list_providers_with_unavailable(self, mock_check):
         """Test listing with some unavailable providers."""
 
@@ -332,7 +332,7 @@ class TestSecurity:
         # This is enforced by never logging or stringifying the token
         pass  # This is a design principle, tested indirectly
 
-    @patch("fuzzforge_cli.llm_resolver._resolve_credentials")
+    @patch("crashwise_cli.llm_resolver._resolve_credentials")
     def test_config_does_not_expose_token_in_str(self, mock_resolve):
         """Test that config dict stringification doesn't expose token."""
         mock_resolve.return_value = ("secret_token_12345", None, "oauth")

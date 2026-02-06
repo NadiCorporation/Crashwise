@@ -1,6 +1,6 @@
-# Docker Requirements for FuzzForge
+# Docker Requirements for Crashwise
 
-FuzzForge runs entirely in Docker containers with Temporal orchestration. This guide covers system requirements, worker profiles, and resource management to help you run FuzzForge efficiently.
+Crashwise runs entirely in Docker containers with Temporal orchestration. This guide covers system requirements, worker profiles, and resource management to help you run Crashwise efficiently.
 
 ---
 
@@ -29,7 +29,7 @@ docker compose version
 
 ### Port Requirements
 
-FuzzForge services use these ports (must be available):
+Crashwise services use these ports (must be available):
 
 | Port | Service | Purpose |
 |------|---------|---------|
@@ -46,7 +46,7 @@ Check for port conflicts:
 # macOS/Linux
 lsof -i :8000,8080,7233,9000,9001,5432
 
-# Or just try starting FuzzForge
+# Or just try starting Crashwise
 docker compose -f docker-compose.yml up -d
 ```
 
@@ -54,7 +54,7 @@ docker compose -f docker-compose.yml up -d
 
 ## Worker Profiles (Resource Optimization)
 
-FuzzForge uses Docker Compose **profiles** to prevent workers from auto-starting. This saves 5-7GB of RAM by only running workers when needed.
+Crashwise uses Docker Compose **profiles** to prevent workers from auto-starting. This saves 5-7GB of RAM by only running workers when needed.
 
 ### Profile Configuration
 
@@ -95,17 +95,17 @@ Workers remain stopped until needed.
 
 ### On-Demand Worker Startup
 
-When you run a workflow via the CLI, FuzzForge automatically starts the required worker:
+When you run a workflow via the CLI, Crashwise automatically starts the required worker:
 
 ```bash
 # Automatically starts worker-python
-fuzzforge workflow run atheris_fuzzing ./project
+crashwise workflow run atheris_fuzzing ./project
 
 # Automatically starts worker-rust
-fuzzforge workflow run cargo_fuzzing ./rust-project
+crashwise workflow run cargo_fuzzing ./rust-project
 
 # Automatically starts worker-secrets
-fuzzforge workflow run secret_detection ./codebase
+crashwise workflow run secret_detection ./codebase
 ```
 
 ### Manual Worker Management
@@ -120,32 +120,32 @@ fuzzforge workflow run secret_detection ./codebase
 | `ossfuzz_campaign` | worker-ossfuzz | `docker compose up -d worker-ossfuzz` |
 | `llm_secret_detection`, `trufflehog_detection`, `gitleaks_detection` | worker-secrets | `docker compose up -d worker-secrets` |
 
-FuzzForge CLI provides convenient commands for managing workers:
+Crashwise CLI provides convenient commands for managing workers:
 
 ```bash
 # List all workers and their status
-ff worker list
-ff worker list --all  # Include stopped workers
+cw worker list
+cw worker list --all  # Include stopped workers
 
 # Start a specific worker
-ff worker start python
-ff worker start android --build  # Rebuild before starting
+cw worker start python
+cw worker start android --build  # Rebuild before starting
 
 # Stop all workers
-ff worker stop
+cw worker stop
 ```
 
 You can also use Docker commands directly:
 
 ```bash
 # Start a single worker
-docker start fuzzforge-worker-python
+docker start crashwise-worker-python
 
 # Start all workers at once (uses more RAM)
 docker compose --profile workers up -d
 
 # Stop a worker to free resources
-docker stop fuzzforge-worker-ossfuzz
+docker stop crashwise-worker-ossfuzz
 ```
 
 ### Stopping Workers Properly
@@ -154,7 +154,7 @@ The easiest way to stop workers is using the CLI:
 
 ```bash
 # Stop all running workers (recommended)
-ff worker stop
+cw worker stop
 ```
 
 This command safely stops all worker containers without affecting core services.
@@ -163,7 +163,7 @@ Alternatively, you can use Docker commands:
 
 ```bash
 # Stop individual worker
-docker stop fuzzforge-worker-python
+docker stop crashwise-worker-python
 
 # Stop all workers using docker compose
 # Note: This requires the --profile flag because workers are in profiles
@@ -173,15 +173,15 @@ docker compose down --profile workers
 **Important:** Workers use Docker Compose profiles to prevent auto-starting. When using Docker commands directly:
 - `docker compose down` (without `--profile workers`) does NOT stop workers
 - Workers remain running unless explicitly stopped with the profile flag or `docker stop`
-- Use `ff worker stop` for the safest option that won't affect core services
+- Use `cw worker stop` for the safest option that won't affect core services
 
 ### Resource Comparison
 
 | Command | Workers Started | RAM Usage |
 |---------|----------------|-----------|
 | `docker compose up -d` | None (core only) | ~1.2 GB |
-| `fuzzforge workflow run atheris_fuzzing .` | Python worker only | ~2-3 GB |
-| `fuzzforge workflow run ossfuzz_campaign .` | OSS-Fuzz worker only | ~3-5 GB |
+| `crashwise workflow run atheris_fuzzing .` | Python worker only | ~2-3 GB |
+| `crashwise workflow run ossfuzz_campaign .` | OSS-Fuzz worker only | ~3-5 GB |
 | `docker compose --profile workers up -d` | All workers | ~8 GB |
 
 ---
@@ -190,17 +190,17 @@ docker compose down --profile workers
 
 ### Docker Volume Cleanup
 
-FuzzForge creates Docker volumes for persistent data. Clean them up periodically:
+Crashwise creates Docker volumes for persistent data. Clean them up periodically:
 
 ```bash
 # Remove unused volumes (safe - keeps volumes for running containers)
 docker volume prune
 
-# List FuzzForge volumes
-docker volume ls | grep fuzzforge
+# List Crashwise volumes
+docker volume ls | grep crashwise
 
 # Remove specific volume (WARNING: deletes data)
-docker volume rm fuzzforge_minio-data
+docker volume rm crashwise_minio-data
 ```
 
 ### Cache Directory
@@ -209,17 +209,17 @@ Workers use `/cache` inside containers for downloaded targets. This is managed a
 
 ```bash
 # Check cache usage in a worker
-docker exec fuzzforge-worker-python du -sh /cache
+docker exec crashwise-worker-python du -sh /cache
 
 # Clear cache manually if needed (safe - will re-download targets)
-docker exec fuzzforge-worker-python rm -rf /cache/*
+docker exec crashwise-worker-python rm -rf /cache/*
 ```
 
 ---
 
 ## Environment Configuration
 
-FuzzForge requires `volumes/env/.env` to start. This file contains API keys and configuration:
+Crashwise requires `volumes/env/.env` to start. This file contains API keys and configuration:
 
 ```bash
 # Copy the example file
@@ -290,4 +290,4 @@ docker compose pull
 
 ---
 
-**Remember:** FuzzForge's on-demand worker startup saves resources. You don't need to manually manage workers - the CLI does it automatically!
+**Remember:** Crashwise's on-demand worker startup saves resources. You don't need to manually manage workers - the CLI does it automatically!

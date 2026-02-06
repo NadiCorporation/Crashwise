@@ -184,7 +184,7 @@ jobs:
   #       env:
   #         POSTGRES_USER: postgres
   #         POSTGRES_PASSWORD: postgres
-  #         POSTGRES_DB: fuzzforge_test
+  #         POSTGRES_DB: crashwise_test
   #       options: >-
   #         --health-cmd pg_isready
   #         --health-interval 10s
@@ -221,7 +221,7 @@ jobs:
   #       run: |
   #         pytest tests/integration/ -v --tb=short
   #       env:
-  #         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fuzzforge_test
+  #         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/crashwise_test
   #         TEMPORAL_ADDRESS: localhost:7233
   #         MINIO_ENDPOINT: localhost:9000
   #

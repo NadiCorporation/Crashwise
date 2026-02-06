@@ -23,10 +23,10 @@ This pattern is analogous to:
 
 ## How to Fuzz
 
-### Using FuzzForge CLI
+### Using Crashwise CLI
 
 ```bash
-# Initialize FuzzForge in this directory
+# Initialize Crashwise in this directory
 cd test_projects/python_fuzz_waterfall/
 ff init
 
@@ -42,13 +42,13 @@ ff workflow run atheris_fuzzing .
 # 6. Finds crash when "FUZZINGLABS" is discovered
 ```
 
-### Using FuzzForge SDK
+### Using Crashwise SDK
 
 ```python
-from fuzzforge_sdk import FuzzForgeClient
+from crashwise_sdk import CrashwiseClient
 from pathlib import Path
 
-client = FuzzForgeClient(base_url="http://localhost:8000")
+client = CrashwiseClient(base_url="http://localhost:8000")
 
 # Upload and run fuzzing
 response = client.submit_workflow_with_upload(
@@ -71,7 +71,7 @@ for finding in findings:
     print(f"Input: {finding.metadata.get('crash_input_hex')}")
 ```
 
-### Standalone (Without FuzzForge)
+### Standalone (Without Crashwise)
 
 ```bash
 # Install Atheris
@@ -98,7 +98,7 @@ When fuzzing:
 Watch real-time fuzzing stats:
 
 ```bash
-docker logs fuzzforge-worker-python -f | grep LIVE_STATS
+docker logs crashwise-worker-python -f | grep LIVE_STATS
 ```
 
 Output example:

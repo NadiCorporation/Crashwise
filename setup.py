@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 """
-FuzzForge Setup Script - One-command setup for development
+Crashwise Setup Script - One-command setup for development
 
-This script automates the entire FuzzForge development setup process,
+This script automates the entire Crashwise development setup process,
 from checking prerequisites to running your first security scan.
 """
 
@@ -38,8 +31,8 @@ class Colors:
     END = '\033[0m'
 
 
-class FuzzForgeSetup:
-    """Automated FuzzForge development environment setup"""
+class CrashwiseSetup:
+    """Automated Crashwise development environment setup"""
 
     def __init__(self):
         self.system = platform.system().lower()
@@ -51,11 +44,11 @@ class FuzzForgeSetup:
         """Print welcome header"""
         print(f"""{Colors.CYAN}{Colors.BOLD}
 ╔══════════════════════════════════════════╗
-║           FuzzForge Setup Script           ║
+║           Crashwise Setup Script           ║
 ║       Automated Development Setup        ║
 ╚══════════════════════════════════════════╝
 {Colors.END}""")
-        print(f"{Colors.WHITE}Welcome to FuzzForge! This script will set up your development environment.{Colors.END}\n")
+        print(f"{Colors.WHITE}Welcome to Crashwise! This script will set up your development environment.{Colors.END}\n")
 
     def run_command(self, command: str, description: str, critical: bool = True) -> Tuple[bool, str]:
         """Run a shell command and return success status and output"""
@@ -158,7 +151,7 @@ class FuzzForgeSetup:
             print(f"{Colors.YELLOW}⚠️  Docker daemon is not running. Please start Docker Desktop and try again.{Colors.END}")
             return False
 
-        # Start FuzzForge services
+        # Start Crashwise services
         os.chdir(self.project_root)
 
         # Warning about first launch
@@ -166,7 +159,7 @@ class FuzzForgeSetup:
         print(f"{Colors.CYAN}   Subsequent starts will be much faster!{Colors.END}\n")
 
         # Build and start services
-        print(f"{Colors.YELLOW}🔨 Building and starting FuzzForge services (this may take a while)...{Colors.END}")
+        print(f"{Colors.YELLOW}🔨 Building and starting Crashwise services (this may take a while)...{Colors.END}")
 
         # Use longer timeout for Docker build (10 minutes)
         try:
@@ -200,7 +193,7 @@ class FuzzForgeSetup:
             time.sleep(1)
             health_success, _ = self.run_command("curl -s http://localhost:8000/health", "Health check", critical=False)
             if health_success:
-                print(f"\n{Colors.GREEN}✅ FuzzForge API is ready at http://localhost:8000!{Colors.END}")
+                print(f"\n{Colors.GREEN}✅ Crashwise API is ready at http://localhost:8000!{Colors.END}")
                 return True
             if i % 10 == 0:  # Print progress every 10 seconds
                 print(f"\n{Colors.CYAN}   Still starting... ({i+1}s){Colors.END}")
@@ -212,8 +205,8 @@ class FuzzForgeSetup:
         return True
 
     def install_cli(self) -> bool:
-        """Install FuzzForge CLI"""
-        print(f"\n{Colors.BOLD}💻 Step 3: Installing FuzzForge CLI (Final Step){Colors.END}\n")
+        """Install Crashwise CLI"""
+        print(f"\n{Colors.BOLD}💻 Step 3: Installing Crashwise CLI (Final Step){Colors.END}\n")
 
         cli_dir = self.project_root / "cli"
         if not cli_dir.exists():
@@ -221,7 +214,7 @@ class FuzzForgeSetup:
             return False
 
         # Install from root, pointing to the 'cli' directory
-        success, _ = self.run_command("uv tool install --python python3.12 .", "Installing FuzzForge CLI with Python 3.12")
+        success, _ = self.run_command("uv tool install --python python3.12 .", "Installing Crashwise CLI with Python 3.12")
 
         return success
 
@@ -231,7 +224,7 @@ class FuzzForgeSetup:
 
         if not self.errors:
             print(f"""
-{Colors.CYAN}🚀 FuzzForge is now ready! Here's what you can do next:{Colors.END}
+{Colors.CYAN}🚀 Crashwise is now ready! Here's what you can do next:{Colors.END}
 
 {Colors.BOLD}📖 Learn More:{Colors.END}
   • {Colors.BLUE}docs/QUICKSTART.md{Colors.END} - 5-minute module creation tutorial
@@ -240,11 +233,11 @@ class FuzzForgeSetup:
 
 {Colors.BOLD}🔍 Try Some Commands:{Colors.END}
   • {Colors.WHITE}cd test_projects/vulnerable_app{Colors.END} - Navigate to test project
-  • {Colors.WHITE}fuzzforge init{Colors.END} - Initialize a FuzzForge project
-  • {Colors.WHITE}ff workflow security_assessment .{Colors.END} - Run security assessment
-  • {Colors.WHITE}ff workflow secret_detection_scan .{Colors.END} - Run secret detection
-  • {Colors.WHITE}fuzzforge status{Colors.END} - Check project and workflow status
-  • {Colors.WHITE}fuzzforge --help{Colors.END} - See all available commands
+  • {Colors.WHITE}crashwise init{Colors.END} - Initialize a Crashwise project
+  • {Colors.WHITE}cw workflow security_assessment .{Colors.END} - Run security assessment
+  • {Colors.WHITE}cw workflow secret_detection_scan .{Colors.END} - Run secret detection
+  • {Colors.WHITE}crashwise status{Colors.END} - Check project and workflow status
+  • {Colors.WHITE}crashwise --help{Colors.END} - See all available commands
 
 {Colors.BOLD}🔧 Available Workflows:{Colors.END}
   • {Colors.CYAN}security_assessment{Colors.END} - Comprehensive security scanning
@@ -294,7 +287,7 @@ class FuzzForgeSetup:
 
 def main():
     """Main entry point"""
-    setup = FuzzForgeSetup()
+    setup = CrashwiseSetup()
 
     try:
         success = setup.run()

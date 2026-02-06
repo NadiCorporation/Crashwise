@@ -1,12 +1,12 @@
-# Understanding Workflows in FuzzForge
+# Understanding Workflows in Crashwise
 
-Workflows are the backbone of FuzzForge’s security analysis platform. If you want to get the most out of FuzzForge, it’s essential to understand what workflows are, how they’re designed, and how they operate from start to finish. This page explains the core concepts, design principles, and execution models behind FuzzForge workflows—so you can use them confidently and effectively.
+Workflows are the backbone of Crashwise’s security analysis platform. If you want to get the most out of Crashwise, it’s essential to understand what workflows are, how they’re designed, and how they operate from start to finish. This page explains the core concepts, design principles, and execution models behind Crashwise workflows—so you can use them confidently and effectively.
 
 ---
 
 ## What Is a Workflow?
 
-A **workflow** in FuzzForge is a containerized process that orchestrates one or more security tools to analyze a target codebase or application. Each workflow is tailored for a specific type of security analysis (like static analysis, secret detection, or fuzzing) and is designed to be:
+A **workflow** in Crashwise is a containerized process that orchestrates one or more security tools to analyze a target codebase or application. Each workflow is tailored for a specific type of security analysis (like static analysis, secret detection, or fuzzing) and is designed to be:
 
 - **Isolated:** Runs in its own Docker container for security and reproducibility.
 - **Integrated:** Can combine multiple tools for comprehensive results.
@@ -20,11 +20,11 @@ A **workflow** in FuzzForge is a containerized process that orchestrates one or 
 
 ### High-Level Architecture
 
-Here’s how a workflow moves through the FuzzForge system:
+Here’s how a workflow moves through the Crashwise system:
 
 ```mermaid
 graph TB
-    User[User/CLI/API] --> API[FuzzForge API]
+    User[User/CLI/API] --> API[Crashwise API]
     API --> MinIO[MinIO Storage]
     API --> Temporal[Temporal Orchestrator]
     Temporal --> Worker[Vertical Worker]
@@ -36,7 +36,7 @@ graph TB
 
 **Key roles:**
 - **User/CLI/API:** Submits workflows and uploads files.
-- **FuzzForge API:** Validates, uploads targets, and tracks workflows.
+- **Crashwise API:** Validates, uploads targets, and tracks workflows.
 - **Temporal Orchestrator:** Schedules and manages workflow execution.
 - **Vertical Worker:** Long-lived worker with pre-installed security tools.
 - **MinIO Storage:** Stores uploaded targets and results.
@@ -55,7 +55,7 @@ graph TB
 
 ## Types of Workflows
 
-FuzzForge supports several workflow types, each optimized for a specific security need:
+Crashwise supports several workflow types, each optimized for a specific security need:
 
 - **Static Analysis:** Examines source code without running it (e.g., Semgrep, Bandit).
 - **Dynamic Analysis:** Tests running applications for runtime vulnerabilities (e.g., OWASP ZAP, Nuclei).
@@ -126,4 +126,4 @@ FuzzForge supports several workflow types, each optimized for a specific securit
 
 ## In Summary
 
-Workflows in FuzzForge are designed to be robust, flexible, and easy to integrate into your security and development processes. By combining containerization, orchestration, and a standardized interface, FuzzForge workflows help you automate and scale security analysis—so you can focus on fixing issues, not just finding them.
+Workflows in Crashwise are designed to be robust, flexible, and easy to integrate into your security and development processes. By combining containerization, orchestration, and a standardized interface, Crashwise workflows help you automate and scale security analysis—so you can focus on fixing issues, not just finding them.

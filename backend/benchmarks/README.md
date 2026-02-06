@@ -1,4 +1,4 @@
-# FuzzForge Benchmark Suite
+# Crashwise Benchmark Suite
 
 Performance benchmarking infrastructure organized by module category.
 

@@ -1,7 +1,7 @@
 """
 Atheris fuzzing target for the waterfall vulnerability.
 
-This file is automatically discovered by FuzzForge's AtherisFuzzer module.
+This file is automatically discovered by Crashwise's AtherisFuzzer module.
 The fuzzer looks for files named: fuzz_*.py, *_fuzz.py, or fuzz_target.py
 """
 

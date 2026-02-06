@@ -2,16 +2,9 @@
 LLM Analysis Workflow Activities
 """
 
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 import logging
 from pathlib import Path
@@ -54,7 +47,7 @@ async def llm_generate_sarif(findings: list, metadata: Dict[str, Any]) -> Dict[s
                     "driver": {
                         "name": metadata.get("tool_name", "llm-analyzer"),
                         "version": metadata.get("tool_version", "1.0.0"),
-                        "informationUri": "https://github.com/FuzzingLabs/fuzzforge_ai"
+                        "informationUri": "https://github.com/Crashwise/crashwise_ai"
                     }
                 },
                 "results": []

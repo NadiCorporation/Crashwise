@@ -1,4 +1,4 @@
-# FuzzForge LiteLLM Proxy Configuration
+# Crashwise LiteLLM Proxy Configuration
 
 This directory contains configuration for the LiteLLM proxy with model-agnostic virtual keys.
 
@@ -59,21 +59,21 @@ Registered models in `volumes/litellm/proxy_config.yaml`:
 ### Use Registered Aliases:
 
 ```bash
-fuzzforge workflow run llm_secret_detection . -n llm_model=gpt-5-mini
-fuzzforge workflow run llm_secret_detection . -n llm_model=claude-sonnet-4-5
+crashwise workflow run llm_secret_detection . -n llm_model=gpt-5-mini
+crashwise workflow run llm_secret_detection . -n llm_model=claude-sonnet-4-5
 ```
 
 ### Use Any Model (Direct):
 
 ```bash
 # Works without registering first!
-fuzzforge workflow run llm_secret_detection . -n llm_model=openai/gpt-5-nano
+crashwise workflow run llm_secret_detection . -n llm_model=openai/gpt-5-nano
 ```
 
 ## Proxy UI
 
 http://localhost:10999/ui
-- User: `fuzzforge` / Pass: `fuzzforge123`
+- User: `crashwise` / Pass: `crashwise123`
 
 ## Troubleshooting
 

@@ -1,19 +1,19 @@
 [project]
-name = "fuzzforge"
+name = "crashwise"
 version = "0.7.3"
-description = "FuzzForge Platform - Complete fuzzing and security testing platform with AI capabilities"
+description = "Crashwise Platform - Complete fuzzing and security testing platform with AI capabilities"
 readme = "README.md"
-license = { text = "BSL-1.1" }
+license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
-    "fuzzforge-sdk",
-    "fuzzforge-ai",
-    "fuzzforge-cli",
+    "crashwise-sdk",
+    "crashwise",
+    "crashwise-cli",
 ]
 
 [project.scripts]
-fuzzforge = "fuzzforge_cli.main:main"
-ff = "fuzzforge_cli.main:main"
+cw = "crashwise_cli.main:main"
+crashwise = "crashwise_cli.main:main"
 
 [build-system]
 requires = ["uv_build>=0.8.22,<0.9.0"]
@@ -23,6 +23,6 @@ build-backend = "uv_build"
 packages = []
 
 [tool.uv.sources]
-fuzzforge-sdk = { path = "./sdk", editable = true }
-fuzzforge-ai = { path = "./ai", editable = true }
-fuzzforge-cli = { path = "./cli", editable = true }
+crashwise-sdk = { path = "./sdk", editable = true }
+crashwise = { path = "./ai", editable = true }
+crashwise-cli = { path = "./cli", editable = true }

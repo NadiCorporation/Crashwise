@@ -14,6 +14,6 @@ def mock_console():
 @pytest.fixture
 def temp_config_dir(tmp_path):
     """Create temporary config directory."""
-    config_dir = tmp_path / ".fuzzforge"
+    config_dir = tmp_path / ".crashwise"
     config_dir.mkdir()
     return config_dir

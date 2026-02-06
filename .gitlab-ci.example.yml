@@ -1,11 +1,11 @@
-# FuzzForge CI/CD Example - GitLab CI
+# Crashwise CI/CD Example - GitLab CI
 #
-# This file demonstrates how to integrate FuzzForge into your GitLab CI/CD pipeline.
+# This file demonstrates how to integrate Crashwise into your GitLab CI/CD pipeline.
 # Copy this to `.gitlab-ci.yml` in your project root to enable security scanning.
 #
 # Features:
 #   - Runs entirely in GitLab runners (no external infrastructure)
-#   - Auto-starts FuzzForge services on-demand
+#   - Auto-starts Crashwise services on-demand
 #   - Fails pipelines on critical/high severity findings
 #   - Uploads SARIF reports to GitLab Security Dashboard
 #   - Exports findings as artifacts
@@ -19,31 +19,31 @@ stages:
   - security
 
 variables:
-  FUZZFORGE_API_URL: "http://localhost:8000"
+  CRASHWISE_API_URL: "http://localhost:8000"
   DOCKER_DRIVER: overlay2
   DOCKER_TLS_CERTDIR: ""
 
-# Base template for all FuzzForge jobs
-.fuzzforge_template:
+# Base template for all Crashwise jobs
+.crashwise_template:
   image: docker:24
   services:
     - docker:24-dind
   before_script:
     # Install dependencies
     - apk add --no-cache bash curl python3 py3-pip git
-    # Start FuzzForge
+    # Start Crashwise
     - bash scripts/ci-start.sh
     # Install CLI
     - pip3 install ./cli --break-system-packages
     # Initialize project
-    - ff init --api-url $FUZZFORGE_API_URL --name "GitLab CI Security Scan"
+    - ff init --api-url $CRASHWISE_API_URL --name "GitLab CI Security Scan"
   after_script:
     # Cleanup
     - bash scripts/ci-stop.sh || true
 
 # Security Assessment - Comprehensive code analysis
 security:scan:
-  extends: .fuzzforge_template
+  extends: .crashwise_template
   stage: security
   timeout: 30 minutes
   script:
@@ -62,7 +62,7 @@ security:scan:
 
 # Secret Detection - Scan for exposed credentials
 security:secrets:
-  extends: .fuzzforge_template
+  extends: .crashwise_template
   stage: security
   timeout: 15 minutes
   script:
@@ -78,7 +78,7 @@ security:secrets:
 
 # Nightly Fuzzing - Long-running fuzzing campaign (scheduled only)
 security:fuzzing:
-  extends: .fuzzforge_template
+  extends: .crashwise_template
   stage: security
   timeout: 2 hours
   script:
@@ -99,7 +99,7 @@ security:fuzzing:
 
 # OSS-Fuzz Campaign (for supported projects)
 security:ossfuzz:
-  extends: .fuzzforge_template
+  extends: .crashwise_template
   stage: security
   timeout: 1 hour
   script:

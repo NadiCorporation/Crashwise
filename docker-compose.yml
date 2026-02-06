@@ -1,4 +1,4 @@
-# FuzzForge AI - Temporal Architecture with Vertical Workers
+# Crashwise AI - Temporal Architecture with Vertical Workers
 #
 # This is the new architecture using:
 # - Temporal for workflow orchestration
@@ -15,7 +15,7 @@ services:
   # ============================================================================
   temporal:
     image: temporalio/auto-setup:latest
-    container_name: fuzzforge-temporal
+    container_name: crashwise-temporal
     depends_on:
       - postgresql
     ports:
@@ -36,7 +36,7 @@ services:
     volumes:
       - temporal_data:/etc/temporal
     networks:
-      - fuzzforge-network
+      - crashwise-network
     healthcheck:
       test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
       interval: 10s
@@ -49,7 +49,7 @@ services:
   # ============================================================================
   temporal-ui:
     image: temporalio/ui:latest
-    container_name: fuzzforge-temporal-ui
+    container_name: crashwise-temporal-ui
     depends_on:
       - temporal
     ports:
@@ -58,7 +58,7 @@ services:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:8080
     networks:
-      - fuzzforge-network
+      - crashwise-network
     restart: unless-stopped
 
   # ============================================================================
@@ -66,7 +66,7 @@ services:
   # ============================================================================
   postgresql:
     image: postgres:14-alpine
-    container_name: fuzzforge-temporal-postgresql
+    container_name: crashwise-temporal-postgresql
     environment:
       POSTGRES_USER: temporal
       POSTGRES_PASSWORD: temporal
@@ -74,7 +74,7 @@ services:
     volumes:
       - temporal_postgres:/var/lib/postgresql/data
     networks:
-      - fuzzforge-network
+      - crashwise-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U temporal"]
       interval: 5s
@@ -87,20 +87,20 @@ services:
   # ============================================================================
   minio:
     image: minio/minio:latest
-    container_name: fuzzforge-minio
+    container_name: crashwise-minio
     command: server /data --console-address ":9001"
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # Web Console (http://localhost:9001)
     environment:
-      MINIO_ROOT_USER: fuzzforge
-      MINIO_ROOT_PASSWORD: fuzzforge123
+      MINIO_ROOT_USER: crashwise
+      MINIO_ROOT_PASSWORD: crashwise123
       # Lightweight mode for development (reduces memory to 256MB)
       MINIO_CI_CD: "true"
     volumes:
       - minio_data:/data
     networks:
-      - fuzzforge-network
+      - crashwise-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
@@ -113,7 +113,7 @@ services:
   # ============================================================================
   minio-setup:
     image: minio/mc:latest
-    container_name: fuzzforge-minio-setup
+    container_name: crashwise-minio-setup
     depends_on:
       minio:
         condition: service_healthy
@@ -123,33 +123,33 @@ services:
       sleep 2;
 
       echo 'Setting up MinIO alias...';
-      mc alias set fuzzforge http://minio:9000 fuzzforge fuzzforge123;
+      mc alias set crashwise http://minio:9000 crashwise crashwise123;
 
       echo 'Creating buckets...';
-      mc mb fuzzforge/targets --ignore-existing;
-      mc mb fuzzforge/results --ignore-existing;
-      mc mb fuzzforge/cache --ignore-existing;
+      mc mb crashwise/targets --ignore-existing;
+      mc mb crashwise/results --ignore-existing;
+      mc mb crashwise/cache --ignore-existing;
 
       echo 'Setting lifecycle policies...';
-      mc ilm add fuzzforge/targets --expiry-days 7;
-      mc ilm add fuzzforge/results --expiry-days 30;
-      mc ilm add fuzzforge/cache --expiry-days 3;
+      mc ilm add crashwise/targets --expiry-days 7;
+      mc ilm add crashwise/results --expiry-days 30;
+      mc ilm add crashwise/cache --expiry-days 3;
 
       echo 'Setting access policies...';
-      mc anonymous set download fuzzforge/results;
+      mc anonymous set download crashwise/results;
 
       echo 'MinIO setup complete!';
       exit 0;
       "
     networks:
-      - fuzzforge-network
+      - crashwise-network
 
   # ============================================================================
   # LLM Proxy - LiteLLM Gateway
   # ============================================================================
   llm-proxy:
     image: ghcr.io/berriai/litellm:main-stable
-    container_name: fuzzforge-llm-proxy
+    container_name: crashwise-llm-proxy
     depends_on:
       llm-proxy-db:
         condition: service_healthy
@@ -161,8 +161,8 @@ services:
       PORT: 4000
       DATABASE_URL: postgresql://litellm:litellm@llm-proxy-db:5432/litellm
       STORE_MODEL_IN_DB: "True"
-      UI_USERNAME: ${UI_USERNAME:-fuzzforge}
-      UI_PASSWORD: ${UI_PASSWORD:-fuzzforge123}
+      UI_USERNAME: ${UI_USERNAME:-crashwise}
+      UI_PASSWORD: ${UI_PASSWORD:-crashwise123}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       ANTHROPIC_API_KEY: ${LITELLM_ANTHROPIC_API_KEY:-}
@@ -176,7 +176,7 @@ services:
       - litellm_proxy_data:/var/lib/litellm
       - ./volumes/litellm/proxy_config.yaml:/etc/litellm/proxy_config.yaml:ro
     networks:
-      - fuzzforge-network
+      - crashwise-network
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 http://localhost:4000/health/liveliness || exit 1"]
       interval: 30s
@@ -187,7 +187,7 @@ services:
 
   otel-collector:
     image: otel/opentelemetry-collector:latest
-    container_name: fuzzforge-otel-collector
+    container_name: crashwise-otel-collector
     command: ["--config=/etc/otel-collector/config.yaml"]
     volumes:
       - ./volumes/otel/collector-config.yaml:/etc/otel-collector/config.yaml:ro
@@ -195,12 +195,12 @@ services:
       - "4317:4317"
       - "4318:4318"
     networks:
-      - fuzzforge-network
+      - crashwise-network
     restart: unless-stopped
 
   llm-proxy-db:
     image: postgres:16
-    container_name: fuzzforge-llm-proxy-db
+    container_name: crashwise-llm-proxy-db
     environment:
       POSTGRES_DB: litellm
       POSTGRES_USER: litellm
@@ -213,7 +213,7 @@ services:
     volumes:
       - litellm_proxy_db:/var/lib/postgresql/data
     networks:
-      - fuzzforge-network
+      - crashwise-network
     restart: unless-stopped
 
   # ============================================================================
@@ -221,7 +221,7 @@ services:
   # ============================================================================
   llm-proxy-bootstrap:
     image: python:3.11-slim
-    container_name: fuzzforge-llm-proxy-bootstrap
+    container_name: crashwise-llm-proxy-bootstrap
     depends_on:
       llm-proxy:
         condition: service_started
@@ -230,14 +230,14 @@ services:
     environment:
       PROXY_BASE_URL: http://llm-proxy:4000
       ENV_FILE_PATH: /bootstrap/env/.env
-      UI_USERNAME: ${UI_USERNAME:-fuzzforge}
-      UI_PASSWORD: ${UI_PASSWORD:-fuzzforge123}
+      UI_USERNAME: ${UI_USERNAME:-crashwise}
+      UI_PASSWORD: ${UI_PASSWORD:-crashwise123}
     volumes:
       - ./docker/scripts/bootstrap_llm_proxy.py:/app/bootstrap.py:ro
       - ./volumes/env:/bootstrap/env
       - litellm_proxy_data:/bootstrap/data
     networks:
-      - fuzzforge-network
+      - crashwise-network
     command: ["python", "/app/bootstrap.py"]
     restart: "no"
 
@@ -250,7 +250,7 @@ services:
     build:
       context: ./workers/rust
       dockerfile: Dockerfile
-    container_name: fuzzforge-worker-rust
+    container_name: crashwise-worker-rust
     profiles:
       - workers
       - rust
@@ -274,8 +274,8 @@ services:
       # Storage configuration (MinIO)
       STORAGE_BACKEND: s3
       S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: fuzzforge
-      S3_SECRET_KEY: fuzzforge123
+      S3_ACCESS_KEY: crashwise
+      S3_SECRET_KEY: crashwise123
       S3_BUCKET: targets
       S3_REGION: us-east-1
       S3_USE_SSL: "false"
@@ -294,7 +294,7 @@ services:
       # Worker cache for downloaded targets
       - worker_rust_cache:/cache
     networks:
-      - fuzzforge-network
+      - crashwise-network
     restart: "no"
     # Resource limits (adjust based on vertical needs)
     deploy:
@@ -313,7 +313,7 @@ services:
     build:
       context: ./workers/python
       dockerfile: Dockerfile
-    container_name: fuzzforge-worker-python
+    container_name: crashwise-worker-python
     depends_on:
       postgresql:
         condition: service_healthy
@@ -334,8 +334,8 @@ services:
       # Storage configuration (MinIO)
       STORAGE_BACKEND: s3
       S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: fuzzforge
-      S3_SECRET_KEY: fuzzforge123
+      S3_ACCESS_KEY: crashwise
+      S3_SECRET_KEY: crashwise123
       S3_BUCKET: targets
       S3_REGION: us-east-1
       S3_USE_SSL: "false"
@@ -356,7 +356,7 @@ services:
       # Worker cache for downloaded targets
       - worker_python_cache:/cache
     networks:
-      - fuzzforge-network
+      - crashwise-network
     restart: "no"
     # Resource limits (lighter than rust)
     deploy:
@@ -375,7 +375,7 @@ services:
     build:
       context: ./workers/secrets
       dockerfile: Dockerfile
-    container_name: fuzzforge-worker-secrets
+    container_name: crashwise-worker-secrets
     profiles:
       - workers
       - secrets
@@ -399,8 +399,8 @@ services:
       # Storage configuration (MinIO)
       STORAGE_BACKEND: s3
       S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: fuzzforge
-      S3_SECRET_KEY: fuzzforge123
+      S3_ACCESS_KEY: crashwise
+      S3_SECRET_KEY: crashwise123
       S3_BUCKET: targets
       S3_REGION: us-east-1
       S3_USE_SSL: "false"
@@ -421,7 +421,7 @@ services:
       # Worker cache for downloaded targets
       - worker_secrets_cache:/cache
     networks:
-      - fuzzforge-network
+      - crashwise-network
     restart: "no"
     # Resource limits (lighter than rust)
     deploy:
@@ -440,7 +440,7 @@ services:
     build:
       context: ./workers/android
       dockerfile: ${ANDROID_DOCKERFILE:-Dockerfile.amd64}
-    container_name: fuzzforge-worker-android
+    container_name: crashwise-worker-android
     profiles:
       - workers
       - android
@@ -465,8 +465,8 @@ services:
       # Storage configuration (MinIO)
       STORAGE_BACKEND: s3
       S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: fuzzforge
-      S3_SECRET_KEY: fuzzforge123
+      S3_ACCESS_KEY: crashwise
+      S3_SECRET_KEY: crashwise123
       S3_BUCKET: targets
       S3_REGION: us-east-1
       S3_USE_SSL: "false"
@@ -485,7 +485,7 @@ services:
       # Worker cache for downloaded targets
       - worker_android_cache:/cache
     networks:
-      - fuzzforge-network
+      - crashwise-network
     restart: "no"
     # Resource limits (Android tools need more memory)
     deploy:
@@ -498,13 +498,13 @@ services:
           memory: 1G
 
   # ============================================================================
-  # FuzzForge Backend API
+  # Crashwise Backend API
   # ============================================================================
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: fuzzforge-backend
+    container_name: crashwise-backend
     depends_on:
       temporal:
         condition: service_healthy
@@ -517,8 +517,8 @@ services:
 
       # Storage configuration (MinIO)
       S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: fuzzforge
-      S3_SECRET_KEY: fuzzforge123
+      S3_ACCESS_KEY: crashwise
+      S3_SECRET_KEY: crashwise123
       S3_BUCKET: targets
       S3_REGION: us-east-1
       S3_USE_SSL: "false"
@@ -528,7 +528,7 @@ services:
       PYTHONUNBUFFERED: 1
 
       # Host filesystem paths (for CLI worker management)
-      FUZZFORGE_HOST_ROOT: ${PWD}
+      CRASHWISE_HOST_ROOT: ${PWD}
 
       # Logging
       LOG_LEVEL: INFO
@@ -539,7 +539,7 @@ services:
       # Mount toolbox for workflow discovery (read-only)
       - ./backend/toolbox:/app/toolbox:ro
     networks:
-      - fuzzforge-network
+      - crashwise-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -554,7 +554,7 @@ services:
     build:
       context: ./ai/agents/task_agent
       dockerfile: Dockerfile
-    container_name: fuzzforge-task-agent
+    container_name: crashwise-task-agent
     depends_on:
       llm-proxy-bootstrap:
         condition: service_completed_successfully
@@ -566,7 +566,7 @@ services:
     volumes:
       - ./volumes/env:/app/config:ro
     networks:
-      - fuzzforge-network
+      - crashwise-network
     restart: unless-stopped
 
   # ============================================================================
@@ -576,7 +576,7 @@ services:
     build:
       context: ./workers/ossfuzz
       dockerfile: Dockerfile
-    container_name: fuzzforge-worker-ossfuzz
+    container_name: crashwise-worker-ossfuzz
     profiles:
       - workers
       - ossfuzz
@@ -600,8 +600,8 @@ services:
       # Storage configuration (MinIO)
       STORAGE_BACKEND: s3
       S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: fuzzforge
-      S3_SECRET_KEY: fuzzforge123
+      S3_ACCESS_KEY: crashwise
+      S3_SECRET_KEY: crashwise123
       S3_BUCKET: targets
       S3_REGION: us-east-1
       S3_USE_SSL: "false"
@@ -622,7 +622,7 @@ services:
       # OSS-Fuzz build output
       - worker_ossfuzz_build:/opt/oss-fuzz/build
     networks:
-      - fuzzforge-network
+      - crashwise-network
     restart: "no"
     # Higher resource limits for fuzzing campaigns
     deploy:
@@ -639,27 +639,27 @@ services:
 # ============================================================================
 volumes:
   temporal_data:
-    name: fuzzforge_temporal_data
+    name: crashwise_temporal_data
   temporal_postgres:
-    name: fuzzforge_temporal_postgres
+    name: crashwise_temporal_postgres
   minio_data:
-    name: fuzzforge_minio_data
+    name: crashwise_minio_data
   worker_rust_cache:
-    name: fuzzforge_worker_rust_cache
+    name: crashwise_worker_rust_cache
   worker_python_cache:
-    name: fuzzforge_worker_python_cache
+    name: crashwise_worker_python_cache
   worker_secrets_cache:
-    name: fuzzforge_worker_secrets_cache
+    name: crashwise_worker_secrets_cache
   worker_android_cache:
-    name: fuzzforge_worker_android_cache
+    name: crashwise_worker_android_cache
   worker_ossfuzz_cache:
-    name: fuzzforge_worker_ossfuzz_cache
+    name: crashwise_worker_ossfuzz_cache
   worker_ossfuzz_build:
-    name: fuzzforge_worker_ossfuzz_build
+    name: crashwise_worker_ossfuzz_build
   litellm_proxy_data:
-    name: fuzzforge_litellm_proxy_data
+    name: crashwise_litellm_proxy_data
   litellm_proxy_db:
-    name: fuzzforge_litellm_proxy_db
+    name: crashwise_litellm_proxy_db
   # Add more worker caches as you add verticals:
   # worker_web_cache:
   # worker_ios_cache:
@@ -668,8 +668,8 @@ volumes:
 # Networks
 # ============================================================================
 networks:
-  fuzzforge-network:
-    name: fuzzforge_temporal_network
+  crashwise-network:
+    name: crashwise_temporal_network
     driver: bridge
 
 # ============================================================================
@@ -692,7 +692,7 @@ networks:
 #
 # 4. Web UIs:
 #    - Temporal UI: http://localhost:8233
-#    - MinIO Console: http://localhost:9001 (user: fuzzforge, pass: fuzzforge123)
+#    - MinIO Console: http://localhost:9001 (user: crashwise, pass: crashwise123)
 #    - LiteLLM Proxy: http://localhost:10999
 #
 # 5. Resource Usage (Baseline):

@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from fuzzforge_cli.commands.oauth import (
+from crashwise_cli.commands.oauth import (
     OAUTH_PROVIDERS,
     PKCEData,
     OAuthCallbackHandler,
@@ -72,7 +72,7 @@ class TestCallbackServer:
 
     def test_find_free_port(self):
         """Test finding a free port."""
-        from fuzzforge_cli.commands.oauth import _find_free_port
+        from crashwise_cli.commands.oauth import _find_free_port
 
         port = _find_free_port()
         assert isinstance(port, int)
@@ -83,7 +83,7 @@ class TestCallbackServer:
             result = s.connect_ex(("127.0.0.1", port))
             assert result != 0  # Should not be able to connect
 
-    @patch("fuzzforge_cli.commands.oauth.HTTPServer")
+    @patch("crashwise_cli.commands.oauth.HTTPServer")
     def test_start_callback_server_success(self, mock_server_class):
         """Test successful callback handling."""
         mock_server = Mock()
@@ -98,7 +98,7 @@ class TestCallbackServer:
             handler.error = None
 
             # Update the closure result
-            import fuzzforge_cli.commands.oauth as oauth_module
+            import crashwise_cli.commands.oauth as oauth_module
 
             if hasattr(oauth_module, "result"):
                 oauth_module.result["code"] = "test_auth_code"
@@ -253,7 +253,7 @@ class TestSecurity:
 
     def test_localhost_only_binding(self):
         """Test that callback server binds to 127.0.0.1 only."""
-        from fuzzforge_cli.commands.oauth import _find_free_port
+        from crashwise_cli.commands.oauth import _find_free_port
 
         port = _find_free_port()
 
@@ -299,8 +299,8 @@ class TestSecurity:
 class TestCLICommands:
     """Test CLI command functionality."""
 
-    @patch("fuzzforge_cli.commands.oauth.get_storage")
-    @patch("fuzzforge_cli.commands.oauth.console")
+    @patch("crashwise_cli.commands.oauth.get_storage")
+    @patch("crashwise_cli.commands.oauth.console")
     def test_status_command(self, mock_console, mock_get_storage):
         """Test oauth status command."""
         mock_storage = Mock()
@@ -313,7 +313,7 @@ class TestCLICommands:
         mock_get_storage.return_value = mock_storage
 
         from typer.testing import CliRunner
-        from fuzzforge_cli.commands.oauth import app
+        from crashwise_cli.commands.oauth import app
 
         runner = CliRunner()
         result = runner.invoke(app, ["status"])
@@ -321,7 +321,7 @@ class TestCLICommands:
         assert result.exit_code == 0
         mock_console.print.assert_called()
 
-    @patch("fuzzforge_cli.commands.oauth.get_storage")
+    @patch("crashwise_cli.commands.oauth.get_storage")
     def test_remove_command_confirmed(self, mock_get_storage):
         """Test oauth remove command with confirmation."""
         mock_storage = Mock()
@@ -330,7 +330,7 @@ class TestCLICommands:
         mock_get_storage.return_value = mock_storage
 
         from typer.testing import CliRunner
-        from fuzzforge_cli.commands.oauth import app
+        from crashwise_cli.commands.oauth import app
 
         runner = CliRunner()
         result = runner.invoke(
@@ -343,7 +343,7 @@ class TestCLICommands:
     def test_invalid_provider(self):
         """Test error handling for invalid provider."""
         from typer.testing import CliRunner
-        from fuzzforge_cli.commands.oauth import app
+        from crashwise_cli.commands.oauth import app
 
         runner = CliRunner()
         result = runner.invoke(app, ["setup", "--provider", "invalid_provider"])

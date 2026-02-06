@@ -1,6 +1,6 @@
-# FuzzForge Test Suite
+# Crashwise Test Suite
 
-Comprehensive test infrastructure for FuzzForge modules and workflows.
+Comprehensive test infrastructure for Crashwise modules and workflows.
 
 ## Directory Structure
 

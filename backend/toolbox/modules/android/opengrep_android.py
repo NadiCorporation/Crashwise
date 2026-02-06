@@ -5,16 +5,9 @@ Pattern-based static analysis for Android applications using OpenGrep/Semgrep
 with Android-specific security rules.
 """
 
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 import asyncio
 import json
@@ -42,7 +35,7 @@ class OpenGrepAndroid(BaseModule):
             name="opengrep_android",
             version="1.45.0",
             description="Android-focused static analysis using OpenGrep/Semgrep with custom security rules for Java/Kotlin",
-            author="FuzzForge Team",
+            author="Crashwise Team",
             category="android",
             tags=["sast", "android", "opengrep", "semgrep", "java", "kotlin", "security"],
             input_schema={

@@ -1,14 +1,7 @@
 #!/usr/bin/env python3
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 """
 Real-time fuzzing monitoring example.
@@ -26,8 +19,8 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-from fuzzforge_sdk import FuzzForgeClient
-from fuzzforge_sdk.utils import (
+from crashwise_sdk import CrashwiseClient
+from crashwise_sdk.utils import (
     create_workflow_submission,
     create_resource_limits,
     format_duration,
@@ -38,7 +31,7 @@ from fuzzforge_sdk.utils import (
 class FuzzingMonitor:
     """Real-time fuzzing monitor with graceful shutdown."""
 
-    def __init__(self, client: FuzzForgeClient):
+    def __init__(self, client: CrashwiseClient):
         self.client = client
         self.running = True
         self.run_id = None
@@ -97,7 +90,7 @@ class FuzzingMonitor:
         # Clear screen and move cursor to top
         print("\033[2J\033[H", end="")
 
-        print("🎯 FuzzForge Live Fuzzing Monitor")
+        print("🎯 Crashwise Live Fuzzing Monitor")
         print("=" * 50)
         print(f"Run ID: {stats_data.get('run_id', 'unknown')}")
         print(f"Workflow: {stats_data.get('workflow', 'unknown')}")
@@ -152,7 +145,7 @@ class FuzzingMonitor:
 async def main():
     """Main fuzzing monitoring example."""
     # Initialize client
-    client = FuzzForgeClient(base_url="http://localhost:8000")
+    client = CrashwiseClient(base_url="http://localhost:8000")
     monitor = FuzzingMonitor(client)
 
     # Set up signal handlers
@@ -161,7 +154,7 @@ async def main():
 
     try:
         # Check API status
-        print("🔗 Connecting to FuzzForge API...")
+        print("🔗 Connecting to Crashwise API...")
         status = await client.aget_api_status()
         print(f"✅ Connected to {status.name} v{status.version}\n")
 
@@ -249,7 +242,7 @@ async def main():
 
 def sync_monitor_example():
     """Example of synchronous SSE monitoring."""
-    client = FuzzForgeClient(base_url="http://localhost:8000")
+    client = CrashwiseClient(base_url="http://localhost:8000")
 
     try:
         # This would require a pre-existing fuzzing run

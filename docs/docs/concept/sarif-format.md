@@ -1,12 +1,12 @@
 # SARIF Format
 
-FuzzForge uses the Static Analysis Results Interchange Format (SARIF) as the standardized output format for all security analysis results. SARIF provides a consistent, machine-readable format that enables tool interoperability and comprehensive result analysis.
+Crashwise uses the Static Analysis Results Interchange Format (SARIF) as the standardized output format for all security analysis results. SARIF provides a consistent, machine-readable format that enables tool interoperability and comprehensive result analysis.
 
 ## What is SARIF?
 
 ### Overview
 
-SARIF (Static Analysis Results Interchange Format) is an OASIS-approved standard (SARIF 2.1.0) designed to standardize the output of static analysis tools. FuzzForge extends this standard to cover dynamic analysis, secret detection, infrastructure analysis, and fuzzing results.
+SARIF (Static Analysis Results Interchange Format) is an OASIS-approved standard (SARIF 2.1.0) designed to standardize the output of static analysis tools. Crashwise extends this standard to cover dynamic analysis, secret detection, infrastructure analysis, and fuzzing results.
 
 ### Key Benefits
 
@@ -33,20 +33,20 @@ SARIF (Static Analysis Results Interchange Format) is an OASIS-approved standard
 }
 ```
 
-## FuzzForge SARIF Implementation
+## Crashwise SARIF Implementation
 
 ### Run Structure
 
-Each FuzzForge workflow produces a SARIF "run" containing:
+Each Crashwise workflow produces a SARIF "run" containing:
 
 ```json
 {
   "tool": {
     "driver": {
-      "name": "FuzzForge",
+      "name": "Crashwise",
       "version": "1.0.0",
-      "informationUri": "https://github.com/FuzzingLabs/fuzzforge_ai",
-      "organization": "FuzzingLabs",
+      "informationUri": "https://github.com/YahyaToubali/Crashwise",
+      "organization": "Crashwise",
       "rules": [ /* Security rules applied */ ]
     },
     "extensions": [
@@ -122,7 +122,7 @@ Each security finding is represented as a SARIF result:
 
 ### Severity Levels
 
-FuzzForge maps tool-specific severity levels to SARIF standard levels:
+Crashwise maps tool-specific severity levels to SARIF standard levels:
 
 #### SARIF Level Mapping
 - **error**: Critical and High severity findings
@@ -134,7 +134,7 @@ FuzzForge maps tool-specific severity levels to SARIF standard levels:
 ```json
 {
   "properties": {
-    "severity": "high",           // FuzzForge severity
+    "severity": "high",           // Crashwise severity
     "confidence": "medium",       // Tool confidence
     "exploitability": "high",     // Likelihood of exploitation
     "impact": "data_breach"       // Potential impact
@@ -179,13 +179,13 @@ FuzzForge maps tool-specific severity levels to SARIF standard levels:
 
 ### Tool Extension Model
 
-FuzzForge aggregates results from multiple tools using SARIF's extension model:
+Crashwise aggregates results from multiple tools using SARIF's extension model:
 
 ```json
 {
   "tool": {
     "driver": {
-      "name": "FuzzForge",
+      "name": "Crashwise",
       "version": "1.0.0"
     },
     "extensions": [
@@ -209,7 +209,7 @@ FuzzForge aggregates results from multiple tools using SARIF's extension model:
 #### Cross-Tool Finding Correlation
 ```json
 {
-  "ruleId": "fuzzforge.correlation.sql-injection",
+  "ruleId": "crashwise.correlation.sql-injection",
   "level": "error",
   "message": {
     "text": "SQL injection vulnerability confirmed by multiple tools"
@@ -451,7 +451,7 @@ GitHub automatically processes SARIF files uploaded through Actions:
 - name: Upload SARIF results
   uses: github/codeql-action/upload-sarif@v2
   with:
-    sarif_file: fuzzforge-results.sarif
+    sarif_file: crashwise-results.sarif
     category: security-analysis
 ```
 
@@ -459,8 +459,8 @@ GitHub automatically processes SARIF files uploaded through Actions:
 
 #### SARIF Result Access
 ```python
-# Example: Accessing SARIF results via FuzzForge API
-async with FuzzForgeClient() as client:
+# Example: Accessing SARIF results via Crashwise API
+async with CrashwiseClient() as client:
     result = await client.get_workflow_result(run_id)
 
     # Access SARIF data

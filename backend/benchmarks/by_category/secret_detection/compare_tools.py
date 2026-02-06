@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "sdk" / "src"))
 
-from fuzzforge_sdk import FuzzForgeClient
+from crashwise_sdk import CrashwiseClient
 
 
 @dataclass
@@ -36,7 +36,7 @@ class SecretDetectionComparison:
 
     def __init__(self, target_path: Path, api_url: str = "http://localhost:8000"):
         self.target_path = target_path
-        self.client = FuzzForgeClient(base_url=api_url)
+        self.client = CrashwiseClient(base_url=api_url)
 
     async def run_workflow(self, workflow_name: str, tool_name: str, config: Dict[str, Any] = None) -> Optional[ToolResult]:
         """Run a workflow and extract findings"""
@@ -154,7 +154,7 @@ class SecretDetectionComparison:
         for model in llm_models:
             tool_name = f"LLM ({model})"
             result = await self.run_workflow("llm_secret_detection", tool_name, {
-                "agent_url": "http://fuzzforge-task-agent:8000/a2a/litellm_agent",
+                "agent_url": "http://crashwise-task-agent:8000/a2a/litellm_agent",
                 "llm_model": model,
                 "llm_provider": "openai" if "gpt" in model else "anthropic",
                 "max_files": 20,

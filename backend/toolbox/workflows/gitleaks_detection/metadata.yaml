@@ -2,7 +2,7 @@ name: gitleaks_detection
 version: "1.0.0"
 vertical: secrets
 description: "Detect secrets and credentials using Gitleaks"
-author: "FuzzForge Team"
+author: "Crashwise Team"
 tags:
   - "secrets"
   - "gitleaks"

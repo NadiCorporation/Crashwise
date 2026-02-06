@@ -1,6 +1,6 @@
 # LLM & Environment Configuration
 
-FuzzForge AI relies on LiteLLM adapters embedded in the Google ADK runtime, so you can swap between providers without touching code. Configuration is driven by environment variables inside `.fuzzforge/.env`.
+Crashwise AI relies on LiteLLM adapters embedded in the Google ADK runtime, so you can swap between providers without touching code. Configuration is driven by environment variables inside `.crashwise/.env`.
 
 ## Minimal Setup
 
@@ -10,11 +10,11 @@ LITELLM_MODEL=gpt-5-mini
 OPENAI_API_KEY=sk-your-key
 ```
 
-Set these values before launching `fuzzforge ai agent` or `python -m fuzzforge_ai`.
+Set these values before launching `crashwise ai agent` or `python -m Crashwise`.
 
 ## .env Template
 
-`fuzzforge init` creates `.fuzzforge/.env.template` alongside the real secrets file. Keep the template under version control so teammates can copy it to `.fuzzforge/.env` and fill in provider credentials locally. The template includes commented examples for Cognee, AgentOps, and alternative LLM providers—extend it with any project-specific overrides you expect collaborators to set.
+`crashwise init` creates `.crashwise/.env.template` alongside the real secrets file. Keep the template under version control so teammates can copy it to `.crashwise/.env` and fill in provider credentials locally. The template includes commented examples for Cognee, AgentOps, and alternative LLM providers—extend it with any project-specific overrides you expect collaborators to set.
 
 ## Provider Examples
 
@@ -84,7 +84,7 @@ If the Cognee variables are omitted, graph-specific tools remain available but r
 ## MCP / Backend Integration
 
 ```env
-FUZZFORGE_MCP_URL=http://localhost:8010/mcp
+CRASHWISE_MCP_URL=http://localhost:8010/mcp
 ```
 
 The agent uses this endpoint to list, launch, and monitor Temporal workflows.
@@ -98,7 +98,7 @@ AGENTOPS_API_KEY=sk-your-agentops-key
 AGENTOPS_ENVIRONMENT=local     # Optional tag for dashboards
 ```
 
-Set `FUZZFORGE_DEBUG=1` to surface verbose executor logging and enable additional stdout in the CLI. For HTTP deployments, combine that with:
+Set `CRASHWISE_DEBUG=1` to surface verbose executor logging and enable additional stdout in the CLI. For HTTP deployments, combine that with:
 
 ```env
 LOG_LEVEL=DEBUG
@@ -109,7 +109,7 @@ The ADK runtime also honours `GOOGLE_ADK_TRACE_DIR=/path/to/logs` if you want JS
 ## Debugging Flags
 
 ```env
-FUZZFORGE_DEBUG=1           # Enables verbose logging
+CRASHWISE_DEBUG=1           # Enables verbose logging
 LOG_LEVEL=DEBUG             # Applies to the A2A server and CLI
 ```
 
@@ -117,6 +117,6 @@ These flags surface additional insight when diagnosing routing or ingestion issu
 
 ## Related Code
 
-- Env bootstrap: `ai/src/fuzzforge_ai/config_manager.py`
-- LiteLLM glue: `ai/src/fuzzforge_ai/agent.py`
-- Cognee integration: `ai/src/fuzzforge_ai/cognee_service.py`
+- Env bootstrap: `ai/src/Crashwise/config_manager.py`
+- LiteLLM glue: `ai/src/Crashwise/agent.py`
+- Cognee integration: `ai/src/Crashwise/cognee_service.py`

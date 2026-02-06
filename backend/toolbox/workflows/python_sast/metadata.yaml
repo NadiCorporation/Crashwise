@@ -2,7 +2,7 @@ name: python_sast
 version: "1.0.0"
 vertical: python
 description: "Python Static Application Security Testing (SAST) workflow combining dependency scanning (pip-audit), security linting (Bandit), and type checking (Mypy)"
-author: "FuzzForge Team"
+author: "Crashwise Team"
 tags:
   - "python"
   - "sast"

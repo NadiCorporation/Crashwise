@@ -4,4 +4,4 @@ sidebar_position: 1
 
 # Introduction
 
-Let's discover **FuzzForge in less than 5 minutes**.
+Let's discover **Crashwise in less than 5 minutes**.

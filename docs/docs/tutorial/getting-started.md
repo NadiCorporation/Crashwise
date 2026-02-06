@@ -1,6 +1,6 @@
 # Getting Started
 
-This tutorial will guide you through setting up FuzzForge and running your first security workflow. By the end of this tutorial, you'll have FuzzForge running locally and will have executed a complete static analysis workflow on a test project.
+This tutorial will guide you through setting up Crashwise and running your first security workflow. By the end of this tutorial, you'll have Crashwise running locally and will have executed a complete static analysis workflow on a test project.
 
 ## Prerequisites
 
@@ -12,13 +12,13 @@ Before we begin, ensure you have the following installed:
 - **Git** (for cloning the repository)
 - **4GB+ RAM** available for workflow execution
 
-## Step 1: Clone and Setup FuzzForge
+## Step 1: Clone and Setup Crashwise
 
-First, let's clone the FuzzForge repository:
+First, let's clone the Crashwise repository:
 
 ```bash
-git clone https://github.com/FuzzingLabs/fuzzforge_ai.git
-cd fuzzforge_ai
+git clone https://github.com/YahyaToubali/Crashwise.git
+cd Crashwise
 ```
 
 ## Step 2: Configure Environment (Required)
@@ -31,13 +31,13 @@ Create the environment configuration file:
 cp volumes/env/.env.template volumes/env/.env
 ```
 
-This file is required for FuzzForge to start. You can leave it with default values if you're only using basic workflows.
+This file is required for Crashwise to start. You can leave it with default values if you're only using basic workflows.
 
 ### When you need to add API keys:
 
 Edit `volumes/env/.env` and add your API keys if using:
 - **AI-powered workflows**: `llm_secret_detection`
-- **AI agent**: `ff ai agent`
+- **AI agent**: `cw ai agent`
 
 Example:
 ```env
@@ -52,15 +52,15 @@ OPENAI_API_KEY=sk-your-key-here
 - `atheris_fuzzing`
 - `cargo_fuzzing`
 
-## Step 3: Start FuzzForge
+## Step 3: Start Crashwise
 
-Start all FuzzForge services:
+Start all Crashwise services:
 
 ```bash
 docker-compose -f docker-compose.yml up -d
 ```
 
-This will start the FuzzForge platform with multiple services:
+This will start the Crashwise platform with multiple services:
 
 **Core Services:**
 - **temporal**: Workflow orchestration server
@@ -84,7 +84,7 @@ Wait for all services to be healthy (this may take 2-3 minutes on first startup)
 # Check service health
 docker-compose -f docker-compose.yml ps
 
-# Verify FuzzForge is ready
+# Verify Crashwise is ready
 curl http://localhost:8000/health
 # Should return: {"status":"healthy"}
 ```
@@ -136,7 +136,7 @@ docker compose ps | grep worker
 
 ## Step 4: Install the CLI (Optional but Recommended)
 
-Install the FuzzForge CLI for easier workflow management:
+Install the Crashwise CLI for easier workflow management:
 
 ```bash
 cd cli
@@ -148,13 +148,13 @@ uv tool install .
 Verify CLI installation:
 
 ```bash
-fuzzforge --version
+crashwise --version
 ```
 
 Configure the CLI to connect to your local instance:
 
 ```bash
-fuzzforge config set-server http://localhost:8000
+crashwise config set-server http://localhost:8000
 ```
 
 ## Step 5: Verify Available Workflows
@@ -163,7 +163,7 @@ List all available workflows to confirm the system is working:
 
 ```bash
 # Using CLI
-fuzzforge workflows list
+crashwise workflows list
 
 # Using API
 curl http://localhost:8000/workflows | jq .
@@ -188,10 +188,10 @@ Let's run a security assessment workflow on one of the included vulnerable test 
 
 ```bash
 # Navigate to a test project
-cd /path/to/fuzzforge/test_projects/vulnerable_app
+cd /path/to/crashwise/test_projects/vulnerable_app
 
 # Submit the workflow - CLI automatically uploads the local directory
-fuzzforge workflow run security_assessment .
+crashwise workflow run security_assessment .
 
 # The CLI will:
 # 1. Detect that '.' is a local directory
@@ -201,10 +201,10 @@ fuzzforge workflow run security_assessment .
 # 5. The worker downloads it when ready to analyze
 
 # Monitor the workflow
-fuzzforge workflow status <run-id>
+crashwise workflow status <run-id>
 
 # View results when complete
-fuzzforge finding <run-id>
+crashwise finding <run-id>
 ```
 
 ### Using the API:
@@ -264,15 +264,15 @@ You can monitor workflow execution in real-time using the Temporal Web UI:
 You can also access the MinIO console to view uploaded targets:
 
 1. Open http://localhost:9001 in your browser
-2. Login with: `fuzzforge` / `fuzzforge123`
+2. Login with: `crashwise` / `crashwise123`
 3. Browse the `targets` bucket to see uploaded files
 
 ## Next Steps
 
 Congratulations! You've successfully:
-- ✅ Installed and configured FuzzForge
+- ✅ Installed and configured Crashwise
 - ✅ Configured Docker with the required insecure registry
-- ✅ Started all FuzzForge services
+- ✅ Started all Crashwise services
 - ✅ Run your first security workflow
 - ✅ Retrieved and understood workflow results
 
@@ -294,6 +294,6 @@ See the [Troubleshooting Guide](../how-to/troubleshooting.md) for detailed solut
 
 ---
 
-**🎉 You're now ready to use FuzzForge for security analysis!**
+**🎉 You're now ready to use Crashwise for security analysis!**
 
 The next tutorial will teach you about the different types of workflows and when to use each one.

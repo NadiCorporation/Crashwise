@@ -1,5 +1,5 @@
 """
-FuzzForge Vertical Worker: Secret Detection
+Crashwise Vertical Worker: Secret Detection
 
 This worker:
 1. Discovers workflows for the 'secrets' vertical from mounted toolbox
@@ -219,7 +219,7 @@ async def main():
     max_concurrent_activities = int(os.getenv("MAX_CONCURRENT_ACTIVITIES", "5"))
 
     logger.info("=" * 60)
-    logger.info(f"FuzzForge Vertical Worker: {vertical}")
+    logger.info(f"Crashwise Vertical Worker: {vertical}")
     logger.info("=" * 60)
     logger.info(f"Temporal Address: {temporal_address}")
     logger.info(f"Temporal Namespace: {temporal_namespace}")

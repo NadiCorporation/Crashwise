@@ -1256,7 +1256,7 @@ wheels = [
 ]
 
 [[package]]
-name = "fuzzforge-ai"
+name = "crashwise-ai"
 version = "0.7.0"
 source = { editable = "../ai" }
 dependencies = [
@@ -1302,12 +1302,12 @@ dev = [
 ]
 
 [[package]]
-name = "fuzzforge-cli"
+name = "crashwise-cli"
 version = "0.7.0"
 source = { editable = "." }
 dependencies = [
-    { name = "fuzzforge-ai" },
-    { name = "fuzzforge-sdk" },
+    { name = "crashwise-ai" },
+    { name = "crashwise-sdk" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -1329,8 +1329,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0.0" },
-    { name = "fuzzforge-ai", editable = "../ai" },
-    { name = "fuzzforge-sdk", editable = "../sdk" },
+    { name = "crashwise-ai", editable = "../ai" },
+    { name = "crashwise-sdk", editable = "../sdk" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.0" },
@@ -1346,7 +1346,7 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
-name = "fuzzforge-sdk"
+name = "crashwise-sdk"
 version = "0.7.0"
 source = { editable = "../sdk" }
 dependencies = [

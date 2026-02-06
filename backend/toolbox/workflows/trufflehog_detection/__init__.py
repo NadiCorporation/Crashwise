@@ -2,9 +2,9 @@
 TruffleHog Detection Workflow
 """
 
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2025 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
+# Licensed under the MIT License 1.1 (MIT). See the LICENSE file
 # at the root of this repository for details.
 
 from .workflow import TrufflehogDetectionWorkflow

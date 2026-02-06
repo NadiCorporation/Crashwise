@@ -1,6 +1,6 @@
 # Common Patterns Cookbook 👨‍🍳
 
-A collection of proven patterns and recipes for FuzzForge modules and workflows. Copy, paste, and adapt these examples to build your own security tools quickly!
+A collection of proven patterns and recipes for Crashwise modules and workflows. Copy, paste, and adapt these examples to build your own security tools quickly!
 
 ## Module Patterns
 

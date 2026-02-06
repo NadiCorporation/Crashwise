@@ -1,11 +1,11 @@
-# FuzzForge Documentation
+# Crashwise Documentation
 
-Welcome to FuzzForge, a comprehensive security analysis platform built on Temporal that automates security testing workflows. FuzzForge provides production-ready workflows that run static analysis, secret detection, infrastructure scanning, penetration testing, and custom fuzzing campaigns with Docker-based isolation and SARIF-compliant reporting.
+Welcome to Crashwise, a comprehensive security analysis platform built on Temporal that automates security testing workflows. Crashwise provides production-ready workflows that run static analysis, secret detection, infrastructure scanning, penetration testing, and custom fuzzing campaigns with Docker-based isolation and SARIF-compliant reporting.
 
 ## 🚀 Quick Navigation
 
 ### 📚 **Tutorials** - *Learn by doing*
-Perfect for newcomers who want to learn FuzzForge step by step.
+Perfect for newcomers who want to learn Crashwise step by step.
 
 - [**Getting Started**](tutorials/getting-started.md) - Complete setup from installation to first workflow
 
@@ -54,7 +54,7 @@ Technical reference materials and specifications.
 
 ---
 
-## 🎯 FuzzForge at a Glance
+## 🎯 Crashwise at a Glance
 
 **Production-Ready Workflows:**
 - Security Assessment - Regex-based analysis for secrets, SQL injection, dangerous functions
@@ -68,7 +68,7 @@ Technical reference materials and specifications.
 - OSS-Fuzz Campaign - OSS-Fuzz integration (heavy development)
 
 **Multiple Interfaces:**
-- 💻 **CLI**: `fuzzforge workflow run security_assessment /path/to/code`
+- 💻 **CLI**: `crashwise workflow run security_assessment /path/to/code`
 - 🐍 **Python SDK**: Programmatic workflow integration
 - 🌐 **REST API**: HTTP-based workflow management
 - 🤖 **MCP**: AI assistant integration (Claude, ChatGPT)
@@ -86,7 +86,7 @@ Technical reference materials and specifications.
 
 **Environment Configuration Required**
 
-Before starting FuzzForge, you **must** create the environment configuration file:
+Before starting Crashwise, you **must** create the environment configuration file:
 
 ```bash
 cp volumes/env/.env.template volumes/env/.env
@@ -109,7 +109,7 @@ This documentation follows the [Diátaxis framework](https://diataxis.fr/):
 
 ---
 
-**New to FuzzForge?** Start with the [Getting Started Tutorial](tutorials/getting-started.md)
+**New to Crashwise?** Start with the [Getting Started Tutorial](tutorials/getting-started.md)
 
 **Need help?** Check the [FAQ](reference/faq.md) or [Troubleshooting Guide](how-to/troubleshooting.md)
 

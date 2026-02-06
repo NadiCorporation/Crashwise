@@ -2,7 +2,7 @@ name: ossfuzz_campaign
 version: "1.0.0"
 vertical: ossfuzz
 description: "Generic OSS-Fuzz fuzzing campaign. Automatically reads project configuration from OSS-Fuzz repo and runs fuzzing using Google's infrastructure."
-author: "FuzzForge Team"
+author: "Crashwise Team"
 tags:
   - "fuzzing"
   - "oss-fuzz"

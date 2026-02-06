@@ -1,6 +1,6 @@
-# Contributing to FuzzForge 🤝
+# Contributing to Crashwise 🤝
 
-Thank you for your interest in contributing to FuzzForge! We welcome contributions from the community and are excited to collaborate with you.
+Thank you for your interest in contributing to Crashwise! We welcome contributions from the community and are excited to collaborate with you.
 
 ## 🌟 Ways to Contribute
 
@@ -161,14 +161,14 @@ Contributors will be:
 - Listed in our [Contributors](CONTRIBUTORS.md) file
 - Mentioned in release notes for significant contributions
 - Invited to join our Discord community
-- Eligible for FuzzingLabs Academy courses and swag
+- Eligible for Crashwise Academy courses and swag
 
 ## 📜 License
 
-By contributing to FuzzForge, you agree that your contributions will be licensed under the same [Business Source License 1.1](LICENSE) as the project.
+By contributing to Crashwise, you agree that your contributions will be licensed under the same [MIT License 1.1](LICENSE) as the project.
 
 ---
 
-**Thank you for making FuzzForge better! 🚀**
+**Thank you for making Crashwise better! 🚀**
 
 Every contribution, no matter how small, helps build a stronger security community.

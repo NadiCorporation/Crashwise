@@ -3,11 +3,11 @@
 ## Phase 1B: LLM Resolver Integration
 
 ### New Files Created
-1. ✅ `cli/src/fuzzforge_cli/commands/triage.py` - LLM Crash Triage implementation
+1. ✅ `cli/src/crashwise_cli/commands/triage.py` - LLM Crash Triage implementation
 2. ✅ `cli/tests/test_triage_integration.py` - Integration tests
 
 ### Modified Files
-1. ✅ `cli/src/fuzzforge_cli/commands/findings.py` - Added `triage` subcommand
+1. ✅ `cli/src/crashwise_cli/commands/findings.py` - Added `triage` subcommand
 
 ### Integration Points Verified
 
@@ -63,7 +63,7 @@ TestPolicyFileEnforcement::test_policy_file_blocks_unauthorized_provider PASSED
 
 ```bash
 # 1. Create restrictive policy
-cat > ~/.config/fuzzforge/policy.yaml << 'EOF'
+cat > ~/.config/crashwise/policy.yaml << 'EOF'
 providers:
   allowed:
     - openai_codex
@@ -250,11 +250,11 @@ python -m pytest cli/tests/ -v
 ## Files Summary
 
 ### New Files (Phase 1B + Killer Feature)
-1. `cli/src/fuzzforge_cli/commands/triage.py` (350 lines)
+1. `cli/src/crashwise_cli/commands/triage.py` (350 lines)
 2. `cli/tests/test_triage_integration.py` (280 lines)
 
 ### Modified Files
-1. `cli/src/fuzzforge_cli/commands/findings.py` (+40 lines)
+1. `cli/src/crashwise_cli/commands/findings.py` (+40 lines)
 
 ### Total New Code
 - ~630 lines of implementation
@@ -269,10 +269,10 @@ If issues occur:
 
 ```bash
 # Remove triage command from findings.py
-git checkout cli/src/fuzzforge_cli/commands/findings.py
+git checkout cli/src/crashwise_cli/commands/findings.py
 
 # Remove new files
-rm cli/src/fuzzforge_cli/commands/triage.py
+rm cli/src/crashwise_cli/commands/triage.py
 rm cli/tests/test_triage_integration.py
 
 # Verify CLI still works

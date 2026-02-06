@@ -1,6 +1,6 @@
 # Prompt Patterns & Examples
 
-Use the `fuzzforge ai agent` shell to mix structured slash commands with natural requests. The Google ADK runtime keeps conversation context, so follow-ups automatically reuse earlier answers, retrieved files, and workflow IDs.
+Use the `crashwise ai agent` shell to mix structured slash commands with natural requests. The Google ADK runtime keeps conversation context, so follow-ups automatically reuse earlier answers, retrieved files, and workflow IDs.
 
 ## Slash Commands
 
@@ -17,10 +17,10 @@ Use the `fuzzforge ai agent` shell to mix structured slash commands with natural
 ## Workflow Automation
 
 ```
-You> list available fuzzforge workflows
+You> list available crashwise workflows
 Assistant> [returns workflow names, descriptions, and required parameters]
 
-You> run fuzzforge workflow security_assessment on ./backend
+You> run crashwise workflow security_assessment on ./backend
 Assistant> Submits the run, emits TaskStatusUpdateEvent entries, and links the SARIF artifact when complete.
 
 You> show findings for that run once it finishes
@@ -31,7 +31,7 @@ Assistant> Streams the `get_comprehensive_scan_summary` output and attaches the 
 
 ```
 You> refresh the project knowledge graph for ./backend
-Assistant> Launches `fuzzforge ingest --path ./backend --recursive` and reports file counts.
+Assistant> Launches `crashwise ingest --path ./backend --recursive` and reports file counts.
 
 You> search project knowledge for "temporal readiness" using INSIGHTS
 Assistant> Routes to Cognee via `query_project_knowledge_api` and returns the top matches.

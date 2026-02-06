@@ -1,20 +1,13 @@
 #!/usr/bin/env python3
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 """
 Basic workflow submission example.
 
 This example demonstrates how to:
-1. Connect to FuzzForge API
+1. Connect to Crashwise API
 2. List available workflows
 3. Submit a workflow for analysis
 4. Monitor the run status
@@ -25,18 +18,18 @@ import asyncio
 import time
 from pathlib import Path
 
-from fuzzforge_sdk import FuzzForgeClient
-from fuzzforge_sdk.utils import create_workflow_submission, format_sarif_summary, format_duration
+from crashwise_sdk import CrashwiseClient
+from crashwise_sdk.utils import create_workflow_submission, format_sarif_summary, format_duration
 
 
 def main():
     """Run basic workflow submission example."""
     # Initialize the client
-    client = FuzzForgeClient(base_url="http://localhost:8000")
+    client = CrashwiseClient(base_url="http://localhost:8000")
 
     try:
         # Check API status
-        print("🔗 Connecting to FuzzForge API...")
+        print("🔗 Connecting to Crashwise API...")
         status = client.get_api_status()
         print(f"✅ Connected to {status.name} v{status.version}")
         print(f"📊 {status.workflows_loaded} workflows loaded\n")
@@ -129,7 +122,7 @@ def main():
             print()
 
             # Extract and display detailed findings
-            from fuzzforge_sdk.utils import extract_sarif_results
+            from crashwise_sdk.utils import extract_sarif_results
             results = extract_sarif_results(findings.sarif)
 
             if results:
@@ -202,10 +195,10 @@ def main():
 async def async_main():
     """Run basic workflow submission example (async version)."""
     # Initialize the async client
-    async with FuzzForgeClient(base_url="http://localhost:8000") as client:
+    async with CrashwiseClient(base_url="http://localhost:8000") as client:
         try:
             # Check API status
-            print("🔗 Connecting to FuzzForge API...")
+            print("🔗 Connecting to Crashwise API...")
             status = await client.aget_api_status()
             print(f"✅ Connected to {status.name} v{status.version}")
             print(f"📊 {status.workflows_loaded} workflows loaded\n")
@@ -255,7 +248,7 @@ async def async_main():
             print(f"📈 {sarif_summary}")
 
             # Extract and display detailed findings
-            from fuzzforge_sdk.utils import extract_sarif_results
+            from crashwise_sdk.utils import extract_sarif_results
             results = extract_sarif_results(findings.sarif)
 
             if results:

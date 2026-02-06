@@ -50,7 +50,7 @@ async def llm_secret_generate_sarif(findings: list, metadata: Dict[str, Any]) ->
                     "driver": {
                         "name": metadata.get("tool_name", "llm-secret-detector"),
                         "version": metadata.get("tool_version", "1.0.0"),
-                        "informationUri": "https://github.com/FuzzingLabs/fuzzforge_ai"
+                        "informationUri": "https://github.com/Crashwise/crashwise_ai"
                     }
                 },
                 "results": []

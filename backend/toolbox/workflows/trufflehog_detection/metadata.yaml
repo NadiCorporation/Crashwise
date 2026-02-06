@@ -2,7 +2,7 @@ name: trufflehog_detection
 version: "1.0.0"
 vertical: secrets
 description: "Detect secrets with verification using TruffleHog"
-author: "FuzzForge Team"
+author: "Crashwise Team"
 tags:
   - "secrets"
   - "trufflehog"

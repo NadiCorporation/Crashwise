@@ -1,4 +1,4 @@
-# FuzzForge AI Architecture
+# Crashwise AI Architecture
 
 **Last Updated:** 2025-10-14
 **Status:** Production - Temporal with Vertical Workers
@@ -44,7 +44,7 @@
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│ FuzzForge Platform                                            │
+│ Crashwise Platform                                            │
 │                                                                │
 │  ┌──────────────────┐         ┌─────────────────────────┐   │
 │  │ Temporal Server  │◄────────│ MinIO (S3 Storage)      │   │
@@ -344,8 +344,8 @@ services:
     volumes:
       - minio_data:/data
     environment:
-      MINIO_ROOT_USER: fuzzforge
-      MINIO_ROOT_PASSWORD: fuzzforge123
+      MINIO_ROOT_USER: crashwise
+      MINIO_ROOT_PASSWORD: crashwise123
       MINIO_CI_CD: "true"  # Reduces memory to 256MB (from 1GB)
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
@@ -361,11 +361,11 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set fuzzforge http://minio:9000 fuzzforge fuzzforge123;
-      mc mb fuzzforge/targets --ignore-existing;
-      mc mb fuzzforge/results --ignore-existing;
-      mc ilm add fuzzforge/targets --expiry-days 7;
-      mc anonymous set download fuzzforge/results;
+      mc alias set crashwise http://minio:9000 crashwise crashwise123;
+      mc mb crashwise/targets --ignore-existing;
+      mc mb crashwise/results --ignore-existing;
+      mc ilm add crashwise/targets --expiry-days 7;
+      mc anonymous set download crashwise/results;
       "
 ```
 
@@ -390,8 +390,8 @@ class S3CachedStorage:
         self.s3 = boto3.client(
             's3',
             endpoint_url=os.getenv('S3_ENDPOINT', 'http://minio:9000'),
-            aws_access_key_id=os.getenv('S3_ACCESS_KEY', 'fuzzforge'),
-            aws_secret_access_key=os.getenv('S3_SECRET_KEY', 'fuzzforge123')
+            aws_access_key_id=os.getenv('S3_ACCESS_KEY', 'crashwise'),
+            aws_secret_access_key=os.getenv('S3_SECRET_KEY', 'crashwise123')
         )
         self.bucket = os.getenv('S3_BUCKET', 'targets')
         self.cache_dir = Path(os.getenv('CACHE_DIR', '/cache'))
@@ -487,7 +487,7 @@ class S3CachedStorage:
 
 ### Workspace Isolation
 
-To support concurrent workflows safely, FuzzForge implements workspace isolation with three modes:
+To support concurrent workflows safely, Crashwise implements workspace isolation with three modes:
 
 **1. Isolated Mode (Default)**
 ```python
@@ -671,8 +671,8 @@ MAX_CONCURRENT_ACTIVITIES=5
 
 # Storage configuration
 S3_ENDPOINT=http://minio:9000
-S3_ACCESS_KEY=fuzzforge
-S3_SECRET_KEY=fuzzforge123
+S3_ACCESS_KEY=crashwise
+S3_SECRET_KEY=crashwise123
 S3_BUCKET=targets
 
 # Cache configuration
@@ -729,8 +729,8 @@ minio:
   image: minio/minio:latest
   environment:
     MINIO_CI_CD: "true"  # Lightweight mode
-    MINIO_ROOT_USER: fuzzforge
-    MINIO_ROOT_PASSWORD: fuzzforge123
+    MINIO_ROOT_USER: crashwise
+    MINIO_ROOT_PASSWORD: crashwise123
 ```
 
 **Web Console:** http://localhost:9001
@@ -782,8 +782,8 @@ Host 4: 5× worker-web
 ```yaml
 # Point all workers to central Temporal/MinIO
 environment:
-  TEMPORAL_ADDRESS: temporal.prod.fuzzforge.ai:7233
-  S3_ENDPOINT: http://minio.prod.fuzzforge.ai:9000
+  TEMPORAL_ADDRESS: temporal.prod.crashwise.ai:7233
+  S3_ENDPOINT: http://minio.prod.crashwise.ai:9000
 ```
 
 **Capacity:** 3× Phase 1 = 45-150 concurrent workflows
@@ -805,7 +805,7 @@ environment:
 
 ```bash
 # Set on bucket (done by minio-setup service)
-mc ilm add fuzzforge/targets --expiry-days 7
+mc ilm add crashwise/targets --expiry-days 7
 
 # MinIO automatically deletes objects older than 7 days
 ```
@@ -870,7 +870,7 @@ async def delete_target(target_id: str):
 ### Nomad Job Example
 
 ```hcl
-job "fuzzforge-worker-android" {
+job "crashwise-worker-android" {
   datacenters = ["dc1"]
   type = "service"
 
@@ -899,10 +899,10 @@ job "fuzzforge-worker-android" {
       driver = "docker"
 
       config {
-        image = "fuzzforge/worker-android:latest"
+        image = "crashwise/worker-android:latest"
 
         volumes = [
-          "/opt/fuzzforge/toolbox:/app/toolbox:ro"
+          "/opt/crashwise/toolbox:/app/toolbox:ro"
         ]
       }
 
@@ -923,7 +923,7 @@ job "fuzzforge-worker-android" {
 
 ### Licensing Considerations
 
-**Nomad BSL 1.1 Risk:** Depends on FuzzForge positioning
+**Nomad MIT Risk:** Depends on Crashwise positioning
 
 **Safe positioning (LOW risk):**
 - ✅ Market as "Android/Rust/Web security verticals"
@@ -993,7 +993,7 @@ job "fuzzforge-worker-android" {
   - Pre-built toolchains (Android, Rust, Web, etc.)
   - Dynamic workflows via mounted volumes (no image rebuild)
   - Better marketing (sell verticals, not orchestration)
-  - Safer Nomad BSL positioning
+  - Safer Nomad MIT positioning
 
 ### 2025-10-01: Unified MinIO Storage
 - **Decision:** Use MinIO for both dev and production (no LocalVolumeStorage)

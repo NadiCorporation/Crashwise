@@ -1,4 +1,4 @@
-# FuzzForge Vertical Workers
+# Crashwise Vertical Workers
 
 This directory contains vertical-specific worker implementations for the Temporal architecture.
 
@@ -81,7 +81,7 @@ worker-my-vertical:
   build:
     context: ./workers/my_vertical
     dockerfile: Dockerfile
-  container_name: fuzzforge-worker-my-vertical
+  container_name: crashwise-worker-my-vertical
   profiles:          # ← Prevents auto-start (saves RAM)
     - workers
     - my_vertical
@@ -98,15 +98,15 @@ worker-my-vertical:
     # MinIO configuration (same for all workers)
     STORAGE_BACKEND: s3
     S3_ENDPOINT: http://minio:9000
-    S3_ACCESS_KEY: fuzzforge
-    S3_SECRET_KEY: fuzzforge123
+    S3_ACCESS_KEY: crashwise
+    S3_SECRET_KEY: crashwise123
     S3_BUCKET: targets
     CACHE_DIR: /cache
   volumes:
     - ./backend/toolbox:/app/toolbox:ro
     - worker_my_vertical_cache:/cache
   networks:
-    - fuzzforge-network
+    - crashwise-network
   restart: "no"      # ← Don't auto-restart
 ```
 
@@ -117,7 +117,7 @@ worker-my-vertical:
 ```yaml
 volumes:
   worker_my_vertical_cache:
-    name: fuzzforge_worker_my_vertical_cache
+    name: crashwise_worker_my_vertical_cache
 ```
 
 ### Step 6: Create Workflows for Your Vertical
@@ -169,7 +169,7 @@ class MyWorkflow:
 docker-compose -f docker-compose.temporal.yaml up -d
 
 # Check worker logs
-docker logs -f fuzzforge-worker-my-vertical
+docker logs -f crashwise-worker-my-vertical
 
 # You should see:
 # "Discovered workflow: MyWorkflow from my_workflow (vertical: my_vertical)"
@@ -229,8 +229,8 @@ All workers support these environment variables:
 | `WORKER_TASK_QUEUE` | `{vertical}-queue` | Task queue name |
 | `MAX_CONCURRENT_ACTIVITIES` | `5` | Max concurrent activities per worker |
 | `S3_ENDPOINT` | `http://minio:9000` | MinIO/S3 endpoint |
-| `S3_ACCESS_KEY` | `fuzzforge` | S3 access key |
-| `S3_SECRET_KEY` | `fuzzforge123` | S3 secret key |
+| `S3_ACCESS_KEY` | `crashwise` | S3 access key |
+| `S3_SECRET_KEY` | `crashwise123` | S3 secret key |
 | `S3_BUCKET` | `targets` | Bucket for uploaded targets |
 | `CACHE_DIR` | `/cache` | Local cache directory |
 | `CACHE_MAX_SIZE` | `10GB` | Max cache size (not enforced yet) |
@@ -278,7 +278,7 @@ Check:
 
 Check:
 1. MinIO is healthy: `docker ps`
-2. Buckets exist: `docker exec fuzzforge-minio mc ls fuzzforge/targets`
+2. Buckets exist: `docker exec crashwise-minio mc ls crashwise/targets`
 3. S3 credentials are correct
 4. Target was uploaded: Check MinIO console at http://localhost:9001
 
@@ -318,13 +318,13 @@ Workers use Docker Compose profiles and CLI-managed lifecycle for resource optim
 
 ```bash
 # Start specific worker
-docker start fuzzforge-worker-ossfuzz
+docker start crashwise-worker-ossfuzz
 
 # Stop specific worker
-docker stop fuzzforge-worker-ossfuzz
+docker stop crashwise-worker-ossfuzz
 
 # Check worker status
-docker ps --filter "name=fuzzforge-worker"
+docker ps --filter "name=crashwise-worker"
 ```
 
 ### CLI Auto-Management

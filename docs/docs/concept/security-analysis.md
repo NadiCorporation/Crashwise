@@ -1,21 +1,21 @@
-# Security Analysis in FuzzForge: Concepts and Approach
+# Security Analysis in Crashwise: Concepts and Approach
 
-Security analysis is at the core of FuzzForge’s mission. This page explains the philosophy, methodologies, and integration patterns that shape how FuzzForge discovers vulnerabilities and helps teams secure their software. If you’re curious about what “security analysis” really means in this platform—and why it’s designed this way—read on.
+Security analysis is at the core of Crashwise’s mission. This page explains the philosophy, methodologies, and integration patterns that shape how Crashwise discovers vulnerabilities and helps teams secure their software. If you’re curious about what “security analysis” really means in this platform—and why it’s designed this way—read on.
 
 ---
 
-## Why Does FuzzForge Approach Security Analysis This Way?
+## Why Does Crashwise Approach Security Analysis This Way?
 
-FuzzForge’s security analysis is built on a few guiding principles:
+Crashwise’s security analysis is built on a few guiding principles:
 
-- **Defense in Depth:** No single tool or method catches everything. FuzzForge layers multiple analysis types—static, dynamic, secret detection, infrastructure checks, and fuzzing—to maximize coverage.
+- **Defense in Depth:** No single tool or method catches everything. Crashwise layers multiple analysis types—static, dynamic, secret detection, infrastructure checks, and fuzzing—to maximize coverage.
 - **Tool Diversity:** Different tools find different issues. Running several tools for each analysis type reduces blind spots and increases confidence in results.
 - **Standardized Results:** All findings are normalized into SARIF, a widely adopted format. This makes results easy to aggregate, review, and integrate with other tools.
-- **Automation and Integration:** Security analysis is only useful if it fits into real-world workflows. FuzzForge is designed for CI/CD, developer feedback, and automated reporting.
+- **Automation and Integration:** Security analysis is only useful if it fits into real-world workflows. Crashwise is designed for CI/CD, developer feedback, and automated reporting.
 
 ---
 
-## What Types of Security Analysis Does FuzzForge Perform?
+## What Types of Security Analysis Does Crashwise Perform?
 
 ### Static Analysis
 
@@ -65,11 +65,11 @@ FuzzForge’s security analysis is built on a few guiding principles:
 
 ---
 
-## How Does FuzzForge Integrate and Orchestrate Analysis?
+## How Does Crashwise Integrate and Orchestrate Analysis?
 
 ### Workflow Composition
 
-FuzzForge composes analysis workflows by combining different analysis types, each running in its own containerized environment. Inputs (code, configs, parameters) are fed into the appropriate tools, and results are normalized and aggregated.
+Crashwise composes analysis workflows by combining different analysis types, each running in its own containerized environment. Inputs (code, configs, parameters) are fed into the appropriate tools, and results are normalized and aggregated.
 
 ```mermaid
 graph TB
@@ -163,12 +163,12 @@ graph TB
 
 ---
 
-## What’s Next for Security Analysis in FuzzForge?
+## What’s Next for Security Analysis in Crashwise?
 
-FuzzForge is designed to evolve. Advanced techniques like machine learning for pattern recognition, contextual analysis, and business logic checks are on the roadmap. The goal: keep raising the bar for automated, actionable, and developer-friendly security analysis.
+Crashwise is designed to evolve. Advanced techniques like machine learning for pattern recognition, contextual analysis, and business logic checks are on the roadmap. The goal: keep raising the bar for automated, actionable, and developer-friendly security analysis.
 
 ---
 
 ## In Summary
 
-FuzzForge’s security analysis is comprehensive, layered, and designed for real-world integration. By combining multiple analysis types, normalizing results, and focusing on automation and developer experience, FuzzForge helps teams find and fix vulnerabilities—before attackers do.
+Crashwise’s security analysis is comprehensive, layered, and designed for real-world integration. By combining multiple analysis types, normalizing results, and focusing on automation and developer experience, Crashwise helps teams find and fix vulnerabilities—before attackers do.

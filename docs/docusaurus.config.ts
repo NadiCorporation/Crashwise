@@ -5,7 +5,7 @@ import type * as Preset from "@docusaurus/preset-classic";
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
 const config: Config = {
-  title: "FuzzForge Documentation",
+  title: "Crashwise Documentation",
   tagline: "AI-Powered Security Analysis Platform",
   favicon: "img/favicon.ico",
 
@@ -15,15 +15,15 @@ const config: Config = {
   },
 
   // Production url of documentation
-  url: "https://docs.fuzzforge.ai",
+  url: "https://docs.crashwise.ai",
   // The /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: "/",
   trailingSlash: false,
 
   // GitHub pages deployment config.
-  organizationName: "FuzzingLabs",
-  projectName: "fuzzforge_alpha",
+  organizationName: "YahyaToubali",
+  projectName: "Crashwise",
   deploymentBranch: "gh-pages",
 
   onBrokenLinks: "throw",
@@ -47,7 +47,7 @@ const config: Config = {
         docs: {
           sidebarPath: "./sidebars.ts",
           editUrl:
-            "https://github.com/FuzzingLabs/fuzzforge_alpha/tree/main/packages/create-docusaurus/templates/shared/",
+            "https://github.com/YahyaToubali/Crashwise/tree/main/packages/create-docusaurus/templates/shared/",
         },
         theme: {
           customCss: "./src/css/custom.css",
@@ -75,16 +75,16 @@ const config: Config = {
       {
         name: "keywords",
         content:
-          "documentation, fuzzforge, fuzzinglabs, fuzzing, security, ai, ai-powered, vulnerability, analysis, platform",
+          "documentation, crashwise, crashwise, fuzzing, security, ai, ai-powered, vulnerability, analysis, platform",
       },
       { name: "twitter:card", content: "summary_large_image" },
     ],
-    image: "img/fuzzforge-social-card.jpg",
+    image: "img/crashwise-social-card.jpg",
     navbar: {
-      title: "FuzzForge Docs",
+      title: "Crashwise Docs",
       logo: {
-        alt: "FuzzForge Logo",
-        src: "img/fuzzforge-logo-1024-rounded.png",
+        alt: "Crashwise Logo",
+        src: "img/crashwise-logo-1024-rounded.png",
       },
       items: [
         {
@@ -100,7 +100,7 @@ const config: Config = {
           label: "AI",
         },
         {
-          href: "https://github.com/FuzzingLabs/fuzzforge_ai",
+          href: "https://github.com/YahyaToubali/Crashwise",
           label: "GitHub",
           position: "right",
         },
@@ -135,7 +135,7 @@ const config: Config = {
           items: [
             {
               label: "Website",
-              href: "https://fuzzforge.ai/",
+              href: "https://crashwise.ai/",
             },
             {
               label: "Discord",
@@ -143,11 +143,11 @@ const config: Config = {
             },
             {
               label: "X",
-              href: "https://x.com/FuzzingLabs",
+              href: "https://x.com/YahyaToubali",
             },
             {
               label: "LinkedIn",
-              href: "https://www.linkedin.com/company/fuzzinglabs",
+              href: "https://www.linkedin.com/company/crashwise",
             },
           ],
         },
@@ -155,17 +155,17 @@ const config: Config = {
           title: "More",
           items: [
             {
-              label: "FuzzingLabs Blog",
-              to: "https://fuzzinglabs.com/security-blog/",
+              label: "Crashwise Blog",
+              to: "https://crashwise.com/security-blog/",
             },
             {
               label: "GitHub",
-              href: "https://github.com/FuzzingLabs/fuzzforge_ai",
+              href: "https://github.com/YahyaToubali/Crashwise",
             },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} FuzzingLabs - All Rights Reserved`,
+      copyright: `Copyright © ${new Date().getFullYear()} Crashwise`,
     },
     prism: {
       theme: prismThemes.github,

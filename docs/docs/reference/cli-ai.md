@@ -1,6 +1,6 @@
-# FuzzForge AI Reference: CLI, Environment, and API
+# Crashwise AI Reference: CLI, Environment, and API
 
-Welcome to the FuzzForge AI Reference! This document provides a comprehensive, no-nonsense guide to all the commands, environment variables, and API endpoints you’ll need to master the FuzzForge AI system. Use this as your quick lookup for syntax, options, and integration details.
+Welcome to the Crashwise AI Reference! This document provides a comprehensive, no-nonsense guide to all the commands, environment variables, and API endpoints you’ll need to master the Crashwise AI system. Use this as your quick lookup for syntax, options, and integration details.
 
 ---
 
@@ -15,7 +15,7 @@ Welcome to the FuzzForge AI Reference! This document provides a comprehensive, n
 | `/recall <query>` | Search conversation history | `/recall past calculations` |
 | `/artifacts [id]` | List or view artifacts | `/artifacts artifact_abc123` |
 | `/tasks [id]` | Show task status | `/tasks task_001` |
-| `/skills` | Display FuzzForge skills | `/skills` |
+| `/skills` | Display Crashwise skills | `/skills` |
 | `/sessions` | List active sessions | `/sessions` |
 | `/sendfile <agent> <path>` | Send file to agent | `/sendfile Analyzer ./code.py` |
 | `/clear` | Clear the screen | `/clear` |
@@ -46,14 +46,14 @@ get_agent_capabilities(agent_name)
 send_file_to_agent(agent_name, file_path, note)
 ```
 
-### FuzzForge Platform
+### Crashwise Platform
 ```python
-list_fuzzforge_workflows()
+list_crashwise_workflows()
 submit_security_scan_mcp(workflow_name, target_path, parameters)
 get_comprehensive_scan_summary(run_id)
-get_fuzzforge_run_status(run_id)
-get_fuzzforge_summary(run_id)
-get_fuzzforge_findings(run_id)
+get_crashwise_run_status(run_id)
+get_crashwise_summary(run_id)
+get_crashwise_findings(run_id)
 ```
 
 ### Task Management
@@ -67,7 +67,7 @@ get_task_list(task_list_id)
 
 ## Environment Variables
 
-Set these in `.fuzzforge/.env` to configure your FuzzForge AI instance.
+Set these in `.crashwise/.env` to configure your Crashwise AI instance.
 
 ### Model Configuration
 ```env
@@ -80,33 +80,33 @@ GEMINI_API_KEY=...                 # For Gemini models
 ### Memory & Persistence
 ```env
 SESSION_PERSISTENCE=sqlite         # sqlite|inmemory
-SESSION_DB_PATH=./fuzzforge_sessions.db
+SESSION_DB_PATH=./crashwise_sessions.db
 MEMORY_SERVICE=inmemory            # inmemory|vertexai
 ```
 
 ### Server & Communication
 ```env
-FUZZFORGE_PORT=10100               # A2A server port
+CRASHWISE_PORT=10100               # A2A server port
 ARTIFACT_STORAGE=inmemory          # inmemory|gcs
 GCS_ARTIFACT_BUCKET=artifacts      # For GCS storage
 ```
 
 ### Debug & Observability
 ```env
-FUZZFORGE_DEBUG=1                  # Enable debug logging
+CRASHWISE_DEBUG=1                  # Enable debug logging
 AGENTOPS_API_KEY=...               # Optional observability
 ```
 
 ### Platform Integration
 ```env
-FUZZFORGE_MCP_URL=http://localhost:8010/mcp
+CRASHWISE_MCP_URL=http://localhost:8010/mcp
 ```
 
 ---
 
 ## MCP (Model Context Protocol) Integration
 
-FuzzForge supports the Model Context Protocol (MCP), allowing LLM clients and AI assistants to interact directly with the security testing platform. All FastAPI endpoints are available as MCP-compatible tools, making security automation accessible to any MCP-aware client.
+Crashwise supports the Model Context Protocol (MCP), allowing LLM clients and AI assistants to interact directly with the security testing platform. All FastAPI endpoints are available as MCP-compatible tools, making security automation accessible to any MCP-aware client.
 
 ### MCP Endpoints
 
@@ -179,7 +179,7 @@ FuzzForge supports the Model Context Protocol (MCP), allowing LLM clients and AI
 ```json
 {
   "mcpServers": {
-    "fuzzforge": {
+    "crashwise": {
       "command": "curl",
       "args": ["-X", "POST", "http://localhost:8010/mcp"],
       "env": {}
@@ -192,7 +192,7 @@ FuzzForge supports the Model Context Protocol (MCP), allowing LLM clients and AI
 
 - **MCP Connection Failed:**
   Check backend status:
-  `docker compose ps fuzzforge-backend`
+  `docker compose ps crashwise-backend`
   `curl http://localhost:8000/health`
 
 - **Workflows Not Found:**
@@ -202,7 +202,7 @@ FuzzForge supports the Model Context Protocol (MCP), allowing LLM clients and AI
   `curl -X POST http://localhost:8000/workflows/security_assessment/submit -H "Content-Type: application/json" -d '{"target_path": "/your/path"}'`
 
 - **General Support:**
-  - Check Docker Compose logs: `docker compose logs fuzzforge-backend`
+  - Check Docker Compose logs: `docker compose logs crashwise-backend`
   - Verify MCP endpoint: `curl http://localhost:8010/mcp`
   - Test FastAPI endpoints directly before using MCP
 
@@ -212,7 +212,7 @@ For more, see the [How-To: MCP Integration](../how-to/mcp-integration.md).
 
 ## API Endpoints
 
-When running as an A2A server (`python -m fuzzforge_ai --port 10100`):
+When running as an A2A server (`python -m Crashwise --port 10100`):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -225,7 +225,7 @@ When running as an A2A server (`python -m fuzzforge_ai --port 10100`):
 
 ```json
 {
-  "name": "FuzzForge",
+  "name": "Crashwise",
   "description": "Multi-agent orchestrator with memory and security tools",
   "version": "1.0.0",
   "url": "http://localhost:10100",
@@ -280,7 +280,7 @@ When running as an A2A server (`python -m fuzzforge_ai --port 10100`):
 
 ```
 project_root/
-├── .fuzzforge/                   # Project-local config
+├── .crashwise/                   # Project-local config
 │   ├── .env                      # Environment variables
 │   ├── config.json               # Project configuration
 │   ├── agents.yaml               # Registered agents

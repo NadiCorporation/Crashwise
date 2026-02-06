@@ -1,6 +1,6 @@
-# Troubleshooting FuzzForge
+# Troubleshooting Crashwise
 
-Running into issues with FuzzForge? This guide will help you diagnose and resolve the most common problems—whether you’re just getting started or running complex workflows. Each section is focused on a specific area, with actionable steps and explanations.
+Running into issues with Crashwise? This guide will help you diagnose and resolve the most common problems—whether you’re just getting started or running complex workflows. Each section is focused on a specific area, with actionable steps and explanations.
 
 ---
 
@@ -9,7 +9,7 @@ Running into issues with FuzzForge? This guide will help you diagnose and resolv
 Before diving into specific errors, let’s check the basics:
 
 ```bash
-# Check all FuzzForge services
+# Check all Crashwise services
 docker compose -f docker-compose.yml ps
 
 # Test service health endpoints
@@ -61,7 +61,7 @@ AI-powered workflows (like `llm_secret_detection`) or the AI agent need API keys
 
 **Which workflows need API keys?**
 - ✅ **Don't need keys**: `security_assessment`, `gitleaks_detection`, `trufflehog_detection`, `atheris_fuzzing`, `cargo_fuzzing`
-- ⚠️ **Need keys**: `llm_secret_detection`, AI agent (`fuzzforge ai agent`)
+- ⚠️ **Need keys**: `llm_secret_detection`, AI agent (`crashwise ai agent`)
 
 ---
 
@@ -112,8 +112,8 @@ File upload to MinIO failed or worker can't download target.
 You see a warning message like:
 ```
 ⚠️  Could not check worker requirements: Cannot find docker-compose.yml.
-   Ensure backend is running, run from FuzzForge directory, or set
-   FUZZFORGE_ROOT environment variable.
+   Ensure backend is running, run from Crashwise directory, or set
+   CRASHWISE_ROOT environment variable.
    Continuing without worker management...
 ```
 
@@ -155,17 +155,17 @@ docker compose ps | grep worker
 **How to fix:**
 - Check if the service is running:
   ```bash
-  docker-compose -f docker-compose.yml ps fuzzforge-backend
+  docker-compose -f docker-compose.yml ps crashwise-backend
   docker-compose -f docker-compose.yml ps temporal
   ```
 - View logs for errors:
   ```bash
-  docker-compose -f docker-compose.yml logs fuzzforge-backend --tail 50
+  docker-compose -f docker-compose.yml logs crashwise-backend --tail 50
   docker-compose -f docker-compose.yml logs temporal --tail 20
   ```
 - Restart the affected service:
   ```bash
-  docker-compose -f docker-compose.yml restart fuzzforge-backend
+  docker-compose -f docker-compose.yml restart crashwise-backend
   docker-compose -f docker-compose.yml restart temporal
   ```
 
@@ -173,7 +173,7 @@ docker compose ps | grep worker
 
 ## CLI Issues
 
-### "fuzzforge: command not found"
+### "crashwise: command not found"
 
 **How to fix:**
 - Install the CLI:
@@ -187,12 +187,12 @@ docker compose ps | grep worker
   ```
 - Check your PATH:
   ```bash
-  which fuzzforge
+  which crashwise
   echo $PATH
   ```
 - As a fallback:
   ```bash
-  python -m fuzzforge_cli --help
+  python -m crashwise_cli --help
   ```
 
 ### CLI connection errors
@@ -201,11 +201,11 @@ docker compose ps | grep worker
 - Make sure the backend is running and healthy.
 - Check your CLI config:
   ```bash
-  fuzzforge config show
+  crashwise config show
   ```
 - Update the server URL if needed:
   ```bash
-  fuzzforge config set-server http://localhost:8000
+  crashwise config set-server http://localhost:8000
   ```
 
 ---
@@ -223,8 +223,8 @@ docker compose ps | grep worker
   ```
 - Clean worker cache manually if needed:
   ```bash
-  docker exec fuzzforge-worker-python rm -rf /cache/*
-  docker exec fuzzforge-worker-rust rm -rf /cache/*
+  docker exec crashwise-worker-python rm -rf /cache/*
+  docker exec crashwise-worker-rust rm -rf /cache/*
   ```
 
 ### High memory usage
@@ -244,7 +244,7 @@ docker compose ps | grep worker
 - Check Docker network configuration:
   ```bash
   docker network ls
-  docker network inspect fuzzforge-temporal_default
+  docker network inspect crashwise-temporal_default
   ```
 - Recreate the network:
   ```bash
@@ -279,7 +279,7 @@ docker compose ps | grep worker
 export TEMPORAL_LOGGING_LEVEL=DEBUG
 docker-compose -f docker-compose.yml down
 docker-compose -f docker-compose.yml up -d
-docker-compose -f docker-compose.yml logs fuzzforge-backend -f
+docker-compose -f docker-compose.yml logs crashwise-backend -f
 ```
 
 ### Collect diagnostic info
@@ -288,7 +288,7 @@ Save and run this script to gather info for support:
 
 ```bash
 #!/bin/bash
-echo "=== FuzzForge Diagnostics ==="
+echo "=== Crashwise Diagnostics ==="
 date
 docker compose -f docker-compose.yml ps
 curl -s http://localhost:8000/health || echo "Backend unhealthy"
@@ -318,4 +318,4 @@ docker compose -f docker-compose.yml logs --tail 10
 
 ---
 
-If you have a persistent or unusual issue, don’t hesitate to reach out with logs and details. FuzzForge is designed to be robust, but every environment is unique—and your feedback helps make it better!
+If you have a persistent or unusual issue, don’t hesitate to reach out with logs and details. Crashwise is designed to be robust, but every environment is unique—and your feedback helps make it better!

@@ -1,5 +1,5 @@
 """
-Fuzzing modules for FuzzForge
+Fuzzing modules for Crashwise
 
 This package contains fuzzing modules for different fuzzing engines.
 """

@@ -1,7 +1,7 @@
 [project]
 name = "backend"
 version = "0.7.3"
-description = "FuzzForge OSS backend"
+description = "Crashwise OSS backend"
 authors = []
 readme = "README.md"
 requires-python = ">=3.11"

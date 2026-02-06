@@ -1,6 +1,6 @@
 # Workspace Isolation
 
-FuzzForge's workspace isolation system ensures that concurrent workflow runs don't interfere with each other. This is critical for fuzzing and security analysis workloads where multiple workflows might process the same target simultaneously.
+Crashwise's workspace isolation system ensures that concurrent workflow runs don't interfere with each other. This is critical for fuzzing and security analysis workloads where multiple workflows might process the same target simultaneously.
 
 ---
 
@@ -21,7 +21,7 @@ This causes problems when:
 
 ### The Solution
 
-FuzzForge implements configurable workspace isolation with three modes:
+Crashwise implements configurable workspace isolation with three modes:
 
 1. **isolated** (default): Each run gets its own workspace
 2. **shared**: All runs share the same workspace
@@ -310,7 +310,7 @@ class MyWorkflow:
 **Diagnosis:**
 ```bash
 # Check workspace paths in logs
-docker logs fuzzforge-worker-python | grep "User code downloaded"
+docker logs crashwise-worker-python | grep "User code downloaded"
 
 # Should see run-specific paths:
 # ✅ /cache/abc-123/run-xyz-456/workspace  (isolated)
@@ -326,7 +326,7 @@ docker logs fuzzforge-worker-python | grep "User code downloaded"
 **Diagnosis:**
 ```bash
 # Check MinIO downloads in logs
-docker logs fuzzforge-worker-python | grep "downloading from MinIO"
+docker logs crashwise-worker-python | grep "downloading from MinIO"
 
 # If many downloads for same target_id with shared workflow:
 # Problem is using "isolated" mode for read-only workflow
@@ -341,10 +341,10 @@ docker logs fuzzforge-worker-python | grep "downloading from MinIO"
 **Diagnosis:**
 ```bash
 # Check cache size
-docker exec fuzzforge-worker-python du -sh /cache
+docker exec crashwise-worker-python du -sh /cache
 
 # Check LRU settings
-docker exec fuzzforge-worker-python env | grep CACHE
+docker exec crashwise-worker-python env | grep CACHE
 ```
 
 **Solution:**
@@ -356,7 +356,7 @@ docker exec fuzzforge-worker-python env | grep CACHE
 
 ## Summary
 
-FuzzForge's workspace isolation system provides:
+Crashwise's workspace isolation system provides:
 
 1. **Safe concurrent execution** for fuzzing and analysis workflows
 2. **Three isolation modes** to balance safety vs efficiency
@@ -374,5 +374,5 @@ FuzzForge's workspace isolation system provides:
 
 **Next Steps:**
 - Review your workflows and set appropriate isolation modes
-- Monitor cache usage with `docker exec fuzzforge-worker-python du -sh /cache`
+- Monitor cache usage with `docker exec crashwise-worker-python du -sh /cache`
 - Adjust `CACHE_MAX_SIZE` if needed for your workload

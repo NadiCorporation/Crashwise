@@ -1,6 +1,6 @@
-# FuzzForge Vulnerable Test Project
+# Crashwise Vulnerable Test Project
 
-This directory contains a comprehensive vulnerable test application designed to validate FuzzForge's security workflows. The project contains multiple categories of security vulnerabilities to test `security_assessment`, `gitleaks_detection`, `trufflehog_detection`, and `llm_secret_detection` workflows.
+This directory contains a comprehensive vulnerable test application designed to validate Crashwise's security workflows. The project contains multiple categories of security vulnerabilities to test `security_assessment`, `gitleaks_detection`, `trufflehog_detection`, and `llm_secret_detection` workflows.
 
 ## Test Project Overview
 
@@ -38,7 +38,7 @@ This directory contains a comprehensive vulnerable test application designed to 
 
 ## Usage Instructions
 
-### Testing with FuzzForge Workflows
+### Testing with Crashwise Workflows
 
 The vulnerable application can be tested with multiple security workflows:
 

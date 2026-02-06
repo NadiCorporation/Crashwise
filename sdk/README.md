@@ -1,10 +1,10 @@
-# FuzzForge SDK
+# Crashwise SDK
 
-A comprehensive Python SDK for the FuzzForge security testing workflow orchestration platform.
+A comprehensive Python SDK for the Crashwise security testing workflow orchestration platform.
 
 ## Features
 
-- **Complete API Coverage**: All FuzzForge API endpoints supported
+- **Complete API Coverage**: All Crashwise API endpoints supported
 - **File Upload**: Automatic tarball creation and multipart upload for local files
 - **Async & Sync**: Both synchronous and asynchronous client methods
 - **Real-time Monitoring**: WebSocket and Server-Sent Events for live fuzzing updates
@@ -17,13 +17,13 @@ A comprehensive Python SDK for the FuzzForge security testing workflow orchestra
 Install using uv (recommended):
 
 ```bash
-uv add fuzzforge-sdk
+uv add crashwise-sdk
 ```
 
 Or with pip:
 
 ```bash
-pip install fuzzforge-sdk
+pip install crashwise-sdk
 ```
 
 ## Quick Start
@@ -31,11 +31,11 @@ pip install fuzzforge-sdk
 ### Method 1: File Upload (Recommended)
 
 ```python
-from fuzzforge_sdk import FuzzForgeClient
+from crashwise_sdk import CrashwiseClient
 from pathlib import Path
 
 # Initialize client
-client = FuzzForgeClient(base_url="http://localhost:8000")
+client = CrashwiseClient(base_url="http://localhost:8000")
 
 # List available workflows
 workflows = client.list_workflows()
@@ -64,11 +64,11 @@ client.close()
 ### Method 2: Path-Based Submission (Legacy)
 
 ```python
-from fuzzforge_sdk import FuzzForgeClient
-from fuzzforge_sdk.utils import create_workflow_submission
+from crashwise_sdk import CrashwiseClient
+from crashwise_sdk.utils import create_workflow_submission
 
 # Initialize client
-client = FuzzForgeClient(base_url="http://localhost:8000")
+client = CrashwiseClient(base_url="http://localhost:8000")
 
 # Submit a workflow with path (only works if backend can access the path)
 submission = create_workflow_submission(
@@ -120,21 +120,21 @@ def submit_workflow_with_upload(
     Raises:
         FileNotFoundError: If target_path doesn't exist
         ValidationError: If parameters are invalid
-        FuzzForgeHTTPError: If upload fails
+        CrashwiseHTTPError: If upload fails
     """
 ```
 
 **Example with progress tracking:**
 
 ```python
-from fuzzforge_sdk import FuzzForgeClient
+from crashwise_sdk import CrashwiseClient
 from pathlib import Path
 
 def upload_progress(bytes_sent, total_bytes):
     pct = (bytes_sent / total_bytes) * 100
     print(f"Upload progress: {pct:.1f}% ({bytes_sent}/{total_bytes} bytes)")
 
-client = FuzzForgeClient(base_url="http://localhost:8000")
+client = CrashwiseClient(base_url="http://localhost:8000")
 
 response = client.submit_workflow_with_upload(
     workflow_name="security_assessment",
@@ -152,10 +152,10 @@ Async version of `submit_workflow_with_upload()`.
 
 ```python
 import asyncio
-from fuzzforge_sdk import FuzzForgeClient
+from crashwise_sdk import CrashwiseClient
 
 async def main():
-    client = FuzzForgeClient(base_url="http://localhost:8000")
+    client = CrashwiseClient(base_url="http://localhost:8000")
 
     response = await client.asubmit_workflow_with_upload(
         workflow_name="security_assessment",
@@ -238,14 +238,14 @@ Workflow execution
 The SDK provides detailed error context:
 
 ```python
-from fuzzforge_sdk import FuzzForgeClient
-from fuzzforge_sdk.exceptions import (
-    FuzzForgeHTTPError,
+from crashwise_sdk import CrashwiseClient
+from crashwise_sdk.exceptions import (
+    CrashwiseHTTPError,
     ValidationError,
     ConnectionError
 )
 
-client = FuzzForgeClient(base_url="http://localhost:8000")
+client = CrashwiseClient(base_url="http://localhost:8000")
 
 try:
     response = client.submit_workflow_with_upload(
@@ -256,7 +256,7 @@ except FileNotFoundError as e:
     print(f"Target not found: {e}")
 except ValidationError as e:
     print(f"Invalid parameters: {e}")
-except FuzzForgeHTTPError as e:
+except CrashwiseHTTPError as e:
     print(f"Upload failed (HTTP {e.status_code}): {e.message}")
     if e.context.response_data:
         print(f"Server response: {e.context.response_data}")

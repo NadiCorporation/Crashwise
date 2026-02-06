@@ -16,8 +16,8 @@ models, updating the virtual key, and exercising the A2A hot-swap flow.
 - Master key (`LITELLM_MASTER_KEY`) and task-agent virtual key (auto-generated
   during bootstrap)
 
-> UI access uses `UI_USERNAME` / `UI_PASSWORD` (defaults: `fuzzforge` /
-> `fuzzforge123`). Change them by exporting new values before running compose.
+> UI access uses `UI_USERNAME` / `UI_PASSWORD` (defaults: `crashwise` /
+> `crashwise123`). Change them by exporting new values before running compose.
 
 ## Register Provider Models
 
@@ -151,7 +151,7 @@ To wipe the LiteLLM state and rerun bootstrap:
 ```bash
 docker compose down llm-proxy llm-proxy-db llm-proxy-bootstrap
 
-docker volume rm fuzzforge_litellm_proxy_data fuzzforge_litellm_proxy_db
+docker volume rm crashwise_litellm_proxy_data crashwise_litellm_proxy_db
 
 docker compose up -d llm-proxy-db llm-proxy
 ```

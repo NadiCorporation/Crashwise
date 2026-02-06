@@ -1,10 +1,10 @@
 # Architecture
 
-FuzzForge is a distributed, containerized platform for security analysis workflows. Its architecture is designed for scalability, isolation, and reliability, drawing on modern patterns like microservices and orchestration. This page explains the core architectural concepts behind FuzzForge, meaning what the main components are, how they interact, and why the system is structured this way.
+Crashwise is a distributed, containerized platform for security analysis workflows. Its architecture is designed for scalability, isolation, and reliability, drawing on modern patterns like microservices and orchestration. This page explains the core architectural concepts behind Crashwise, meaning what the main components are, how they interact, and why the system is structured this way.
 
 :::warning
 
-FuzzForge’s architecture is evolving. While the long-term goal is a hexagonal architecture, the current implementation is still in transition. Expect changes as the platform matures.
+Crashwise’s architecture is evolving. While the long-term goal is a hexagonal architecture, the current implementation is still in transition. Expect changes as the platform matures.
 
 :::
 
@@ -12,7 +12,7 @@ FuzzForge’s architecture is evolving. While the long-term goal is a hexagonal 
 
 ## Why This Architecture?
 
-FuzzForge’s architecture is shaped by several key goals:
+Crashwise’s architecture is shaped by several key goals:
 
 - **Scalability:** Handle many workflows in parallel, scaling up or down as needed.
 - **Isolation:** Run each workflow in its own secure environment, minimizing risk.
@@ -21,7 +21,7 @@ FuzzForge’s architecture is shaped by several key goals:
 
 ## High-Level System Overview
 
-At a glance, FuzzForge is organized into several layers, each with a clear responsibility:
+At a glance, Crashwise is organized into several layers, each with a clear responsibility:
 
 - **Client Layer:** Where users and external systems interact (CLI, API clients, MCP server).
 - **API Layer:** The FastAPI backend, which exposes REST endpoints and manages requests.
@@ -169,7 +169,7 @@ sequenceDiagram
 - **API Security:** All endpoints validate inputs, enforce rate limits, and log requests for auditing.
 - **No Host Access:** Workers access targets via MinIO, not host filesystem.
 
-## How Does FuzzForge Scale?
+## How Does Crashwise Scale?
 
 - **Horizontally:** Add more vertical workers to handle more workflows in parallel. Scale specific worker types based on demand.
 - **Vertically:** Adjust CPU and memory limits for workers and adjust concurrent activity limits.
@@ -201,11 +201,11 @@ services:
 
 Example configuration:
 ```bash
-DATABASE_URL=postgresql://postgres:postgres@postgres:5432/fuzzforge
+DATABASE_URL=postgresql://postgres:postgres@postgres:5432/crashwise
 TEMPORAL_ADDRESS=temporal:7233
 S3_ENDPOINT=http://minio:9000
-S3_ACCESS_KEY=fuzzforge
-S3_SECRET_KEY=fuzzforge123
+S3_ACCESS_KEY=crashwise
+S3_SECRET_KEY=crashwise123
 ```
 
 ## How Are Failures Handled?
@@ -223,4 +223,4 @@ S3_SECRET_KEY=fuzzforge123
 
 ## In Summary
 
-FuzzForge’s architecture is designed to be robust, scalable, and secure—ready to handle demanding security analysis workflows in a modern, distributed environment. As the platform evolves, expect even more modularity and flexibility, making it easier to adapt to new requirements and technologies.
+Crashwise’s architecture is designed to be robust, scalable, and secure—ready to handle demanding security analysis workflows in a modern, distributed environment. As the platform evolves, expect even more modularity and flexibility, making it easier to adapt to new requirements and technologies.

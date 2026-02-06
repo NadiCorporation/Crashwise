@@ -1,5 +1,5 @@
 """
-Temporal integration for FuzzForge.
+Temporal integration for Crashwise.
 
 Handles workflow execution, monitoring, and management.
 """

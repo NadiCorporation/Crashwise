@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from fuzzforge_cli.secure_storage import SecureStorage, SecureStorageError, get_storage
+from crashwise_cli.secure_storage import SecureStorage, SecureStorageError, get_storage
 
 
 class TestSecureStorage:

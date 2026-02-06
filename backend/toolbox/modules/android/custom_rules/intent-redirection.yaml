@@ -5,7 +5,7 @@ rules:
     message: "Potential intent redirection: using getIntent().getExtras() without validation."
     metadata:
       authors:
-        - Guerric ELOI (FuzzingLabs)
+        - Guerric ELOI (Crashwise)
       category: intent
       area: intercomponent
       verification-level: [L1]

@@ -1,6 +1,6 @@
 {
-  "name": "FuzzForge Security Testing Platform",
-  "description": "MCP server for FuzzForge security testing workflows via Docker Compose",
+  "name": "Crashwise Security Testing Platform",
+  "description": "MCP server for Crashwise security testing workflows via Docker Compose",
   "version": "0.6.0",
   "connection": {
     "type": "http",
@@ -10,7 +10,7 @@
     "mcp_endpoint": "/mcp"
   },
   "docker_compose": {
-    "service": "fuzzforge-backend",
+    "service": "crashwise-backend",
     "command": "docker compose up -d",
     "health_check": "http://localhost:8000/health"
   },
@@ -75,7 +75,7 @@
         "3. Monitor status and get results"
       ],
       "workflow_name": "infrastructure_scan",
-      "target_path": "/Users/tduhamel/Documents/FuzzingLabs/fuzzforge_alpha/test_projects/infrastructure_vulnerable",
+      "target_path": "/path/to/crashwise/test_projects/infrastructure_vulnerable",
       "parameters": {
         "checkov_config": {
           "severity": ["HIGH", "MEDIUM", "LOW"]
@@ -88,7 +88,7 @@
     "static_analysis_scan": {
       "description": "Run static analysis security scan",
       "workflow_name": "static_analysis_scan",
-      "target_path": "/Users/tduhamel/Documents/FuzzingLabs/fuzzforge_alpha/test_projects/static_analysis_vulnerable",
+      "target_path": "/path/to/crashwise/test_projects/static_analysis_vulnerable",
       "parameters": {
         "bandit_config": {
           "severity": ["HIGH", "MEDIUM", "LOW"]
@@ -101,7 +101,7 @@
     "secret_detection_scan": {
       "description": "Run secret detection scan",
       "workflow_name": "secret_detection_scan",
-      "target_path": "/Users/tduhamel/Documents/FuzzingLabs/fuzzforge_alpha/test_projects/secret_detection_vulnerable",
+      "target_path": "/path/to/crashwise/test_projects/secret_detection_vulnerable",
       "parameters": {
         "trufflehog_config": {
           "verified_only": false

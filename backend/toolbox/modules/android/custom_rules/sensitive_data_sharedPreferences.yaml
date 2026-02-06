@@ -5,7 +5,7 @@ rules:
     message: "Sensitive data may be stored in SharedPreferences. Please review the key '$KEY'."
     metadata:
       authors:
-        - Guerric ELOI (FuzzingLabs)
+        - Guerric ELOI (Crashwise)
       owasp-mobile: M2
       category: security
       area: storage

@@ -17,8 +17,8 @@ import pytest
 from typer.testing import CliRunner
 
 # Import CLI app
-from fuzzforge_cli.main import app
-from fuzzforge_cli.policy import Policy, ProviderPolicy, FallbackPolicy
+from crashwise_cli.main import app
+from crashwise_cli.policy import Policy, ProviderPolicy, FallbackPolicy
 
 
 runner = CliRunner()
@@ -90,11 +90,11 @@ READ of size 4 in fuzzer::LLVMFuzzerTestOneInput
 
         with patch.dict(os.environ, env_vars, clear=False):
             with patch(
-                "fuzzforge_cli.policy.Policy.from_file",
+                "crashwise_cli.policy.Policy.from_file",
                 return_value=Policy.from_file(mock_policy_file),
             ):
                 with patch(
-                    "fuzzforge_cli.commands.triage.get_project_db"
+                    "crashwise_cli.commands.triage.get_project_db"
                 ) as mock_get_db:
                     # Mock database with findings
                     mock_db = Mock()
@@ -130,15 +130,15 @@ READ of size 4 in fuzzer::LLVMFuzzerTestOneInput
         - Command should succeed
         """
         with patch(
-            "fuzzforge_cli.policy.Policy.from_file",
+            "crashwise_cli.policy.Policy.from_file",
             return_value=Policy.from_file(mock_policy_file),
         ):
-            with patch("fuzzforge_cli.commands.triage.get_project_db") as mock_get_db:
+            with patch("crashwise_cli.commands.triage.get_project_db") as mock_get_db:
                 with patch(
-                    "fuzzforge_cli.llm_resolver.get_storage"
+                    "crashwise_cli.llm_resolver.get_storage"
                 ) as mock_get_storage:
                     with patch(
-                        "fuzzforge_cli.llm_resolver._get_env_credential"
+                        "crashwise_cli.llm_resolver._get_env_credential"
                     ) as mock_env:
                         # Mock OAuth token available
                         mock_storage = Mock()
@@ -171,8 +171,8 @@ READ of size 4 in fuzzer::LLVMFuzzerTestOneInput
 
     def test_triage_with_explicit_provider_flag(self):
         """Test that --provider flag is passed through to resolver."""
-        with patch("fuzzforge_cli.commands.triage.get_project_db") as mock_get_db:
-            with patch("fuzzforge_cli.llm_resolver.get_llm_client") as mock_get_llm:
+        with patch("crashwise_cli.commands.triage.get_project_db") as mock_get_db:
+            with patch("crashwise_cli.llm_resolver.get_llm_client") as mock_get_llm:
                 # Mock successful LLM config
                 mock_get_llm.return_value = {
                     "provider": "openai_codex",
@@ -214,8 +214,8 @@ class TestTriageOutputFormats:
 
     def test_triage_table_output(self):
         """Test default table output format."""
-        with patch("fuzzforge_cli.commands.triage.get_project_db") as mock_get_db:
-            with patch("fuzzforge_cli.llm_resolver.get_llm_client") as mock_get_llm:
+        with patch("crashwise_cli.commands.triage.get_project_db") as mock_get_db:
+            with patch("crashwise_cli.llm_resolver.get_llm_client") as mock_get_llm:
                 mock_get_llm.return_value = {
                     "provider": "test",
                     "model": "test-model",
@@ -249,7 +249,7 @@ class TestTokenSecurity:
         for key in test_keys:
             with patch.dict(os.environ, {"OPENAI_API_KEY": key}):
                 with patch(
-                    "fuzzforge_cli.commands.triage.get_project_db"
+                    "crashwise_cli.commands.triage.get_project_db"
                 ) as mock_get_db:
                     mock_db = Mock()
                     mock_db.get_findings.return_value = []  # No findings
@@ -290,7 +290,7 @@ class TestCrashLogParsing:
 
     def test_parse_asan_crash(self):
         """Test parsing AddressSanitizer crash log."""
-        from fuzzforge_cli.commands.triage import parse_crash_log
+        from crashwise_cli.commands.triage import parse_crash_log
 
         log = """
 ERROR: AddressSanitizer: heap-buffer-overflow on address 0x6020000000a0
@@ -308,7 +308,7 @@ READ of size 4 in fuzzer::LLVMFuzzerTestOneInput
 
     def test_parse_python_exception(self):
         """Test parsing Python exception."""
-        from fuzzforge_cli.commands.triage import parse_crash_log
+        from crashwise_cli.commands.triage import parse_crash_log
 
         log = """
 Traceback (most recent call last):
@@ -333,7 +333,7 @@ class TestPolicyFileEnforcement:
         Create real policy file and verify it's enforced.
         """
         # Create restrictive policy
-        policy_dir = tmp_path / ".config" / "fuzzforge"
+        policy_dir = tmp_path / ".config" / "crashwise"
         policy_dir.mkdir(parents=True)
         policy_file = policy_dir / "policy.yaml"
 
@@ -350,10 +350,10 @@ fallback:
         # Mock home directory
         with patch.dict(os.environ, {"HOME": str(tmp_path)}):
             with patch("pathlib.Path.home", return_value=tmp_path):
-                with patch("fuzzforge_cli.policy._policy", None):  # Force reload
+                with patch("crashwise_cli.policy._policy", None):  # Force reload
                     # Now test with a blocked provider
                     with patch(
-                        "fuzzforge_cli.commands.triage.get_project_db"
+                        "crashwise_cli.commands.triage.get_project_db"
                     ) as mock_get_db:
                         mock_db = Mock()
                         mock_db.get_findings.return_value = [

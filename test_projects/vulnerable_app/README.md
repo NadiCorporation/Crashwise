@@ -1,6 +1,6 @@
 # Vulnerable Test Application
 
-This is a **TEST PROJECT** designed to trigger security findings in the FuzzForge security assessment workflow.
+This is a **TEST PROJECT** designed to trigger security findings in the Crashwise security assessment workflow.
 
 ⚠️ **WARNING**: This application contains intentional security vulnerabilities for testing purposes only. DO NOT use any of this code in production!
 
@@ -75,7 +75,7 @@ When running the security assessment workflow, you should see:
 
 ## Testing
 
-To test with FuzzForge:
+To test with Crashwise:
 
 ```bash
 curl -X POST "http://localhost:8000/workflows/security_assessment/submit" \

@@ -1,17 +1,17 @@
 <p align="center">
-  <img src="docs/static/img/fuzzforge_banner_github.png" alt="FuzzForge Banner" width="100%">
+  <img src="docs/static/img/crashwise_banner_github.png" alt="Crashwise Banner" width="100%">
 </p>
-<h1 align="center">🚧 FuzzForge is under active development</h1>
+<h1 align="center">🚧 Crashwise is under active development</h1>
 
 <p align="center"><strong>AI-powered workflow automation and AI Agents for AppSec, Fuzzing & Offensive Security</strong></p>
 
 <p align="center">
   <a href="https://discord.gg/8XEX33UUwZ"><img src="https://img.shields.io/discord/1420767905255133267?logo=discord&label=Discord" alt="Discord"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSL%20%2B%20Apache-orange" alt="License: BSL + Apache"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"/></a>
-  <a href="https://fuzzforge.ai"><img src="https://img.shields.io/badge/Website-fuzzforge.ai-blue" alt="Website"/></a>
+  <a href="https://crashwise.ai"><img src="https://img.shields.io/badge/Website-crashwise.ai-blue" alt="Website"/></a>
   <img src="https://img.shields.io/badge/version-0.7.3-green" alt="Version">
-  <a href="https://github.com/FuzzingLabs/fuzzforge_ai/stargazers"><img src="https://img.shields.io/github/stars/FuzzingLabs/fuzzforge_ai?style=social" alt="GitHub Stars"></a>
+  <a href="https://github.com/YahyaToubali/Crashwise/stargazers"><img src="https://img.shields.io/github/stars/YahyaToubali/Crashwise?style=social" alt="GitHub Stars"></a>
   
 </p>
 
@@ -31,16 +31,16 @@
 
 ## 🚀 Overview
 
-**FuzzForge** helps security researchers and engineers automate **application security** and **offensive security** workflows with the power of AI and fuzzing frameworks.
+**Crashwise** helps security researchers and engineers automate **application security** and **offensive security** workflows with the power of AI and fuzzing frameworks.
 
 - Orchestrate static & dynamic analysis
 - Automate vulnerability research
 - Scale AppSec testing with AI agents
 - Build, share & reuse workflows across teams
 
-FuzzForge is **open source**, built to empower security teams, researchers, and the community.
+Crashwise is **open source**, built to empower security teams, researchers, and the community.
 
-> 🚧 FuzzForge is under active development. Expect breaking changes.
+> 🚧 Crashwise is under active development. Expect breaking changes.
 >
 > **Note:** Fuzzing workflows (`atheris_fuzzing`, `cargo_fuzzing`, `ossfuzz_campaign`) are in early development. OSS-Fuzz integration is under heavy active development. For stable workflows, use: `security_assessment`, `gitleaks_detection`, `trufflehog_detection`, or `llm_secret_detection`.
 
@@ -52,7 +52,7 @@ FuzzForge is **open source**, built to empower security teams, researchers, and 
 
 _Setting up and running security workflows through the interface_
 
-👉 More installation options in the [Documentation](https://docs.fuzzforge.ai).
+👉 More installation options in the [Documentation](https://docs.crashwise.ai).
 
 ---
 
@@ -69,17 +69,17 @@ _Setting up and running security workflows through the interface_
 
 ## ⭐ Support the Project
 
-<a href="https://github.com/FuzzingLabs/fuzzforge_ai/stargazers">
-  <img src="https://img.shields.io/github/stars/FuzzingLabs/fuzzforge_ai?style=social" alt="GitHub Stars">
+<a href="https://github.com/YahyaToubali/Crashwise/stargazers">
+  <img src="https://img.shields.io/github/stars/YahyaToubali/Crashwise?style=social" alt="GitHub Stars">
 </a>
 
-If you find FuzzForge useful, please star the repo to support development 🚀
+If you find Crashwise useful, please star the repo to support development 🚀
 
 ---
 
 ## 🔍 Secret Detection Benchmarks
 
-FuzzForge includes three secret detection workflows benchmarked on a controlled dataset of **32 documented secrets** (12 Easy, 10 Medium, 10 Hard):
+Crashwise includes three secret detection workflows benchmarked on a controlled dataset of **32 documented secrets** (12 Easy, 10 Medium, 10 Hard):
 
 | Tool | Recall | Secrets Found | Speed |
 |------|--------|---------------|-------|
@@ -123,18 +123,18 @@ cp volumes/env/.env.template volumes/env/.env
 
 This is required for:
 - `llm_secret_detection` workflow
-- AI agent features (`ff ai agent`)
+- AI agent features (`cw ai agent`)
 
 Basic security workflows (gitleaks, trufflehog, security_assessment) work without this configuration.
 
 ### CLI Installation
 
-After installing the requirements, install the FuzzForge CLI:
+After installing the requirements, install the Crashwise CLI:
 
 ```bash
 # Clone the repository
-git clone https://github.com/fuzzinglabs/fuzzforge_ai.git
-cd fuzzforge_ai
+git clone https://github.com/YahyaToubali/Crashwise.git
+cd Crashwise
 
 # Install CLI with uv (from the root directory)
 uv tool install --python python3.12 .
@@ -148,13 +148,13 @@ Run your first workflow with **Temporal orchestration** and **automatic file upl
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/fuzzinglabs/fuzzforge_ai.git
-cd fuzzforge_ai
+git clone https://github.com/YahyaToubali/Crashwise.git
+cd Crashwise
 
 # 2. Copy the default LLM env config
 cp volumes/env/.env.template volumes/env/.env
 
-# 3. Start FuzzForge with Temporal
+# 3. Start Crashwise with Temporal
 docker compose up -d
 
 # 4. Start the Python worker (needed for security_assessment workflow)
@@ -178,8 +178,8 @@ docker compose up -d worker-python
 ```bash
 # 5. Run your first workflow (files are automatically uploaded)
 cd test_projects/vulnerable_app/
-fuzzforge init                           # Initialize FuzzForge project
-ff workflow run security_assessment .    # Start workflow - CLI uploads files automatically!
+crashwise init                           # Initialize Crashwise project
+cw workflow run security_assessment .    # Start workflow - CLI uploads files automatically!
 
 # The CLI will:
 # - Detect the local directory
@@ -192,7 +192,7 @@ ff workflow run security_assessment .    # Start workflow - CLI uploads files au
 - **Temporal**: Workflow orchestration (UI at http://localhost:8080)
 - **MinIO**: File storage for targets (Console at http://localhost:9001)
 - **Vertical Workers**: Pre-built workers with security toolchains
-- **Backend API**: FuzzForge REST API (http://localhost:8000)
+- **Backend API**: Crashwise REST API (http://localhost:8000)
 
 ## AI-Powered Workflow Execution
 
@@ -202,10 +202,9 @@ _AI agents automatically analyzing code and providing security insights_
 
 ## 📚 Resources
 
-- 🌐 [Website](https://fuzzforge.ai)
-- 📖 [Documentation](https://docs.fuzzforge.ai)
+- 🌐 [Website](https://crashwise.ai)
+- 📖 [Documentation](https://docs.crashwise.ai)
 - 💬 [Community Discord](https://discord.gg/8XEX33UUwZ)
-- 🎓 [FuzzingLabs Academy](https://academy.fuzzinglabs.com/?coupon=GITHUB_FUZZFORGE)
 
 ---
 
@@ -239,5 +238,5 @@ Planned features and improvements:
 
 ## 📜 License
 
-FuzzForge is released under the **Business Source License (BSL) 1.1**, with an automatic fallback to **Apache 2.0** after 4 years.  
+Crashwise is released under the **MIT License**.  
 See [LICENSE](LICENSE) and [LICENSE-APACHE](LICENSE-APACHE) for details.

@@ -1,6 +1,6 @@
 # Docker Compose Override for CI/CD Environments
 #
-# This file optimizes FuzzForge for ephemeral CI/CD environments where:
+# This file optimizes Crashwise for ephemeral CI/CD environments where:
 # - Data persistence is not needed
 # - Fast startup is critical
 # - Disk I/O can be bypassed
@@ -106,5 +106,5 @@ volumes:
 
 # Networks - Keep the same
 networks:
-  fuzzforge-network:
+  crashwise-network:
     driver: bridge

@@ -1,6 +1,6 @@
 {
   "tool": {
-    "name": "FuzzForge Security Assessment",
+    "name": "Crashwise Security Assessment",
     "version": "1.0.0"
   },
   "summary": {
@@ -74,9 +74,9 @@
     {
       "rule_id": "sensitive_file_medium",
       "severity": "warning",
-      "message": "Found potentially sensitive file at .fuzzforge/.env",
+      "message": "Found potentially sensitive file at .crashwise/.env",
       "location": {
-        "file": ".fuzzforge/.env",
+        "file": ".crashwise/.env",
         "line": null,
         "column": null
       }
@@ -84,9 +84,9 @@
     {
       "rule_id": "sensitive_file_medium",
       "severity": "warning",
-      "message": "Found potentially sensitive file at .fuzzforge/.env.template",
+      "message": "Found potentially sensitive file at .crashwise/.env.template",
       "location": {
-        "file": ".fuzzforge/.env.template",
+        "file": ".crashwise/.env.template",
         "line": null,
         "column": null
       }

@@ -1,17 +1,10 @@
 #!/usr/bin/env python3
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 """
-Install shell completion for FuzzForge CLI.
+Install shell completion for Crashwise CLI.
 
 This script installs completion using Typer's built-in --install-completion command.
 """
@@ -23,12 +16,12 @@ from pathlib import Path
 import typer
 
 
-def run_fuzzforge_completion_install(shell: str) -> bool:
-    """Install completion using the fuzzforge CLI itself."""
+def run_crashwise_completion_install(shell: str) -> bool:
+    """Install completion using the crashwise CLI itself."""
     try:
         # Use the CLI's built-in completion installation
         result = subprocess.run([
-            sys.executable, "-m", "fuzzforge_cli.main",
+            sys.executable, "-m", "crashwise_cli.main",
             "--install-completion", shell
         ], capture_output=True, text=True, cwd=Path(__file__).parent.parent)
 
@@ -48,12 +41,12 @@ def create_manual_completion_scripts():
     """Create manual completion scripts as fallback."""
     scripts = {
         "bash": '''
-# FuzzForge CLI completion for bash
-_fuzzforge_completion() {
+# Crashwise CLI completion for bash
+_crashwise_completion() {
     local IFS=$'\\t'
     local response
 
-    response=$(env COMP_WORDS="${COMP_WORDS[*]}" COMP_CWORD=$COMP_CWORD _FUZZFORGE_COMPLETE=bash_complete $1)
+    response=$(env COMP_WORDS="${COMP_WORDS[*]}" COMP_CWORD=$COMP_CWORD _CRASHWISE_COMPLETE=bash_complete $1)
 
     for completion in $response; do
         IFS=',' read type value <<< "$completion"
@@ -72,17 +65,17 @@ _fuzzforge_completion() {
     return 0
 }
 
-complete -o nosort -F _fuzzforge_completion fuzzforge
+complete -o nosort -F _crashwise_completion crashwise
         ''',
 
         "zsh": '''
-#compdef fuzzforge
+#compdef crashwise
 
-_fuzzforge_completion() {
+_crashwise_completion() {
     local -a completions
     local -a completions_with_descriptions
     local -a response
-    response=(${(f)"$(env COMP_WORDS="${words[*]}" COMP_CWORD=$((CURRENT-1)) _FUZZFORGE_COMPLETE=zsh_complete fuzzforge)"})
+    response=(${(f)"$(env COMP_WORDS="${words[*]}" COMP_CWORD=$((CURRENT-1)) _CRASHWISE_COMPLETE=zsh_complete crashwise)"})
 
     for type_and_line in $response; do
         if [[ "$type_and_line" =~ ^([^,]*),(.*)$ ]]; then
@@ -112,15 +105,15 @@ _fuzzforge_completion() {
     fi
 }
 
-compdef _fuzzforge_completion fuzzforge;
+compdef _crashwise_completion crashwise;
         ''',
 
         "fish": '''
-# FuzzForge CLI completion for fish
-function __fuzzforge_completion
+# Crashwise CLI completion for fish
+function __crashwise_completion
     set -l response
 
-    for value in (env _FUZZFORGE_COMPLETE=fish_complete COMP_WORDS=(commandline -cp) COMP_CWORD=(commandline -t) fuzzforge)
+    for value in (env _CRASHWISE_COMPLETE=fish_complete COMP_WORDS=(commandline -cp) COMP_CWORD=(commandline -t) crashwise)
         set response $response $value
     end
 
@@ -137,7 +130,7 @@ function __fuzzforge_completion
     end
 end
 
-complete --no-files --command fuzzforge --arguments "(__fuzzforge_completion)"
+complete --no-files --command crashwise --arguments "(__crashwise_completion)"
         '''
     }
 
@@ -162,7 +155,7 @@ def install_bash_completion():
     for completion_dir in completion_dirs:
         try:
             completion_dir.mkdir(exist_ok=True)
-            completion_file = completion_dir / "fuzzforge"
+            completion_file = completion_dir / "crashwise"
             completion_file.write_text(completion_script)
             print(f"✅ Bash completion installed to: {completion_file}")
 
@@ -174,7 +167,7 @@ def install_bash_completion():
                 bashrc_content = bashrc.read_text()
                 if source_line not in bashrc_content:
                     with bashrc.open("a") as f:
-                        f.write(f"\n# FuzzForge CLI completion\n{source_line}\n")
+                        f.write(f"\n# Crashwise CLI completion\n{source_line}\n")
                     print("✅ Added completion source to ~/.bashrc")
 
             return True
@@ -201,7 +194,7 @@ def install_zsh_completion():
     comp_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        completion_file = comp_dir / "_fuzzforge"
+        completion_file = comp_dir / "_crashwise"
         completion_file.write_text(completion_script)
         print(f"✅ Zsh completion installed to: {completion_file}")
 
@@ -222,7 +215,7 @@ def install_zsh_completion():
 
             if lines_to_add:
                 with zshrc.open("a") as f:
-                    f.write("\n# FuzzForge CLI completion\n")
+                    f.write("\n# Crashwise CLI completion\n")
                     for line in lines_to_add:
                         f.write(f"{line}\n")
                 print("✅ Added completion setup to ~/.zshrc")
@@ -246,7 +239,7 @@ def install_fish_completion():
     comp_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        completion_file = comp_dir / "fuzzforge.fish"
+        completion_file = comp_dir / "crashwise.fish"
         completion_file.write_text(completion_script)
         print(f"✅ Fish completion installed to: {completion_file}")
         return True
@@ -270,7 +263,7 @@ def detect_shell():
 
 def main():
     """Install completion for the current shell or all shells."""
-    print("🚀 FuzzForge CLI Completion Installer")
+    print("🚀 Crashwise CLI Completion Installer")
     print("=" * 50)
 
     current_shell = detect_shell()
@@ -311,7 +304,7 @@ def main():
         print("  • Bash: Restart your terminal or run 'source ~/.bashrc'")
         print("  • Zsh: Restart your terminal or run 'source ~/.zshrc'")
         print("  • Fish: Completion is active immediately")
-        print("\n💡 Try typing 'fuzzforge <TAB>' to test completion!")
+        print("\n💡 Try typing 'crashwise <TAB>' to test completion!")
     else:
         print("❌ No completions were installed successfully.")
         return 1

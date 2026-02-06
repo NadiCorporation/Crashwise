@@ -50,7 +50,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build fuzzforge_ai package
+      - name: Build Crashwise package
         run: uv build
 
       - name: Build ai package

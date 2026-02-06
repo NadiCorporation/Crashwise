@@ -1,24 +1,24 @@
-# How-To: Integrate and Use MCP (Model Context Protocol) with FuzzForge
+# How-To: Integrate and Use MCP (Model Context Protocol) with Crashwise
 
-FuzzForge supports the Model Context Protocol (MCP), enabling LLM clients and AI assistants to interact directly with the security testing platform. This guide walks you through setting up, connecting, and using MCP with FuzzForge for automated security scans, results analysis, and intelligent recommendations.
+Crashwise supports the Model Context Protocol (MCP), enabling LLM clients and AI assistants to interact directly with the security testing platform. This guide walks you through setting up, connecting, and using MCP with Crashwise for automated security scans, results analysis, and intelligent recommendations.
 
 ---
 
 ## 🚀 What is MCP?
 
-**MCP (Model Context Protocol)** is a standard that allows AI models and clients (like Claude, GPT, or custom agents) to interact with backend tools and APIs in a structured, tool-oriented way. With FuzzForge’s MCP integration, all FastAPI endpoints become MCP-compatible tools, making security automation accessible to any MCP-aware client.
+**MCP (Model Context Protocol)** is a standard that allows AI models and clients (like Claude, GPT, or custom agents) to interact with backend tools and APIs in a structured, tool-oriented way. With Crashwise’s MCP integration, all FastAPI endpoints become MCP-compatible tools, making security automation accessible to any MCP-aware client.
 
 ---
 
 ## 1. Prerequisites
 
-- FuzzForge installed and running (see [Getting Started](../tutorial/getting-started.md))
+- Crashwise installed and running (see [Getting Started](../tutorial/getting-started.md))
 - Docker and Docker Compose installed (for containerized deployment)
 - An MCP-compatible client (LLM, custom agent, or CLI tool)
 
 ---
 
-## 2. Start FuzzForge with MCP Support
+## 2. Start Crashwise with MCP Support
 
 From your project root, launch the platform using Docker Compose:
 
@@ -140,7 +140,7 @@ For clients that require config files, use:
 ```json
 {
   "mcpServers": {
-    "fuzzforge": {
+    "crashwise": {
       "command": "curl",
       "args": ["-X", "POST", "http://localhost:8010/mcp"],
       "env": {}
@@ -174,7 +174,7 @@ For clients that require config files, use:
 
 ```bash
 # Check backend status
-docker compose ps fuzzforge-backend
+docker compose ps crashwise-backend
 curl http://localhost:8000/health
 ```
 
@@ -194,7 +194,7 @@ curl -X POST http://localhost:8000/workflows/infrastructure_scan/submit \
 
 ### General Support
 
-- Check Docker Compose logs: `docker compose logs fuzzforge-backend`
+- Check Docker Compose logs: `docker compose logs crashwise-backend`
 - Verify MCP endpoint: `curl http://localhost:8010/mcp`
 - Test FastAPI endpoints directly before using MCP
 
@@ -204,7 +204,7 @@ curl -X POST http://localhost:8000/workflows/infrastructure_scan/submit \
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   MCP Client    │───▶│   FastMCP        │───▶│   FuzzForge     │
+│   MCP Client    │───▶│   FastMCP        │───▶│   Crashwise     │
 │   (LLM/AI)      │    │   Integration    │    │   API           │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                                 │                        │
@@ -223,8 +223,8 @@ curl -X POST http://localhost:8000/workflows/infrastructure_scan/submit \
 
 - [Reference: CLI and API](../reference/cli-ai.md)
 - [How-To: Create a Custom Workflow](./create-workflow.md)
-- [FuzzForge Concepts](../concept/fuzzforge-ai.md)
+- [Crashwise Concepts](../concept/crashwise.md)
 
 ---
 
-With MCP, FuzzForge becomes a powerful, AI-friendly security automation platform. Connect your favorite LLM, automate security scans, and get actionable insights—all with a few API calls!
+With MCP, Crashwise becomes a powerful, AI-friendly security automation platform. Connect your favorite LLM, automate security scans, and get actionable insights—all with a few API calls!

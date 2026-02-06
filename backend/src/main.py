@@ -1,13 +1,6 @@
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 import asyncio
 import logging
@@ -55,10 +48,10 @@ class TemporalBootstrapState:
 temporal_bootstrap_state = TemporalBootstrapState()
 
 # Configure retry strategy for bootstrapping Temporal + infrastructure
-STARTUP_RETRY_SECONDS = max(1, int(os.getenv("FUZZFORGE_STARTUP_RETRY_SECONDS", "5")))
+STARTUP_RETRY_SECONDS = max(1, int(os.getenv("CRASHWISE_STARTUP_RETRY_SECONDS", "5")))
 STARTUP_RETRY_MAX_SECONDS = max(
     STARTUP_RETRY_SECONDS,
-    int(os.getenv("FUZZFORGE_STARTUP_RETRY_MAX_SECONDS", "60")),
+    int(os.getenv("CRASHWISE_STARTUP_RETRY_MAX_SECONDS", "60")),
 )
 
 temporal_bootstrap_task: Optional[asyncio.Task] = None
@@ -68,7 +61,7 @@ temporal_bootstrap_task: Optional[asyncio.Task] = None
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="FuzzForge API",
+    title="Crashwise API",
     description="Security testing workflow orchestration API with fuzzing support",
     version="0.6.0",
 )
@@ -101,7 +94,7 @@ def _temporal_not_ready_status() -> Optional[Dict[str, Any]]:
 async def root() -> Dict[str, Any]:
     status = get_temporal_status()
     return {
-        "name": "FuzzForge API",
+        "name": "Crashwise API",
         "version": "0.6.0",
         "status": "ready" if status.get("ready") else "initializing",
         "workflows_loaded": status.get("workflows_loaded", 0),
@@ -140,7 +133,7 @@ FASTAPI_MCP_NAME_OVERRIDES: Dict[str, str] = {
 # Create an MCP adapter exposing all FastAPI endpoints via OpenAPI parsing
 FASTAPI_MCP_ADAPTER = FastMCP.from_fastapi(
     app,
-    name="FuzzForge FastAPI",
+    name="Crashwise FastAPI",
     mcp_names=FASTAPI_MCP_NAME_OVERRIDES,
 )
 _fastapi_mcp_imported = False
@@ -150,7 +143,7 @@ _fastapi_mcp_imported = False
 # FastMCP server (runs on dedicated port outside FastAPI)
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP(name="FuzzForge MCP")
+mcp = FastMCP(name="Crashwise MCP")
 
 
 async def _bootstrap_temporal_with_retries() -> None:
@@ -631,7 +624,7 @@ def create_mcp_transport_app() -> Starlette:
 async def combined_lifespan(app: FastAPI):
     global temporal_bootstrap_task, _fastapi_mcp_imported
 
-    logger.info("Starting FuzzForge backend...")
+    logger.info("Starting Crashwise backend...")
 
     # Ensure FastAPI endpoints are exposed via MCP once
     if not _fastapi_mcp_imported:
@@ -706,7 +699,7 @@ async def combined_lifespan(app: FastAPI):
 
         # Close Temporal client
         await temporal_mgr.close()
-        logger.info("Shutting down FuzzForge backend...")
+        logger.info("Shutting down Crashwise backend...")
 
 
 app.router.lifespan_context = combined_lifespan

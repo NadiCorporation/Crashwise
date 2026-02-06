@@ -1,18 +1,18 @@
-# How-To: Artifact Workflows in FuzzForge AI
+# How-To: Artifact Workflows in Crashwise AI
 
-Artifacts are the heart of FuzzForge AI’s collaborative workflows. They let you generate, share, analyze, and improve files—code, configs, reports, and more—across agents and projects. This guide shows you, step by step, how to use artifacts for practical, productive automation.
+Artifacts are the heart of Crashwise AI’s collaborative workflows. They let you generate, share, analyze, and improve files—code, configs, reports, and more—across agents and projects. This guide shows you, step by step, how to use artifacts for practical, productive automation.
 
 ---
 
 ## 1. What is an Artifact?
 
-An **artifact** is any file or structured content created, processed, or shared by FuzzForge AI or its agents. Artifacts can be:
+An **artifact** is any file or structured content created, processed, or shared by Crashwise AI or its agents. Artifacts can be:
 - Generated code, configs, or documentation
 - Analysis results or transformed data
 - Files shared between agents (including user uploads)
 - Anything you want to track, review, or improve
 
-Artifacts are stored locally (in `.fuzzforge/artifacts/`) and can be served over HTTP for agent-to-agent workflows.
+Artifacts are stored locally (in `.crashwise/artifacts/`) and can be served over HTTP for agent-to-agent workflows.
 
 ---
 
@@ -20,7 +20,7 @@ Artifacts are stored locally (in `.fuzzforge/artifacts/`) and can be served over
 
 ### a. Natural Language Generation
 
-Just ask FuzzForge to create something, and it will generate an artifact automatically.
+Just ask Crashwise to create something, and it will generate an artifact automatically.
 
 **Examples:**
 ```bash
@@ -55,7 +55,7 @@ Send any file (including artifacts) to a registered agent for further analysis o
 ```
 
 **What happens:**
-1. FuzzForge reads the file or artifact
+1. Crashwise reads the file or artifact
 2. Creates (or references) an artifact
 3. Generates an HTTP URL for the artifact
 4. Sends an A2A message to the target agent
@@ -150,11 +150,11 @@ You> ROUTE_TO DataAnalyst: Add metrics and visualization sections to this templa
 
 ## 6. Where Are Artifacts Stored?
 
-Artifacts are stored in your project’s `.fuzzforge/artifacts/` directory and are accessible via HTTP when the A2A server is running.
+Artifacts are stored in your project’s `.crashwise/artifacts/` directory and are accessible via HTTP when the A2A server is running.
 
 **Example structure:**
 ```
-.fuzzforge/
+.crashwise/
 └── artifacts/
     ├── artifact_abc123
     ├── artifact_def456
@@ -191,4 +191,4 @@ http://localhost:10100/artifacts/artifact_abc123
 
 ---
 
-Artifacts make FuzzForge AI a powerful, collaborative automation platform. Experiment, share, and build smarter workflows—one artifact at a time!
+Artifacts make Crashwise AI a powerful, collaborative automation platform. Experiment, share, and build smarter workflows—one artifact at a time!

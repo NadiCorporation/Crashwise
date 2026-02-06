@@ -1,6 +1,6 @@
-# FuzzForge CLI Reference
+# Crashwise CLI Reference
 
-Complete reference for the FuzzForge CLI (`ff` command). Use this as your quick lookup for all commands, options, and examples.
+Complete reference for the Crashwise CLI (`cw` command). Use this as your quick lookup for all commands, options, and examples.
 
 ---
 
@@ -15,36 +15,36 @@ Complete reference for the FuzzForge CLI (`ff` command). Use this as your quick 
 
 ## Core Commands
 
-### `ff init`
+### `cw init`
 
-Initialize a new FuzzForge project in the current directory.
+Initialize a new Crashwise project in the current directory.
 
 **Usage:**
 ```bash
-ff init [OPTIONS]
+cw init [OPTIONS]
 ```
 
 **Options:**
 - `--name`, `-n` — Project name (defaults to current directory name)
-- `--api-url`, `-u` — FuzzForge API URL (defaults to http://localhost:8000)
+- `--api-url`, `-u` — Crashwise API URL (defaults to http://localhost:8000)
 - `--force`, `-f` — Force initialization even if project already exists
 
 **Examples:**
 ```bash
-ff init                           # Initialize with defaults
-ff init --name my-project         # Set custom project name
-ff init --api-url http://prod:8000  # Use custom API URL
+cw init                           # Initialize with defaults
+cw init --name my-project         # Set custom project name
+cw init --api-url http://prod:8000  # Use custom API URL
 ```
 
 ---
 
-### `ff status`
+### `cw status`
 
 Show project and latest execution status.
 
 **Usage:**
 ```bash
-ff status
+cw status
 ```
 
 **Example Output:**
@@ -62,33 +62,33 @@ Latest Execution:
 
 ---
 
-### `ff config`
+### `cw config`
 
 Manage project configuration.
 
 **Usage:**
 ```bash
-ff config                    # Show all config
-ff config <key>              # Get specific value
-ff config <key> <value>      # Set value
+cw config                    # Show all config
+cw config <key>              # Get specific value
+cw config <key> <value>      # Set value
 ```
 
 **Examples:**
 ```bash
-ff config                         # Display all settings
-ff config api_url                 # Get API URL
-ff config api_url http://prod:8000  # Set API URL
+cw config                         # Display all settings
+cw config api_url                 # Get API URL
+cw config api_url http://prod:8000  # Set API URL
 ```
 
 ---
 
-### `ff clean`
+### `cw clean`
 
 Clean old execution data and findings.
 
 **Usage:**
 ```bash
-ff clean [OPTIONS]
+cw clean [OPTIONS]
 ```
 
 **Options:**
@@ -97,22 +97,22 @@ ff clean [OPTIONS]
 
 **Examples:**
 ```bash
-ff clean                    # Clean data older than 90 days
-ff clean --days 30          # Clean data older than 30 days
-ff clean --dry-run          # Preview what would be deleted
+cw clean                    # Clean data older than 90 days
+cw clean --days 30          # Clean data older than 30 days
+cw clean --dry-run          # Preview what would be deleted
 ```
 
 ---
 
 ## Workflow Commands
 
-### `ff workflows`
+### `cw workflows`
 
 Browse and list available workflows.
 
 **Usage:**
 ```bash
-ff workflows [COMMAND]
+cw workflows [COMMAND]
 ```
 
 **Subcommands:**
@@ -122,31 +122,31 @@ ff workflows [COMMAND]
 
 **Examples:**
 ```bash
-ff workflows list                    # List all workflows
-ff workflows info python_sast        # Show workflow details
-ff workflows params python_sast      # Show parameters
+cw workflows list                    # List all workflows
+cw workflows info python_sast        # Show workflow details
+cw workflows params python_sast      # Show parameters
 ```
 
 ---
 
-### `ff workflow`
+### `cw workflow`
 
 Execute and manage individual workflows.
 
 **Usage:**
 ```bash
-ff workflow <COMMAND>
+cw workflow <COMMAND>
 ```
 
 **Subcommands:**
 
-#### `ff workflow run`
+#### `cw workflow run`
 
 Execute a security testing workflow.
 
 **Usage:**
 ```bash
-ff workflow run <workflow> <target> [params...] [OPTIONS]
+cw workflow run <workflow> <target> [params...] [OPTIONS]
 ```
 
 **Arguments:**
@@ -168,44 +168,44 @@ ff workflow run <workflow> <target> [params...] [OPTIONS]
 **Examples:**
 ```bash
 # Basic workflow execution
-ff workflow run python_sast ./project
+cw workflow run python_sast ./project
 
 # With parameters
-ff workflow run python_sast ./project check_secrets=true
+cw workflow run python_sast ./project check_secrets=true
 
 # CI/CD integration - fail on errors
-ff workflow run python_sast ./project --wait --no-interactive \
+cw workflow run python_sast ./project --wait --no-interactive \
   --fail-on error --export-sarif results.sarif
 
 # With parameter file
-ff workflow run python_sast ./project --param-file config.json
+cw workflow run python_sast ./project --param-file config.json
 
 # Live monitoring for fuzzing
-ff workflow run atheris_fuzzing ./project --live
+cw workflow run atheris_fuzzing ./project --live
 ```
 
-#### `ff workflow status`
+#### `cw workflow status`
 
 Check status of latest or specific workflow execution.
 
 **Usage:**
 ```bash
-ff workflow status [run_id]
+cw workflow status [run_id]
 ```
 
 **Examples:**
 ```bash
-ff workflow status                     # Show latest execution status
-ff workflow status python_sast-abc123  # Show specific execution
+cw workflow status                     # Show latest execution status
+cw workflow status python_sast-abc123  # Show specific execution
 ```
 
-#### `ff workflow history`
+#### `cw workflow history`
 
 Show execution history.
 
 **Usage:**
 ```bash
-ff workflow history [OPTIONS]
+cw workflow history [OPTIONS]
 ```
 
 **Options:**
@@ -213,45 +213,45 @@ ff workflow history [OPTIONS]
 
 **Example:**
 ```bash
-ff workflow history --limit 20
+cw workflow history --limit 20
 ```
 
-#### `ff workflow retry`
+#### `cw workflow retry`
 
 Retry a failed workflow execution.
 
 **Usage:**
 ```bash
-ff workflow retry <run_id>
+cw workflow retry <run_id>
 ```
 
 **Example:**
 ```bash
-ff workflow retry python_sast-abc123
+cw workflow retry python_sast-abc123
 ```
 
 ---
 
 ## Finding Commands
 
-### `ff findings`
+### `cw findings`
 
 Browse all findings across executions.
 
 **Usage:**
 ```bash
-ff findings [COMMAND]
+cw findings [COMMAND]
 ```
 
 **Subcommands:**
 
-#### `ff findings list`
+#### `cw findings list`
 
 List findings from a specific run.
 
 **Usage:**
 ```bash
-ff findings list [run_id] [OPTIONS]
+cw findings list [run_id] [OPTIONS]
 ```
 
 **Options:**
@@ -260,19 +260,19 @@ ff findings list [run_id] [OPTIONS]
 
 **Examples:**
 ```bash
-ff findings list                        # Show latest findings
-ff findings list python_sast-abc123     # Show specific run
-ff findings list --format json          # JSON output
-ff findings list --format sarif --save  # Export SARIF
+cw findings list                        # Show latest findings
+cw findings list python_sast-abc123     # Show specific run
+cw findings list --format json          # JSON output
+cw findings list --format sarif --save  # Export SARIF
 ```
 
-#### `ff findings export`
+#### `cw findings export`
 
 Export findings to various formats.
 
 **Usage:**
 ```bash
-ff findings export <run_id> [OPTIONS]
+cw findings export <run_id> [OPTIONS]
 ```
 
 **Options:**
@@ -281,16 +281,16 @@ ff findings export <run_id> [OPTIONS]
 
 **Example:**
 ```bash
-ff findings export python_sast-abc123 --format sarif --output results.sarif
+cw findings export python_sast-abc123 --format sarif --output results.sarif
 ```
 
-#### `ff findings history`
+#### `cw findings history`
 
 Show finding history across multiple runs.
 
 **Usage:**
 ```bash
-ff findings history [OPTIONS]
+cw findings history [OPTIONS]
 ```
 
 **Options:**
@@ -298,45 +298,45 @@ ff findings history [OPTIONS]
 
 ---
 
-### `ff finding`
+### `cw finding`
 
 View and analyze individual findings.
 
 **Usage:**
 ```bash
-ff finding [id]                         # Show latest or specific finding
-ff finding show <run_id> --rule <rule>  # Show specific finding detail
+cw finding [id]                         # Show latest or specific finding
+cw finding show <run_id> --rule <rule>  # Show specific finding detail
 ```
 
 **Examples:**
 ```bash
-ff finding                                # Show latest finding
-ff finding python_sast-abc123             # Show specific run findings
-ff finding show python_sast-abc123 --rule f2cf5e3e  # Show specific finding
+cw finding                                # Show latest finding
+cw finding python_sast-abc123             # Show specific run findings
+cw finding show python_sast-abc123 --rule f2cf5e3e  # Show specific finding
 ```
 
 ---
 
 ## Worker Management Commands
 
-### `ff worker`
+### `cw worker`
 
 Manage Temporal workers for workflow execution.
 
 **Usage:**
 ```bash
-ff worker <COMMAND>
+cw worker <COMMAND>
 ```
 
 **Subcommands:**
 
-#### `ff worker list`
+#### `cw worker list`
 
-List FuzzForge workers and their status.
+List Crashwise workers and their status.
 
 **Usage:**
 ```bash
-ff worker list [OPTIONS]
+cw worker list [OPTIONS]
 ```
 
 **Options:**
@@ -344,13 +344,13 @@ ff worker list [OPTIONS]
 
 **Examples:**
 ```bash
-ff worker list          # Show running workers
-ff worker list --all    # Show all workers
+cw worker list          # Show running workers
+cw worker list --all    # Show all workers
 ```
 
 **Example Output:**
 ```
-FuzzForge Workers
+Crashwise Workers
 ┏━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┓
 ┃ Worker  ┃ Status    ┃ Uptime         ┃
 ┡━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━┩
@@ -361,13 +361,13 @@ FuzzForge Workers
 ✅ 2 worker(s) running
 ```
 
-#### `ff worker start`
+#### `cw worker start`
 
 Start a specific worker.
 
 **Usage:**
 ```bash
-ff worker start <name> [OPTIONS]
+cw worker start <name> [OPTIONS]
 ```
 
 **Arguments:**
@@ -378,8 +378,8 @@ ff worker start <name> [OPTIONS]
 
 **Examples:**
 ```bash
-ff worker start python           # Start Python worker
-ff worker start android --build  # Rebuild and start Android worker
+cw worker start python           # Start Python worker
+cw worker start android --build  # Rebuild and start Android worker
 ```
 
 **Available Workers:**
@@ -389,13 +389,13 @@ ff worker start android --build  # Rebuild and start Android worker
 - `secrets` — Secret detection workflows
 - `ossfuzz` — OSS-Fuzz integration
 
-#### `ff worker stop`
+#### `cw worker stop`
 
-Stop all running FuzzForge workers.
+Stop all running Crashwise workers.
 
 **Usage:**
 ```bash
-ff worker stop [OPTIONS]
+cw worker stop [OPTIONS]
 ```
 
 **Options:**
@@ -403,7 +403,7 @@ ff worker stop [OPTIONS]
 
 **Example:**
 ```bash
-ff worker stop
+cw worker stop
 ```
 
 **Note:** This command stops only worker containers, leaving core services (backend, temporal, minio) running.
@@ -412,13 +412,13 @@ ff worker stop
 
 ## Monitoring Commands
 
-### `ff monitor`
+### `cw monitor`
 
 Real-time monitoring for running workflows.
 
 **Usage:**
 ```bash
-ff monitor [COMMAND]
+cw monitor [COMMAND]
 ```
 
 **Subcommands:**
@@ -427,21 +427,21 @@ ff monitor [COMMAND]
 
 **Examples:**
 ```bash
-ff monitor live atheris-abc123    # Monitor fuzzing campaign
-ff monitor stats atheris-abc123   # Show fuzzing statistics
+cw monitor live atheris-abc123    # Monitor fuzzing campaign
+cw monitor stats atheris-abc123   # Show fuzzing statistics
 ```
 
 ---
 
 ## AI Integration Commands
 
-### `ff ai`
+### `cw ai`
 
 AI-powered analysis and assistance.
 
 **Usage:**
 ```bash
-ff ai [COMMAND]
+cw ai [COMMAND]
 ```
 
 **Subcommands:**
@@ -451,22 +451,22 @@ ff ai [COMMAND]
 
 **Examples:**
 ```bash
-ff ai analyze python_sast-abc123           # Analyze all findings
-ff ai explain python_sast-abc123:finding1  # Explain specific finding
-ff ai remediate python_sast-abc123:finding1  # Get fix suggestions
+cw ai analyze python_sast-abc123           # Analyze all findings
+cw ai explain python_sast-abc123:finding1  # Explain specific finding
+cw ai remediate python_sast-abc123:finding1  # Get fix suggestions
 ```
 
 ---
 
 ## Knowledge Ingestion Commands
 
-### `ff ingest`
+### `cw ingest`
 
 Ingest knowledge into the AI knowledge base.
 
 **Usage:**
 ```bash
-ff ingest [COMMAND]
+cw ingest [COMMAND]
 ```
 
 **Subcommands:**
@@ -476,9 +476,9 @@ ff ingest [COMMAND]
 
 **Examples:**
 ```bash
-ff ingest file ./docs/security.md           # Ingest single file
-ff ingest directory ./docs                  # Ingest directory
-ff ingest workflow python_sast              # Ingest workflow docs
+cw ingest file ./docs/security.md           # Ingest single file
+cw ingest directory ./docs                  # Ingest directory
+cw ingest workflow python_sast              # Ingest workflow docs
 ```
 
 ---
@@ -489,7 +489,7 @@ ff ingest workflow python_sast              # Ingest workflow docs
 
 ```bash
 # Run security scan in CI, fail on errors
-ff workflow run python_sast . \
+cw workflow run python_sast . \
   --wait \
   --no-interactive \
   --fail-on error \
@@ -500,23 +500,23 @@ ff workflow run python_sast . \
 
 ```bash
 # Quick security check
-ff workflow run python_sast ./my-code
+cw workflow run python_sast ./my-code
 
 # Check specific file types
-ff workflow run python_sast . file_extensions='[".py",".js"]'
+cw workflow run python_sast . file_extensions='[".py",".js"]'
 
 # Interactive parameter configuration
-ff workflow run python_sast . --interactive
+cw workflow run python_sast . --interactive
 ```
 
 ### Fuzzing Workflows
 
 ```bash
 # Start fuzzing with live monitoring
-ff workflow run atheris_fuzzing ./project --live
+cw workflow run atheris_fuzzing ./project --live
 
 # Long-running fuzzing campaign
-ff workflow run ossfuzz_campaign ./project \
+cw workflow run ossfuzz_campaign ./project \
   --auto-start \
   duration=3600 \
   --live
@@ -526,20 +526,20 @@ ff workflow run ossfuzz_campaign ./project \
 
 ```bash
 # Check which workers are running
-ff worker list
+cw worker list
 
 # Start needed worker manually
-ff worker start python --build
+cw worker start python --build
 
 # Stop all workers when done
-ff worker stop
+cw worker stop
 ```
 
 ---
 
 ## Configuration Files
 
-### Project Config (`.fuzzforge/config.json`)
+### Project Config (`.crashwise/config.json`)
 
 ```json
 {
@@ -580,9 +580,9 @@ ff worker stop
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `FUZZFORGE_API_URL` | Backend API URL | http://localhost:8000 |
-| `FUZZFORGE_ROOT` | FuzzForge installation directory | Auto-detected |
-| `FUZZFORGE_DEBUG` | Enable debug logging | false |
+| `CRASHWISE_API_URL` | Backend API URL | http://localhost:8000 |
+| `CRASHWISE_ROOT` | Crashwise installation directory | Auto-detected |
+| `CRASHWISE_DEBUG` | Enable debug logging | false |
 
 ---
 
@@ -593,7 +593,7 @@ ff worker stop
 3. **Export SARIF for tool integration** — Most security tools support SARIF format
 4. **Let workflows auto-start workers** — More efficient than manually managing workers
 5. **Use `--wait` with `--export-sarif`** — Ensures results are available before export
-6. **Check `ff worker list` regularly** — Helps manage system resources
+6. **Check `cw worker list` regularly** — Helps manage system resources
 7. **Use parameter files for complex configs** — Easier to version control and reuse
 
 ---
@@ -610,7 +610,7 @@ ff worker stop
 **Need Help?**
 
 ```bash
-ff --help                # General help
-ff workflow run --help   # Command-specific help
-ff worker --help         # Worker management help
+cw --help                # General help
+cw workflow run --help   # Command-specific help
+cw worker --help         # Worker management help
 ```

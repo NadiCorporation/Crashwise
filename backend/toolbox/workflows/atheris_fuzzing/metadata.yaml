@@ -2,7 +2,7 @@ name: atheris_fuzzing
 version: "1.0.0"
 vertical: python
 description: "Fuzz Python code using Atheris with real-time monitoring. Automatically discovers and fuzzes TestOneInput() functions in user code."
-author: "FuzzForge Team"
+author: "Crashwise Team"
 tags:
   - "fuzzing"
   - "atheris"

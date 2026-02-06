@@ -1,5 +1,5 @@
 """
-FuzzForge Common Storage Activities
+Crashwise Common Storage Activities
 
 Activities for interacting with MinIO storage:
 - get_target_activity: Download target from MinIO to local cache
@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 s3_client = boto3.client(
     's3',
     endpoint_url=os.getenv('S3_ENDPOINT', 'http://minio:9000'),
-    aws_access_key_id=os.getenv('S3_ACCESS_KEY', 'fuzzforge'),
-    aws_secret_access_key=os.getenv('S3_SECRET_KEY', 'fuzzforge123'),
+    aws_access_key_id=os.getenv('S3_ACCESS_KEY', 'crashwise'),
+    aws_secret_access_key=os.getenv('S3_SECRET_KEY', 'crashwise123'),
     region_name=os.getenv('S3_REGION', 'us-east-1'),
     use_ssl=os.getenv('S3_USE_SSL', 'false').lower() == 'true'
 )

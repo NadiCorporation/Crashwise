@@ -2,7 +2,7 @@ name: llm_analysis
 version: "1.0.0"
 vertical: python
 description: "Uses AI/LLM to analyze code for security vulnerabilities and code quality issues"
-author: "FuzzForge Team"
+author: "Crashwise Team"
 tags:
   - "llm"
   - "ai"
@@ -19,7 +19,7 @@ parameters:
     agent_url:
       type: string
       description: "A2A agent endpoint URL"
-      default: "http://fuzzforge-task-agent:8000/a2a/litellm_agent"
+      default: "http://crashwise-task-agent:8000/a2a/litellm_agent"
     llm_model:
       type: string
       description: "LLM model to use (e.g., gpt-4o-mini, claude-3-5-sonnet)"

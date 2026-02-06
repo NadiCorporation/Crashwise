@@ -5,7 +5,7 @@ rules:
     message: "Potential insecure data storage (external storage)."
     metadata:
       authors:
-        - Guerric ELOI (FuzzingLabs)
+        - Guerric ELOI (Crashwise)
       owasp-mobile: M2
       category: security
       area: storage

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to FuzzForge will be documented in this file.
+All notable changes to Crashwise will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -34,10 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Worker metadata convention (`metadata.yaml`) for platform-specific capabilities
   - Multi-Dockerfile support: `Dockerfile.amd64` (full toolchain) and `Dockerfile.arm64` (optimized)
   - Conditional module imports for graceful degradation (MobSF skips on ARM64)
-  - Backend path resolution via `FUZZFORGE_HOST_ROOT` for CLI worker management
+  - Backend path resolution via `CRASHWISE_HOST_ROOT` for CLI worker management
 - **Worker selection logic**:
   - CLI automatically selects appropriate Dockerfile based on detected platform
-  - Multi-strategy path resolution (API → .fuzzforge marker → environment variable)
+  - Multi-strategy path resolution (API → .crashwise marker → environment variable)
   - Platform-specific tool availability documented in metadata
 
 #### Python SAST Workflow
@@ -194,7 +194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[0.7.3]: https://github.com/FuzzingLabs/fuzzforge_ai/compare/v0.7.2...v0.7.3
-[0.7.2]: https://github.com/FuzzingLabs/fuzzforge_ai/compare/v0.7.0...v0.7.2
-[0.7.0]: https://github.com/FuzzingLabs/fuzzforge_ai/releases/tag/v0.7.0
-[0.6.0]: https://github.com/FuzzingLabs/fuzzforge_ai/tree/v0.6.0
+[0.7.3]: https://github.com/YahyaToubali/Crashwise/compare/v0.7.2...v0.7.3
+[0.7.2]: https://github.com/YahyaToubali/Crashwise/compare/v0.7.0...v0.7.2
+[0.7.0]: https://github.com/YahyaToubali/Crashwise/releases/tag/v0.7.0
+[0.6.0]: https://github.com/YahyaToubali/Crashwise/tree/v0.6.0

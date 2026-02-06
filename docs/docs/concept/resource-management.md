@@ -1,12 +1,12 @@
-# Resource Management in FuzzForge
+# Resource Management in Crashwise
 
-FuzzForge uses a multi-layered approach to manage CPU, memory, and concurrency for workflow execution. This ensures stable operation, prevents resource exhaustion, and allows predictable performance.
+Crashwise uses a multi-layered approach to manage CPU, memory, and concurrency for workflow execution. This ensures stable operation, prevents resource exhaustion, and allows predictable performance.
 
 ---
 
 ## Overview
 
-Resource limiting in FuzzForge operates at three levels:
+Resource limiting in Crashwise operates at three levels:
 
 1. **Docker Container Limits** (Primary Enforcement) - Hard limits enforced by Docker
 2. **Worker Concurrency Limits** - Controls parallel workflow execution
@@ -35,12 +35,12 @@ Workers are **pre-built** but **not auto-started**:
 └─────────────┘
        ↓
 ┌─────────────┐
-│ ff workflow │  CLI detects required worker
+│ cw workflow │  CLI detects required worker
 │ run         │  via /workflows/{name}/worker-info API
 └─────────────┘
        ↓
 ┌─────────────┐
-│ docker      │  docker start fuzzforge-worker-ossfuzz
+│ docker      │  docker start crashwise-worker-ossfuzz
 │ start       │  Wait for healthy status
 └─────────────┘
        ↓
@@ -62,7 +62,7 @@ Workers are **pre-built** but **not auto-started**:
 
 ### Configuration
 
-Control via `.fuzzforge/config.yaml`:
+Control via `.crashwise/config.yaml`:
 
 ```yaml
 workers:
@@ -76,10 +76,10 @@ Or via CLI flags:
 
 ```bash
 # Auto-start disabled
-ff workflow run ossfuzz_campaign . --no-auto-start
+cw workflow run ossfuzz_campaign . --no-auto-start
 
 # Auto-stop enabled
-ff workflow run ossfuzz_campaign . --wait --auto-stop
+cw workflow run ossfuzz_campaign . --wait --auto-stop
 ```
 
 ### Backend API
@@ -91,7 +91,7 @@ New endpoint: `GET /workflows/{workflow_name}/worker-info`
 {
   "workflow": "ossfuzz_campaign",
   "vertical": "ossfuzz",
-  "worker_container": "fuzzforge-worker-ossfuzz",
+  "worker_container": "crashwise-worker-ossfuzz",
   "task_queue": "ossfuzz-queue",
   "required": true
 }
@@ -100,24 +100,24 @@ New endpoint: `GET /workflows/{workflow_name}/worker-info`
 ### SDK Integration
 
 ```python
-from fuzzforge_sdk import FuzzForgeClient
+from crashwise_sdk import CrashwiseClient
 
-client = FuzzForgeClient()
+client = CrashwiseClient()
 worker_info = client.get_workflow_worker_info("ossfuzz_campaign")
-# Returns: {"vertical": "ossfuzz", "worker_container": "fuzzforge-worker-ossfuzz", ...}
+# Returns: {"vertical": "ossfuzz", "worker_container": "crashwise-worker-ossfuzz", ...}
 ```
 
 ### Manual Control
 
 ```bash
 # Start worker manually
-docker start fuzzforge-worker-ossfuzz
+docker start crashwise-worker-ossfuzz
 
 # Stop worker manually
-docker stop fuzzforge-worker-ossfuzz
+docker stop crashwise-worker-ossfuzz
 
 # Check all worker statuses
-docker ps -a --filter "name=fuzzforge-worker"
+docker ps -a --filter "name=crashwise-worker"
 ```
 
 ---
@@ -190,11 +190,11 @@ Check real-time resource usage:
 docker stats
 
 # Monitor specific worker
-docker stats fuzzforge-worker-rust
+docker stats crashwise-worker-rust
 
 # Output:
 # CONTAINER           CPU %    MEM USAGE / LIMIT     MEM %
-# fuzzforge-worker-rust   85%     1.5GiB / 2GiB        75%
+# crashwise-worker-rust   85%     1.5GiB / 2GiB        75%
 ```
 
 ---
@@ -356,7 +356,7 @@ Profile a single workflow first:
 
 ```bash
 # Run single workflow and monitor
-docker stats fuzzforge-worker-rust
+docker stats crashwise-worker-rust
 
 # Note peak memory usage (e.g., 800MB)
 # Calculate concurrency: 4GB ÷ 800MB = 5
@@ -386,11 +386,11 @@ Watch for these warning signs:
 docker-compose -f docker-compose.yml logs worker-rust | grep -i "oom\|killed"
 
 # Check for CPU throttling
-docker stats fuzzforge-worker-rust
+docker stats crashwise-worker-rust
 # If CPU% consistently at limit → increase cpus
 
 # Check for memory pressure
-docker stats fuzzforge-worker-rust
+docker stats crashwise-worker-rust
 # If MEM% consistently >90% → increase memory
 ```
 
@@ -438,7 +438,7 @@ docker-compose -f docker-compose.yml up -d --scale worker-rust=3
 docker-compose -f docker-compose.yml ps worker-rust
 
 # Check worker resource usage
-docker stats fuzzforge-worker-rust
+docker stats crashwise-worker-rust
 
 # Check for OOM kills
 docker-compose -f docker-compose.yml logs worker-rust | grep -i oom
@@ -456,7 +456,7 @@ docker-compose -f docker-compose.yml logs worker-rust | grep -i oom
 **Diagnosis:**
 ```bash
 # Check concurrent activities setting
-docker exec fuzzforge-worker-rust env | grep MAX_CONCURRENT_ACTIVITIES
+docker exec crashwise-worker-rust env | grep MAX_CONCURRENT_ACTIVITIES
 
 # Check current workload
 docker-compose -f docker-compose.yml logs worker-rust | grep "Starting"
@@ -488,7 +488,7 @@ requirements:
 
 ## Workspace Isolation and Cache Management
 
-FuzzForge uses workspace isolation to prevent concurrent workflows from interfering with each other. Each workflow run can have its own isolated workspace or share a common workspace based on the isolation mode.
+Crashwise uses workspace isolation to prevent concurrent workflows from interfering with each other. Each workflow run can have its own isolated workspace or share a common workspace based on the isolation mode.
 
 ### Cache Directory Structure
 
@@ -554,7 +554,7 @@ Check cache size and cleanup logs:
 
 ```bash
 # Check cache size
-docker exec fuzzforge-worker-rust du -sh /cache
+docker exec crashwise-worker-rust du -sh /cache
 
 # Monitor cache evictions
 docker-compose -f docker-compose.yml logs worker-rust | grep "Evicted from cache"
@@ -569,7 +569,7 @@ See the [Workspace Isolation](/docs/concept/workspace-isolation) guide for compl
 
 ## Summary
 
-FuzzForge's resource management strategy:
+Crashwise's resource management strategy:
 
 1. **Docker Container Limits**: Primary enforcement (CPU/memory hard limits)
 2. **Concurrency Limits**: Controls parallel workflows per worker

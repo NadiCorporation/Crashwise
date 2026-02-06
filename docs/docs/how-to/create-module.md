@@ -1,6 +1,6 @@
-# How to Create a Custom Module in FuzzForge
+# How to Create a Custom Module in Crashwise
 
-This guide will walk you through the process of developing a custom security analysis module for FuzzForge. Modules are the building blocks of FuzzForge workflows, enabling you to add new analysis capabilities or extend existing ones.
+This guide will walk you through the process of developing a custom security analysis module for Crashwise. Modules are the building blocks of Crashwise workflows, enabling you to add new analysis capabilities or extend existing ones.
 
 ---
 
@@ -8,15 +8,15 @@ This guide will walk you through the process of developing a custom security ana
 
 Before you start, make sure you have:
 
-- A working FuzzForge development environment (see [Contributing](/reference/contributing.md))
+- A working Crashwise development environment (see [Contributing](/reference/contributing.md))
 - Familiarity with Python and async programming
-- Basic understanding of Docker and the FuzzForge architecture
+- Basic understanding of Docker and the Crashwise architecture
 
 ---
 
 ## Step 1: Understand the Module Architecture
 
-All FuzzForge modules inherit from a common `BaseModule` interface and use Pydantic models for type safety and result standardization.
+All Crashwise modules inherit from a common `BaseModule` interface and use Pydantic models for type safety and result standardization.
 
 **Key components:**
 
@@ -132,7 +132,7 @@ if __name__ == "__main__":
 
 ## Module Types
 
-FuzzForge supports several module types:
+Crashwise supports several module types:
 
 - **Scanner Modules:** Discover files, extract metadata (e.g., license scanner, dependency scanner)
 - **Analyzer Modules:** Perform deep security analysis (e.g., static analyzer, secret detector)
@@ -155,7 +155,7 @@ Each module type follows the same interface but focuses on a different stage of 
 ## Testing Your Module
 
 - Write unit tests for your module’s logic and edge cases.
-- Test integration by running your module as part of a FuzzForge workflow.
+- Test integration by running your module as part of a Crashwise workflow.
 - Use temporary directories and mock files to simulate real-world scenarios.
 
 ---

@@ -58,14 +58,14 @@ class S3CachedStorage(StorageBackend):
         """
         # Use environment variables as defaults
         self.endpoint_url = endpoint_url or os.getenv('S3_ENDPOINT', 'http://minio:9000')
-        self.access_key = access_key or os.getenv('S3_ACCESS_KEY', 'fuzzforge')
-        self.secret_key = secret_key or os.getenv('S3_SECRET_KEY', 'fuzzforge123')
+        self.access_key = access_key or os.getenv('S3_ACCESS_KEY', 'crashwise')
+        self.secret_key = secret_key or os.getenv('S3_SECRET_KEY', 'crashwise123')
         self.bucket = bucket or os.getenv('S3_BUCKET', 'targets')
         self.region = region or os.getenv('S3_REGION', 'us-east-1')
         self.use_ssl = use_ssl or os.getenv('S3_USE_SSL', 'false').lower() == 'true'
 
         # Cache configuration
-        self.cache_dir = cache_dir or Path(os.getenv('CACHE_DIR', '/tmp/fuzzforge-cache'))
+        self.cache_dir = cache_dir or Path(os.getenv('CACHE_DIR', '/tmp/crashwise-cache'))
         self.cache_max_size = cache_max_size_gb * (1024 ** 3)  # Convert to bytes
 
         # Ensure cache directory exists

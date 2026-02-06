@@ -1,14 +1,7 @@
 #!/usr/bin/env python3
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 """
 Batch analysis example.
@@ -26,10 +19,10 @@ from pathlib import Path
 from typing import List, Dict, Any
 import time
 
-from fuzzforge_sdk import (
-    FuzzForgeClient
+from crashwise_sdk import (
+    CrashwiseClient
 )
-from fuzzforge_sdk.utils import (
+from crashwise_sdk.utils import (
     create_workflow_submission,
     format_sarif_summary,
     count_sarif_severity_levels,
@@ -41,7 +34,7 @@ from fuzzforge_sdk.utils import (
 class BatchAnalyzer:
     """Batch analysis manager."""
 
-    def __init__(self, client: FuzzForgeClient):
+    def __init__(self, client: CrashwiseClient):
         self.client = client
         self.results: List[Dict[str, Any]] = []
 
@@ -246,16 +239,16 @@ async def main():
         # "static-analysis",
         # "security-scan",
         # "dependency-check",
-        # Add actual workflow names from your FuzzForge instance
+        # Add actual workflow names from your Crashwise instance
     ]
 
     output_base_dir = Path("./analysis_results")
 
     # Initialize client
-    async with FuzzForgeClient(base_url="http://localhost:8000") as client:
+    async with CrashwiseClient(base_url="http://localhost:8000") as client:
         try:
             # Check API status
-            print("🔗 Connecting to FuzzForge API...")
+            print("🔗 Connecting to Crashwise API...")
             status = await client.aget_api_status()
             print(f"✅ Connected to {status.name} v{status.version}")
 

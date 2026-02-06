@@ -32,7 +32,7 @@ class CargoFuzzer(BaseModule):
             name="cargo_fuzz",
             version="0.11.2",
             description="Fuzz Rust code using cargo-fuzz with libFuzzer backend",
-            author="FuzzForge Team",
+            author="Crashwise Team",
             category="fuzzer",
             tags=["fuzzing", "rust", "cargo-fuzz", "libfuzzer", "memory-safety"],
             input_schema={

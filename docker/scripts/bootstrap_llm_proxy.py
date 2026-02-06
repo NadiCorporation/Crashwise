@@ -55,8 +55,8 @@ class VirtualKeySpec:
 VIRTUAL_KEYS: tuple[VirtualKeySpec, ...] = (
     VirtualKeySpec(
         env_var="OPENAI_API_KEY",
-        alias="fuzzforge-cli",
-        user_id="fuzzforge-cli",
+        alias="crashwise-cli",
+        user_id="crashwise-cli",
         budget_env_var="CLI_BUDGET",
         duration_env_var="CLI_DURATION",
         default_budget=100.0,
@@ -64,8 +64,8 @@ VIRTUAL_KEYS: tuple[VirtualKeySpec, ...] = (
     ),
     VirtualKeySpec(
         env_var="TASK_AGENT_API_KEY",
-        alias="fuzzforge-task-agent",
-        user_id="fuzzforge-task-agent",
+        alias="crashwise-task-agent",
+        user_id="crashwise-task-agent",
         budget_env_var="TASK_AGENT_BUDGET",
         duration_env_var="TASK_AGENT_DURATION",
         default_budget=25.0,
@@ -73,8 +73,8 @@ VIRTUAL_KEYS: tuple[VirtualKeySpec, ...] = (
     ),
     VirtualKeySpec(
         env_var="COGNEE_API_KEY",
-        alias="fuzzforge-cognee",
-        user_id="fuzzforge-cognee",
+        alias="crashwise-cognee",
+        user_id="crashwise-cognee",
         budget_env_var="COGNEE_BUDGET",
         duration_env_var="COGNEE_DURATION",
         default_budget=50.0,

@@ -1,17 +1,10 @@
 #!/usr/bin/env python3
-# Copyright (c) 2025 FuzzingLabs
+# Copyright (c) 2026 Crashwise
 #
-# Licensed under the Business Source License 1.1 (BSL). See the LICENSE file
-# at the root of this repository for details.
-#
-# After the Change Date (four years from publication), this version of the
-# Licensed Work will be made available under the Apache License, Version 2.0.
-# See the LICENSE-APACHE file or http://www.apache.org/licenses/LICENSE-2.0
-#
-# Additional attribution and requirements are provided in the NOTICE file.
+# Licensed under the MIT License. See the LICENSE file for details.
 
 """
-Automated workflow testing example using FuzzForge SDK.
+Automated workflow testing example using Crashwise SDK.
 
 This example demonstrates how to:
 1. Use the WorkflowTester for automated testing
@@ -28,13 +21,13 @@ import argparse
 import logging
 from pathlib import Path
 
-from fuzzforge_sdk import (
-    FuzzForgeClient,
+from crashwise_sdk import (
+    CrashwiseClient,
     WorkflowTester,
     format_test_summary,
     DEFAULT_TEST_CONFIG
 )
-from fuzzforge_sdk.exceptions import FuzzForgeError
+from crashwise_sdk.exceptions import CrashwiseError
 
 
 def setup_logging(verbose: bool = False):
@@ -52,7 +45,7 @@ def setup_logging(verbose: bool = False):
 def main():
     """Main test execution function."""
     parser = argparse.ArgumentParser(
-        description="Automated workflow testing for FuzzForge",
+        description="Automated workflow testing for Crashwise",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -73,7 +66,7 @@ Examples:
     parser.add_argument(
         "--base-url",
         default="http://localhost:8000",
-        help="FuzzForge API base URL (default: http://localhost:8000)"
+        help="Crashwise API base URL (default: http://localhost:8000)"
     )
 
     parser.add_argument(
@@ -118,7 +111,7 @@ Examples:
 
     # Show configuration and exit if requested
     if args.show_config:
-        print("🔧 FuzzForge Workflow Test Configurations:")
+        print("🔧 Crashwise Workflow Test Configurations:")
         print("=" * 60)
         for workflow_name, config in DEFAULT_TEST_CONFIG.items():
             print(f"📋 {workflow_name}:")
@@ -131,8 +124,8 @@ Examples:
 
     try:
         # Initialize client and tester
-        print(f"🔗 Connecting to FuzzForge API at {args.base_url}")
-        client = FuzzForgeClient(base_url=args.base_url)
+        print(f"🔗 Connecting to Crashwise API at {args.base_url}")
+        client = CrashwiseClient(base_url=args.base_url)
 
         # Verify API connection
         status = client.get_api_status()
@@ -207,9 +200,9 @@ Examples:
         print("\n⚠️  Test execution interrupted by user")
         sys.exit(130)
 
-    except FuzzForgeError as e:
-        logger.error(f"FuzzForge API error: {e}")
-        print(f"❌ FuzzForge API error: {e}")
+    except CrashwiseError as e:
+        logger.error(f"Crashwise API error: {e}")
+        print(f"❌ Crashwise API error: {e}")
         sys.exit(1)
 
     except Exception as e:
@@ -225,7 +218,7 @@ def test_single_workflow_example():
     This demonstrates the SDK usage for integration into other scripts.
     """
     # Initialize client and tester
-    client = FuzzForgeClient(base_url="http://localhost:8000")
+    client = CrashwiseClient(base_url="http://localhost:8000")
     tester = WorkflowTester(client)
 
     # Test a specific workflow
@@ -250,7 +243,7 @@ def validate_deployments_example():
 
     Useful for health checks and deployment verification.
     """
-    client = FuzzForgeClient(base_url="http://localhost:8000")
+    client = CrashwiseClient(base_url="http://localhost:8000")
     tester = WorkflowTester(client)
 
     # Check all workflows are deployed

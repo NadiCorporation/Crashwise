@@ -1,6 +1,6 @@
 ---
 name: 🔄 Workflow Submission
-about: Contribute a security workflow or module to the FuzzForge community
+about: Contribute a security workflow or module to the Crashwise community
 title: "[WORKFLOW] "
 labels: workflow, community
 assignees: ''
@@ -62,6 +62,6 @@ Anything else the maintainers should know about this workflow?
 
 ---
 
-🚀 **Thank you for contributing to FuzzForge!** Your workflow will help the security community automate and scale their testing efforts.
+🚀 **Thank you for contributing to Crashwise!** Your workflow will help the security community automate and scale their testing efforts.
 
 💬 **Questions?** Join our [Discord Community](https://discord.com/invite/acqv9FVG) to discuss your contribution!

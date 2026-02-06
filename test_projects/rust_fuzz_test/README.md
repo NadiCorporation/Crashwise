@@ -1,22 +1,22 @@
 # rust_fuzz_test
 
-FuzzForge security testing project.
+Crashwise security testing project.
 
 ## Quick Start
 
 ```bash
 # List available workflows
-fuzzforge workflows
+crashwise workflows
 
 # Submit a workflow for analysis
-fuzzforge workflow run <workflow-name> /path/to/target
+crashwise workflow run <workflow-name> /path/to/target
 
 # View findings
-fuzzforge finding <run-id>
+crashwise finding <run-id>
 ```
 
 ## Project Structure
 
-- `.fuzzforge/` - Project data and configuration
-- `.fuzzforge/config.yaml` - Project configuration
-- `.fuzzforge/findings.db` - Local database for runs and findings
+- `.crashwise/` - Project data and configuration
+- `.crashwise/config.yaml` - Project configuration
+- `.crashwise/findings.db` - Local database for runs and findings

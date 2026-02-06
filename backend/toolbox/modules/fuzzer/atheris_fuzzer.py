@@ -161,7 +161,7 @@ class AtherisFuzzer(BaseModule):
             name="atheris_fuzzer",
             version="1.0.0",
             description="Python fuzzing using Atheris - discovers and fuzzes TestOneInput() functions",
-            author="FuzzForge Team",
+            author="Crashwise Team",
             category="fuzzer",
             tags=["fuzzing", "atheris", "python", "coverage"],
             input_schema={
@@ -395,7 +395,7 @@ class AtherisFuzzer(BaseModule):
         self.total_executions = 0
 
         # Create corpus directory in workspace
-        corpus_dir = workspace / ".fuzzforge_corpus"
+        corpus_dir = workspace / ".crashwise_corpus"
         corpus_dir.mkdir(exist_ok=True)
         logger.info(f"Using corpus directory: {corpus_dir}")
 

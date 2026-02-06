@@ -1,6 +1,6 @@
 ---
 name: ✨ Feature Request
-about: Suggest an idea for FuzzForge
+about: Suggest an idea for Crashwise
 title: "[FEATURE] "
 labels: enhancement
 assignees: ''
@@ -19,7 +19,7 @@ What other approaches have you considered? List any alternative solutions or fea
 **(Optional)** Do you have any technical considerations or implementation ideas?
 
 ## Category
-What area of FuzzForge would this feature enhance?
+What area of Crashwise would this feature enhance?
 
 - [ ] 🤖 AI Agents for Security
 - [ ] 🛠 Workflow Automation

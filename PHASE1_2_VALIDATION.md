@@ -3,8 +3,8 @@
 ## Phase 1A: LLM Resolver & Policy System
 
 ### New Files Created
-1. ✅ `cli/src/fuzzforge_cli/policy.py` - Policy enforcement
-2. ✅ `cli/src/fuzzforge_cli/llm_resolver.py` - Single source of truth for LLM config
+1. ✅ `cli/src/crashwise_cli/policy.py` - Policy enforcement
+2. ✅ `cli/src/crashwise_cli/llm_resolver.py` - Single source of truth for LLM config
 3. ✅ `cli/tests/test_policy.py` - Policy tests
 4. ✅ `cli/tests/test_llm_resolver.py` - Resolver tests
 
@@ -18,8 +18,8 @@ python -m pytest cli/tests/test_policy.py -v
 python -m pytest cli/tests/test_llm_resolver.py -v
 
 # Verify imports work
-python -c "from fuzzforge_cli.policy import Policy; print('Policy OK')"
-python -c "from fuzzforge_cli.llm_resolver import get_llm_client; print('Resolver OK')"
+python -c "from crashwise_cli.policy import Policy; print('Policy OK')"
+python -c "from crashwise_cli.llm_resolver import get_llm_client; print('Resolver OK')"
 ```
 
 ### Policy Features Verified
@@ -27,7 +27,7 @@ python -c "from fuzzforge_cli.llm_resolver import get_llm_client; print('Resolve
 - [ ] Provider allow/block lists work
 - [ ] Env var fallback can be disabled
 - [ ] Limits can be configured
-- [ ] Policy file loads from ~/.config/fuzzforge/policy.yaml
+- [ ] Policy file loads from ~/.config/crashwise/policy.yaml
 
 ### LLM Resolver Features Verified
 - [ ] OAuth tokens preferred over env vars
@@ -113,7 +113,7 @@ ff oauth status --json
 
 # 5. Verify resolver can use credentials
 python -c "
-from fuzzforge_cli.llm_resolver import get_llm_client
+from crashwise_cli.llm_resolver import get_llm_client
 config = get_llm_client(provider='openai_codex')
 print(f'Provider: {config[\"provider\"]}')
 print(f'Model: {config[\"model\"]}')
@@ -126,7 +126,7 @@ ff oauth logout -p openai_codex --force
 
 # 7. Verify resolver fails gracefully
 python -c "
-from fuzzforge_cli.llm_resolver import get_llm_client, LLMResolverError
+from crashwise_cli.llm_resolver import get_llm_client, LLMResolverError
 try:
     config = get_llm_client(provider='openai_codex')
     print('ERROR: Should have failed')
@@ -140,7 +140,7 @@ except LLMResolverError as e:
 
 ```bash
 # Create restrictive policy
-cat > ~/.config/fuzzforge/policy.yaml << 'EOF'
+cat > ~/.config/crashwise/policy.yaml << 'EOF'
 providers:
   allowed:
     - openai_codex
@@ -156,7 +156,7 @@ EOF
 
 # Test policy enforcement
 python -c "
-from fuzzforge_cli.llm_resolver import get_llm_client, PolicyViolationError
+from crashwise_cli.llm_resolver import get_llm_client, PolicyViolationError
 
 # Should work - openai_codex is allowed
 try:
@@ -198,8 +198,8 @@ ff oauth remove --help
 ```bash
 # Verify exception imports work
 python -c "
-from fuzzforge_cli.exceptions import (
-    FuzzForgeError,
+from crashwise_cli.exceptions import (
+    CrashwiseError,
     ValidationError,
     ProjectNotFoundError
 )
@@ -208,7 +208,7 @@ print('Exception imports: OK')
 
 # Verify SDK exceptions still work
 python -c "
-from fuzzforge_sdk.exceptions import FuzzForgeError
+from crashwise_sdk.exceptions import CrashwiseError
 print('SDK exceptions: OK')
 "
 ```
@@ -247,13 +247,13 @@ cat /tmp/oauth_status.json | python -m json.tool > /dev/null && echo "Valid JSON
 ## Files Changed Summary
 
 ### New Files:
-1. `cli/src/fuzzforge_cli/policy.py` (220 lines)
-2. `cli/src/fuzzforge_cli/llm_resolver.py` (310 lines)
+1. `cli/src/crashwise_cli/policy.py` (220 lines)
+2. `cli/src/crashwise_cli/llm_resolver.py` (310 lines)
 3. `cli/tests/test_policy.py` (260 lines)
 4. `cli/tests/test_llm_resolver.py` (340 lines)
 
 ### Modified Files:
-1. `cli/src/fuzzforge_cli/commands/oauth.py` (enhanced)
+1. `cli/src/crashwise_cli/commands/oauth.py` (enhanced)
    - Added `--json` flag to status
    - Added `logout` command
    - Added `--list-providers` flag to setup

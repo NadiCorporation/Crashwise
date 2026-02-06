@@ -3,8 +3,8 @@
 ## Task #5: Secure OAuth Setup
 
 ### Files Modified/Created:
-1. ✅ `cli/src/fuzzforge_cli/secure_storage.py` - NEW (secure token storage)
-2. ✅ `cli/src/fuzzforge_cli/commands/oauth.py` - REWRITE (OAuth 2.0 with PKCE)
+1. ✅ `cli/src/crashwise_cli/secure_storage.py` - NEW (secure token storage)
+2. ✅ `cli/src/crashwise_cli/commands/oauth.py` - REWRITE (OAuth 2.0 with PKCE)
 3. ✅ `cli/tests/test_secure_storage.py` - NEW (storage tests)
 4. ✅ `cli/tests/test_oauth.py` - NEW (OAuth tests)
 5. ✅ `cli/tests/conftest.py` - NEW (test fixtures)
@@ -27,7 +27,7 @@ python -m pytest cli/tests/test_secure_storage.py -v
 python -m pytest cli/tests/test_oauth.py -v
 
 # 3. Test CLI integration (manual)
-cd /path/to/fuzzforge
+cd /path/to/crashwise
 ff oauth status
 ff oauth setup --provider openai_codex --help
 ff oauth setup --provider gemini_cli --help
@@ -46,13 +46,13 @@ ff oauth remove --provider openai_codex --help
 ## Task #3: Exception Consolidation
 
 ### Files Modified:
-1. ✅ `cli/src/fuzzforge_cli/exceptions.py` - REWRITE (compatibility shim)
+1. ✅ `cli/src/crashwise_cli/exceptions.py` - REWRITE (compatibility shim)
 2. ✅ `cli/tests/test_exceptions.py` - NEW (consolidation tests)
 
 ### Compatibility Strategy:
 - ✅ SDK exceptions remain single source of truth
 - ✅ CLI exceptions re-export all SDK exceptions
-- ✅ CLI FuzzForgeError inherits from SDK FuzzForgeError
+- ✅ CLI CrashwiseError inherits from SDK CrashwiseError
 - ✅ CLI ValidationError inherits from SDK ValidationError
 - ✅ CLI-specific exceptions preserved (ProjectNotFoundError, etc.)
 - ✅ All existing exception class names maintained
@@ -64,22 +64,22 @@ ff oauth remove --provider openai_codex --help
 python -m pytest cli/tests/test_exceptions.py -v
 
 # 2. Verify imports work
-python -c "from fuzzforge_cli.exceptions import FuzzForgeError; print('OK')"
-python -c "from fuzzforge_cli.exceptions import ValidationError; print('OK')"
-python -c "from fuzzforge_cli.exceptions import ProjectNotFoundError; print('OK')"
-python -c "from fuzzforge_cli.exceptions import FuzzForgeHTTPError; print('OK')"
+python -c "from crashwise_cli.exceptions import CrashwiseError; print('OK')"
+python -c "from crashwise_cli.exceptions import ValidationError; print('OK')"
+python -c "from crashwise_cli.exceptions import ProjectNotFoundError; print('OK')"
+python -c "from crashwise_cli.exceptions import CrashwiseHTTPError; print('OK')"
 
 # 3. Verify inheritance
 python -c "
-from fuzzforge_cli.exceptions import FuzzForgeError as CLIE
-from fuzzforge_sdk.exceptions import FuzzForgeError as SDKE
+from crashwise_cli.exceptions import CrashwiseError as CLIE
+from crashwise_sdk.exceptions import CrashwiseError as SDKE
 print('CLI inherits SDK:', issubclass(CLIE, SDKE))
 "
 
 # 4. Test backward compatibility
 python -c "
-from fuzzforge_cli.exceptions import FuzzForgeError
-e = FuzzForgeError('test', hint='hint', exit_code=2)
+from crashwise_cli.exceptions import CrashwiseError
+e = CrashwiseError('test', hint='hint', exit_code=2)
 print('Has message:', hasattr(e, 'message'))
 print('Has hint:', hasattr(e, 'hint'))
 print('Has exit_code:', hasattr(e, 'exit_code'))
@@ -138,9 +138,9 @@ ff config --help
 ### Task #5 Rollback:
 ```bash
 # Restore original oauth.py
-git checkout cli/src/fuzzforge_cli/commands/oauth.py
+git checkout cli/src/crashwise_cli/commands/oauth.py
 # Remove new files
-rm cli/src/fuzzforge_cli/secure_storage.py
+rm cli/src/crashwise_cli/secure_storage.py
 rm cli/tests/test_secure_storage.py
 rm cli/tests/test_oauth.py
 ```
@@ -148,7 +148,7 @@ rm cli/tests/test_oauth.py
 ### Task #3 Rollback:
 ```bash
 # Restore original exceptions.py
-git checkout cli/src/fuzzforge_cli/exceptions.py
+git checkout cli/src/crashwise_cli/exceptions.py
 # Remove test file
 rm cli/tests/test_exceptions.py
 ```

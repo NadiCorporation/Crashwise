@@ -1,5 +1,5 @@
 """
-Storage abstraction layer for FuzzForge.
+Storage abstraction layer for Crashwise.
 
 Provides unified interface for storing and retrieving targets and results.
 """

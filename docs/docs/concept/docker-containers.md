@@ -1,12 +1,12 @@
-# Docker Containers in FuzzForge: Concept and Design
+# Docker Containers in Crashwise: Concept and Design
 
-Docker containers are at the heart of FuzzForge’s execution model. They provide the isolation, consistency, and flexibility needed to run security workflows reliably—no matter where FuzzForge is deployed. This page explains the core concepts behind container usage in FuzzForge, why containers are used, and how they shape the platform’s behavior.
+Docker containers are at the heart of Crashwise’s execution model. They provide the isolation, consistency, and flexibility needed to run security workflows reliably—no matter where Crashwise is deployed. This page explains the core concepts behind container usage in Crashwise, why containers are used, and how they shape the platform’s behavior.
 
 ---
 
 ## Why Use Docker Containers?
 
-FuzzForge relies on Docker containers for several key reasons:
+Crashwise relies on Docker containers for several key reasons:
 
 - **Isolation:** Each workflow runs in its own container, so tools and processes can’t interfere with each other or the host.
 - **Consistency:** The environment inside a container is always the same, regardless of the underlying system.
@@ -16,11 +16,11 @@ FuzzForge relies on Docker containers for several key reasons:
 
 ---
 
-## How Does FuzzForge Use Containers?
+## How Does Crashwise Use Containers?
 
 ### The Container Model
 
-Every workflow in FuzzForge is executed inside a Docker container. Here’s what that means in practice:
+Every workflow in Crashwise is executed inside a Docker container. Here’s what that means in practice:
 
 - **Vertical worker containers** are built from language-specific base images with domain-specific security toolchains pre-installed (Android, Rust, Web, etc.).
 - **Infrastructure containers** (API server, Temporal, MinIO, database) use official images and are configured for the platform's needs.
@@ -74,8 +74,8 @@ RUN apt-get update && apt-get install -y git curl build-essential && rm -rf /var
 RUN pip install temporalio boto3 pydantic
 COPY worker.py /app/
 WORKDIR /app
-RUN useradd -m -u 1000 fuzzforge
-USER fuzzforge
+RUN useradd -m -u 1000 crashwise
+USER crashwise
 # Toolbox will be mounted as volume at /app/toolbox
 CMD ["python", "worker.py"]
 ```
@@ -93,7 +93,7 @@ Example network config:
 
 ```yaml
 networks:
-  fuzzforge:
+  crashwise:
     driver: bridge
     ipam:
       config:
@@ -139,7 +139,7 @@ Example build:
 
 ```bash
 cd workers/rust
-docker build -t fuzzforge-worker-rust:latest .
+docker build -t crashwise-worker-rust:latest .
 # Or via docker-compose
 docker-compose -f docker-compose.yml build worker-rust
 ```
@@ -209,13 +209,13 @@ services:
 ## How Are Containers Monitored and Debugged?
 
 - **Health Checks:** Each service and workflow container has a health endpoint or check.
-- **Logging:** All container logs are collected and can be accessed via `docker logs` or the FuzzForge API.
+- **Logging:** All container logs are collected and can be accessed via `docker logs` or the Crashwise API.
 - **Debug Access:** Use `docker exec` to access running containers for troubleshooting.
 - **Resource Stats:** Monitor with `docker stats` or platform dashboards.
 
 ---
 
-## How Does This All Fit Into FuzzForge?
+## How Does This All Fit Into Crashwise?
 
 - **Temporal Workers:** Long-lived vertical workers execute workflows with pre-installed toolchains.
 - **API Integration:** Exposes workflow status, logs, and resource metrics via Temporal.
@@ -226,4 +226,4 @@ services:
 
 ## In Summary
 
-Docker containers are the foundation of FuzzForge’s execution model. They provide the isolation, security, and reproducibility needed for robust security analysis workflows—while making it easy to scale, monitor, and extend the platform.
+Docker containers are the foundation of Crashwise’s execution model. They provide the isolation, security, and reproducibility needed for robust security analysis workflows—while making it easy to scale, monitor, and extend the platform.

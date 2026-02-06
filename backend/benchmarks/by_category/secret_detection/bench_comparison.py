@@ -13,7 +13,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "sdk" / "src"))
 
-from fuzzforge_sdk import FuzzForgeClient
+from crashwise_sdk import CrashwiseClient
 from benchmarks.category_configs import ModuleCategory, get_threshold
 
 
@@ -37,8 +37,8 @@ def ground_truth(target_path):
 
 @pytest.fixture
 def sdk_client():
-    """FuzzForge SDK client"""
-    client = FuzzForgeClient(base_url="http://localhost:8000")
+    """Crashwise SDK client"""
+    client = CrashwiseClient(base_url="http://localhost:8000")
     yield client
     client.close()
 
@@ -209,7 +209,7 @@ class TestSecretDetectionComparison:
                 workflow_name="llm_secret_detection",
                 target_path=str(target_path),
                 parameters={
-                    "agent_url": "http://fuzzforge-task-agent:8000/a2a/litellm_agent",
+                    "agent_url": "http://crashwise-task-agent:8000/a2a/litellm_agent",
                     "llm_model": model,
                     "llm_provider": provider,
                     "max_files": 20,

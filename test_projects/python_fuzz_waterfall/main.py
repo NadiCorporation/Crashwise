@@ -111,7 +111,7 @@ if __name__ == "__main__":
         print()
 
     print("=" * 60)
-    print("To fuzz this vulnerability with FuzzForge:")
+    print("To fuzz this vulnerability with Crashwise:")
     print("  ff init")
     print("  ff workflow run atheris_fuzzing .")
     print("=" * 60)

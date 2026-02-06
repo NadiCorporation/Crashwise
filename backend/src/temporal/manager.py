@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 class TemporalManager:
     """
-    Manages Temporal workflow execution for FuzzForge.
+    Manages Temporal workflow execution for Crashwise.
 
     This class:
     - Discovers available workflows from toolbox

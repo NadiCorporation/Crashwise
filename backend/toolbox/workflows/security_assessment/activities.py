@@ -132,7 +132,7 @@ async def generate_sarif_report_activity(
         reporter_config = {
             **config,
             "findings": all_findings,
-            "tool_name": "FuzzForge Security Assessment",
+            "tool_name": "Crashwise Security Assessment",
             "tool_version": "1.0.0"
         }
 

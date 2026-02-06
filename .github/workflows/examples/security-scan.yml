@@ -1,11 +1,11 @@
-# FuzzForge CI/CD Example - Security Scanning
+# Crashwise CI/CD Example - Security Scanning
 #
-# This workflow demonstrates how to integrate FuzzForge into your CI/CD pipeline
+# This workflow demonstrates how to integrate Crashwise into your CI/CD pipeline
 # for automated security testing on pull requests and pushes.
 #
 # Features:
 #   - Runs entirely in GitHub Actions (no external infrastructure needed)
-#   - Auto-starts FuzzForge services on-demand
+#   - Auto-starts Crashwise services on-demand
 #   - Fails builds on error-level SARIF findings
 #   - Uploads SARIF results to GitHub Security tab
 #   - Exports findings as artifacts
@@ -33,7 +33,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Start FuzzForge
+      - name: Start Crashwise
         run: |
           bash scripts/ci-start.sh
 
@@ -42,11 +42,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install FuzzForge CLI
+      - name: Install Crashwise CLI
         run: |
           pip install ./cli
 
-      - name: Initialize FuzzForge
+      - name: Initialize Crashwise
         run: |
           ff init --api-url http://localhost:8000 --name "GitHub Actions Security Scan"
 
@@ -71,7 +71,7 @@ jobs:
           path: results.sarif
           retention-days: 30
 
-      - name: Stop FuzzForge
+      - name: Stop Crashwise
         if: always()
         run: |
           bash scripts/ci-stop.sh
@@ -84,7 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start FuzzForge
+      - name: Start Crashwise
         run: bash scripts/ci-start.sh
 
       - name: Install CLI
@@ -122,7 +122,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start FuzzForge
+      - name: Start Crashwise
         run: bash scripts/ci-start.sh
 
       - name: Install CLI

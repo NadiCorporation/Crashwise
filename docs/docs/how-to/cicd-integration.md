@@ -1,12 +1,12 @@
 # CI/CD Integration Guide
 
-This guide shows you how to integrate FuzzForge into your CI/CD pipeline for automated security testing on every commit, pull request, or scheduled run.
+This guide shows you how to integrate Crashwise into your CI/CD pipeline for automated security testing on every commit, pull request, or scheduled run.
 
 ---
 
 ## Overview
 
-FuzzForge can run entirely inside CI containers (GitHub Actions, GitLab CI, etc.) with no external infrastructure required. The complete FuzzForge stack—Temporal, PostgreSQL, MinIO, Backend, and workers—starts automatically when needed and cleans up after execution.
+Crashwise can run entirely inside CI containers (GitHub Actions, GitLab CI, etc.) with no external infrastructure required. The complete Crashwise stack—Temporal, PostgreSQL, MinIO, Backend, and workers—starts automatically when needed and cleans up after execution.
 
 ### Key Benefits
 
@@ -27,7 +27,7 @@ FuzzForge can run entirely inside CI containers (GitHub Actions, GitLab CI, etc.
 
 ### Optional
 - **jq**: For merging Docker daemon config (auto-installed in examples)
-- **Python 3.11+**: For FuzzForge CLI
+- **Python 3.11+**: For Crashwise CLI
 
 ---
 
@@ -35,10 +35,10 @@ FuzzForge can run entirely inside CI containers (GitHub Actions, GitLab CI, etc.
 
 ### 1. Add Startup Scripts
 
-FuzzForge provides helper scripts to configure Docker and start services:
+Crashwise provides helper scripts to configure Docker and start services:
 
 ```bash
-# Start FuzzForge (configure Docker, start services, wait for health)
+# Start Crashwise (configure Docker, start services, wait for health)
 bash scripts/ci-start.sh
 
 # Stop and cleanup after execution
@@ -54,14 +54,14 @@ pip install ./cli
 ### 3. Initialize Project
 
 ```bash
-ff init --api-url http://localhost:8000 --name "CI Security Scan"
+cw init --api-url http://localhost:8000 --name "CI Security Scan"
 ```
 
 ### 4. Run Workflow
 
 ```bash
 # Run and fail on error findings
-ff workflow run security_assessment . \
+cw workflow run security_assessment . \
   --wait \
   --fail-on error \
   --export-sarif results.sarif
@@ -71,7 +71,7 @@ ff workflow run security_assessment . \
 
 ## Deployment Models
 
-FuzzForge supports two CI/CD deployment models:
+Crashwise supports two CI/CD deployment models:
 
 ### Option A: Ephemeral (Recommended)
 
@@ -82,7 +82,7 @@ FuzzForge supports two CI/CD deployment models:
 │ GitHub Actions Runner              │
 │                                    │
 │  ┌──────────────────────────────┐ │
-│  │ FuzzForge Stack              │ │
+│  │ Crashwise Stack              │ │
 │  │ • Temporal                   │ │
 │  │ • PostgreSQL                 │ │
 │  │ • MinIO                      │ │
@@ -90,7 +90,7 @@ FuzzForge supports two CI/CD deployment models:
 │  │ • Workers (on-demand)        │ │
 │  └──────────────────────────────┘ │
 │                                    │
-│  ff workflow run ...               │
+│  cw workflow run ...               │
 └────────────────────────────────────┘
 ```
 
@@ -111,8 +111,8 @@ FuzzForge supports two CI/CD deployment models:
 
 ```
 ┌──────────────┐         ┌──────────────────┐
-│ CI Runner    │────────▶│ FuzzForge Server │
-│ (ff CLI)     │  HTTPS  │ (self-hosted)    │
+│ CI Runner    │────────▶│ Crashwise Server │
+│ (cw CLI)     │  HTTPS  │ (self-hosted)    │
 └──────────────┘         └──────────────────┘
 ```
 
@@ -148,7 +148,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start FuzzForge
+      - name: Start Crashwise
         run: bash scripts/ci-start.sh
 
       - name: Install CLI
@@ -156,8 +156,8 @@ jobs:
 
       - name: Security Scan
         run: |
-          ff init --api-url http://localhost:8000
-          ff workflow run security_assessment . \
+          cw init --api-url http://localhost:8000
+          cw workflow run security_assessment . \
             --wait \
             --fail-on error \
             --export-sarif results.sarif
@@ -205,7 +205,7 @@ stages:
   - security
 
 variables:
-  FUZZFORGE_API_URL: "http://localhost:8000"
+  CRASHWISE_API_URL: "http://localhost:8000"
 
 security:scan:
   image: docker:24
@@ -215,9 +215,9 @@ security:scan:
     - apk add bash python3 py3-pip
     - bash scripts/ci-start.sh
     - pip3 install ./cli --break-system-packages
-    - ff init --api-url $FUZZFORGE_API_URL
+    - cw init --api-url $CRASHWISE_API_URL
   script:
-    - ff workflow run security_assessment . --wait --fail-on error --export-sarif results.sarif
+    - cw workflow run security_assessment . --wait --fail-on error --export-sarif results.sarif
   artifacts:
     reports:
       sast: results.sarif
@@ -286,7 +286,7 @@ Export SARIF results to a file after workflow completion.
 
 **Example:**
 ```bash
-ff workflow run security_assessment . \
+cw workflow run security_assessment . \
   --wait \
   --export-sarif results.sarif
 ```
@@ -297,7 +297,7 @@ Wait for workflow execution to complete (required for CI/CD).
 
 **Example:**
 ```bash
-ff workflow run security_assessment . --wait
+cw workflow run security_assessment . --wait
 ```
 
 Without `--wait`, the command returns immediately and the workflow runs in the background.
@@ -321,8 +321,8 @@ jobs:
       - run: bash scripts/ci-start.sh
       - run: pip install ./cli
       - run: |
-          ff init --api-url http://localhost:8000
-          ff workflow run security_assessment . --wait --fail-on error
+          cw init --api-url http://localhost:8000
+          cw workflow run security_assessment . --wait --fail-on error
       - if: always()
         run: bash scripts/ci-stop.sh
 ```
@@ -332,7 +332,7 @@ jobs:
 Fail on ANY exposed secrets:
 
 ```bash
-ff workflow run secret_detection . --wait --fail-on all
+cw workflow run secret_detection . --wait --fail-on all
 ```
 
 ### Nightly Fuzzing (Report Only)
@@ -353,8 +353,8 @@ jobs:
       - run: bash scripts/ci-start.sh
       - run: pip install ./cli
       - run: |
-          ff init --api-url http://localhost:8000
-          ff workflow run atheris_fuzzing . \
+          cw init --api-url http://localhost:8000
+          cw workflow run atheris_fuzzing . \
             max_iterations=100000000 \
             timeout_seconds=7200 \
             --wait \
@@ -382,8 +382,8 @@ jobs:
       - run: bash scripts/ci-start.sh
       - run: pip install ./cli
       - run: |
-          ff init --api-url http://localhost:8000
-          ff workflow run security_assessment . --wait --fail-on all
+          cw init --api-url http://localhost:8000
+          cw workflow run security_assessment . --wait --fail-on all
 ```
 
 ---
@@ -476,7 +476,7 @@ after_script:
 **Solution:** Workers are pre-built but start on-demand (v0.7.0). If a workflow fails immediately, check:
 
 ```bash
-docker logs fuzzforge-worker-<vertical>
+docker logs crashwise-worker-<vertical>
 ```
 
 ---
@@ -497,14 +497,14 @@ docker logs fuzzforge-worker-<vertical>
 
 ## Advanced: Persistent Backend Setup
 
-For high-frequency usage, deploy FuzzForge on a dedicated server:
+For high-frequency usage, deploy Crashwise on a dedicated server:
 
-### 1. Deploy FuzzForge Server
+### 1. Deploy Crashwise Server
 
 ```bash
 # On your CI server
-git clone https://github.com/FuzzingLabs/fuzzforge_ai.git
-cd fuzzforge_ai
+git clone https://github.com/YahyaToubali/Crashwise.git
+cd Crashwise
 docker-compose up -d
 ```
 
@@ -512,7 +512,7 @@ docker-compose up -d
 
 ```bash
 # This will be available in a future release
-docker exec fuzzforge-backend python -c "
+docker exec crashwise-backend python -c "
 from src.auth import generate_token
 print(generate_token(name='github-actions'))
 "
@@ -522,12 +522,12 @@ print(generate_token(name='github-actions'))
 
 ```yaml
 env:
-  FUZZFORGE_API_URL: https://fuzzforge.company.com
-  FUZZFORGE_API_TOKEN: ${{ secrets.FUZZFORGE_TOKEN }}
+  CRASHWISE_API_URL: https://crashwise.company.com
+  CRASHWISE_API_TOKEN: ${{ secrets.CRASHWISE_TOKEN }}
 
 steps:
-  - run: pip install fuzzforge-cli
-  - run: ff workflow run security_assessment . --wait --fail-on error
+  - run: pip install crashwise-cli
+  - run: cw workflow run security_assessment . --wait --fail-on error
 ```
 
 **Note:** Authentication is not yet implemented (v0.7.0). Use network isolation or VPN for now.
@@ -545,6 +545,6 @@ steps:
 
 ## Support
 
-- **Documentation**: [https://docs.fuzzforge.ai](https://docs.fuzzforge.ai)
-- **Issues**: [GitHub Issues](https://github.com/FuzzingLabs/fuzzforge_ai/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/FuzzingLabs/fuzzforge_ai/discussions)
+- **Documentation**: [https://docs.crashwise.ai](https://docs.crashwise.ai)
+- **Issues**: [GitHub Issues](https://github.com/YahyaToubali/Crashwise/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/YahyaToubali/Crashwise/discussions)

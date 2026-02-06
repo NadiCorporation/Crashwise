@@ -1,11 +1,11 @@
 ---
 title: "Run the LLM Proxy"
-description: "Run the LiteLLM gateway that ships with FuzzForge and connect it to the task agent."
+description: "Run the LiteLLM gateway that ships with Crashwise and connect it to the task agent."
 ---
 
 ## Overview
 
-FuzzForge routes every LLM request through a LiteLLM proxy so that usage can be
+Crashwise routes every LLM request through a LiteLLM proxy so that usage can be
 metered, priced, and rate limited per user. Docker Compose starts the proxy in a
 hardened container, while a bootstrap job seeds upstream provider secrets and
 issues a virtual key for the task agent automatically.
@@ -37,10 +37,10 @@ The service publishes two things:
 
 - HTTP API + admin UI on `http://localhost:10999`
 - Persistent SQLite state inside the named volume
-  `fuzzforge_litellm_proxy_data`
+  `crashwise_litellm_proxy_data`
 
 The UI login uses the `UI_USERNAME` / `UI_PASSWORD` pair (defaults to
-`fuzzforge` / `fuzzforge123`). To change them, set the environment variables
+`crashwise` / `crashwise123`). To change them, set the environment variables
 before you run `docker compose up`:
 
 ```bash
@@ -188,7 +188,7 @@ default configuration that forwards traces to standard output. To wire it up:
    `docker-compose.yml` or your shell to point at a remote collector.
 
 After updating the configs, run `docker compose up -d otel-collector llm-proxy`
-and generate a request (for example, trigger `ff workflow run llm_analysis`).
+and generate a request (for example, trigger `cw workflow run llm_analysis`).
 New traces will show up in the collector logs or whichever backend you
 configured. See the official LiteLLM guide for advanced exporter options:
 https://docs.litellm.ai/docs/observability/opentelemetry_integration.

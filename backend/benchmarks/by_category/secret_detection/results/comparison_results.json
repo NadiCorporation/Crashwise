@@ -1,5 +1,5 @@
 {
-  "target_path": "/Users/tduhamel/Documents/FuzzingLabs/fuzzforge_ai/test_projects/secret_detection_benchmark",
+  "target_path": "/Users/tduhamel/Documents/Crashwise/Crashwise/test_projects/secret_detection_benchmark",
   "results": [
     {
       "tool_name": "Gitleaks",

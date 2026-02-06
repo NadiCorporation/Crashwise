@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fuzzforge_cli.policy import (
+from crashwise_cli.policy import (
     Policy,
     ProviderPolicy,
     FallbackPolicy,
