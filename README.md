@@ -1,15 +1,10 @@
-<p align="center">
-  <img src="docs/static/img/crashwise_banner_github.png" alt="Crashwise Banner" width="100%">
-</p>
 <h1 align="center">🚧 Crashwise is under active development</h1>
 
 <p align="center"><strong>AI-powered workflow automation and AI Agents for AppSec, Fuzzing & Offensive Security</strong></p>
 
 <p align="center">
-  <a href="https://discord.gg/8XEX33UUwZ"><img src="https://img.shields.io/discord/1420767905255133267?logo=discord&label=Discord" alt="Discord"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"/></a>
-  <a href="https://crashwise.ai"><img src="https://img.shields.io/badge/Website-crashwise.ai-blue" alt="Website"/></a>
   <img src="https://img.shields.io/badge/version-0.7.3-green" alt="Version">
   <a href="https://github.com/YahyaToubali/Crashwise/stargazers"><img src="https://img.shields.io/github/stars/YahyaToubali/Crashwise?style=social" alt="GitHub Stars"></a>
   
@@ -51,8 +46,6 @@ Crashwise is **open source**, built to empower security teams, researchers, and 
 ![Manual Workflow Demo](docs/static/videos/manual_workflow.gif)
 
 _Setting up and running security workflows through the interface_
-
-👉 More installation options in the [Documentation](https://docs.crashwise.ai).
 
 ---
 
@@ -110,16 +103,22 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 **Docker**
 For containerized workflows, see the [Docker Installation Guide](https://docs.docker.com/get-docker/).
 
-#### Configure AI Agent API Keys (Optional)
+#### Configure AI Agent Credentials (Optional)
 
-For AI-powered workflows, configure your LLM API keys:
+For AI-powered workflows, authenticate via OAuth (preferred):
+
+```bash
+cw oauth setup -p openai_codex
+# or
+cw oauth setup -p gemini_cli
+```
+
+Environment variables can still be used if your policy allows it:
 
 ```bash
 cp volumes/env/.env.template volumes/env/.env
-# Edit volumes/env/.env and add your API keys (OpenAI, Anthropic, Google, etc.)
-# Add your key to LITELLM_GEMINI_API_KEY 
+# Add provider keys only if you explicitly want env-based auth
 ```
-> Dont change the OPENAI_API_KEY default value, as it is used for the LLM proxy. 
 
 This is required for:
 - `llm_secret_detection` workflow
@@ -202,9 +201,6 @@ _AI agents automatically analyzing code and providing security insights_
 
 ## 📚 Resources
 
-- 🌐 [Website](https://crashwise.ai)
-- 📖 [Documentation](https://docs.crashwise.ai)
-- 💬 [Community Discord](https://discord.gg/8XEX33UUwZ)
 
 ---
 
