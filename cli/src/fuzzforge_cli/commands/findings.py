@@ -86,12 +86,12 @@ def get_findings(
                 db = ensure_project_db()
 
                 # Extract summary from SARIF
-                sarif_data = findings.sarif
-                runs_data = sarif_data.get("runs", [])
+                sarif_data = findings.sarif or {}
+                runs_data = sarif_data.get("runs") or []
                 summary = {}
 
                 if runs_data:
-                    results = runs_data[0].get("results", [])
+                    results = runs_data[0].get("results") or []
                     summary = {
                         "total_issues": len(results),
                         "by_severity": {},

@@ -56,7 +56,7 @@ class Crash:
             parts.append(first_line)
 
         sig = "|".join(parts)
-        return hashlib.md5(sig.encode()).hexdigest()[:16]
+        return hashlib.sha1(sig.encode()).hexdigest()[:16]
 
 
 @dataclass
@@ -171,7 +171,8 @@ def sanitize_for_llm(text: str, max_length: int = 4000) -> str:
     """Sanitize crash log for LLM processing.
 
     - Truncates if too long
-    - Removes potential PII (IPs, emails)
+    - Removes potential PII (IPs, emails, usernames, paths)
+    - Masks obvious secrets/tokens
     - Keeps essential crash info
     """
     # Remove potential PII patterns
@@ -179,12 +180,71 @@ def sanitize_for_llm(text: str, max_length: int = 4000) -> str:
     text = re.sub(
         r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "[EMAIL]", text
     )
+    # Mask common home directory paths
+    text = re.sub(r"/(home|Users)/[^\s]+", "/[REDACTED_PATH]", text)
+    # Mask obvious secrets in key=value forms
+    text = re.sub(
+        r"(?i)\b(api[_-]?key|token|secret|password)\b\s*[:=]\s*\S+",
+        r"\1=[REDACTED]",
+        text,
+    )
+    # Mask long hex-like strings
+    text = re.sub(r"\b[a-fA-F0-9]{32,}\b", "[HEX]", text)
 
     # Truncate if needed
     if len(text) > max_length:
         text = text[:max_length] + "\n[... truncated ...]"
 
     return text
+
+
+def _request_llm_completion(llm_config: Dict[str, Any], prompt: str) -> str:
+    """Call LLM endpoint with basic retry/backoff.
+
+    Raises on final failure; does not log secrets.
+    """
+    import urllib.request
+    import urllib.error
+    import time
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {llm_config['api_key']}",
+    }
+
+    data = {
+        "model": f"{llm_config['provider']}/{llm_config['model']}",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 500,
+    }
+
+    base_url = llm_config.get("base_url") or "https://api.openai.com/v1"
+    url = f"{base_url}/chat/completions"
+
+    max_retries = 3
+    backoff = 2
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            req = urllib.request.Request(
+                url, data=json.dumps(data).encode(), headers=headers, method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=60) as response:
+                result = json.loads(response.read().decode())
+                return result["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504) and attempt < max_retries:
+                time.sleep(backoff ** attempt)
+                continue
+            raise
+        except urllib.error.URLError:
+            if attempt < max_retries:
+                time.sleep(backoff ** attempt)
+                continue
+            raise
+
+    raise RuntimeError("LLM request failed after retries")
 
 
 def analyze_cluster_with_llm(
@@ -240,33 +300,7 @@ ROOT_CAUSE: <your analysis>"""
     # Call LLM (implementation depends on provider)
     # For now, we'll use a simple HTTP request to LiteLLM-compatible endpoint
     try:
-        import urllib.request
-        import urllib.error
-
-        # Build request
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {llm_config['api_key']}",
-        }
-
-        data = {
-            "model": f"{llm_config['provider']}/{llm_config['model']}",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-            "max_tokens": 500,
-        }
-
-        # Determine endpoint
-        base_url = llm_config.get("base_url") or "https://api.openai.com/v1"
-        url = f"{base_url}/chat/completions"
-
-        req = urllib.request.Request(
-            url, data=json.dumps(data).encode(), headers=headers, method="POST"
-        )
-
-        with urllib.request.urlopen(req, timeout=60) as response:
-            result = json.loads(response.read().decode())
-            content = result["choices"][0]["message"]["content"]
+        content = _request_llm_completion(llm_config, prompt)
 
         # Parse response
         summary_match = re.search(
@@ -412,12 +446,35 @@ def triage(
         return
 
     # Parse crashes
-    crashes = []
-    for finding in findings:
-        if finding.get("log") or finding.get("details"):
-            log_content = finding.get("log") or finding.get("details", "")
-            crash = parse_crash_log(log_content)
-            crashes.append(crash)
+    crashes: List[Crash] = []
+
+    def _append_log(log_content: Optional[str]) -> None:
+        if not log_content:
+            return
+        crash = parse_crash_log(log_content)
+        crashes.append(crash)
+
+    if isinstance(findings, list):
+        for finding in findings:
+            if isinstance(finding, dict):
+                _append_log(finding.get("log") or finding.get("details") or finding.get("message"))
+    else:
+        # FindingRecord from DB (SARIF-based)
+        sarif_data = getattr(findings, "sarif_data", {}) or {}
+        for run in sarif_data.get("runs", []) or []:
+            for result in run.get("results", []) or []:
+                message = (result.get("message") or {}).get("text")
+                details = (result.get("properties") or {}).get("details")
+                _append_log(details or message)
+
+    # Also include crash records if present
+    try:
+        crash_records = db.get_crashes(run_id)
+    except Exception:
+        crash_records = []
+
+    for record in crash_records:
+        _append_log(record.stack_trace or record.signal or "")
 
     if not crashes:
         console.print("[yellow]No crash logs found to analyze[/yellow]")
