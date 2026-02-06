@@ -41,14 +41,6 @@ Crashwise is **open source**, built to empower security teams, researchers, and 
 
 ---
 
-## Demo - Manual Workflow Setup
-
-![Manual Workflow Demo](docs/static/videos/manual_workflow.gif)
-
-_Setting up and running security workflows through the interface_
-
----
-
 ## ✨ Key Features
 
 - 🤖 **AI Agents for Security** – Specialized agents for AppSec, reversing, and fuzzing
