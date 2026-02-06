@@ -224,6 +224,13 @@ Planned features and improvements:
 
 ---
 
+
+## 🙌 Attribution
+
+Crashwise is based on the original open-source work of **FuzzForge** by FuzzingLabs.
+The project has been rebranded and extended, but we credit the original authors
+and community for the foundation.
+
 ## 📜 License
 
 Crashwise is released under the **MIT License**.  
