@@ -5,7 +5,7 @@ import type * as Preset from "@docusaurus/preset-classic";
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
 const config: Config = {
-  title: "Crashwise Documentation",
+  title: "Crashwise",
   tagline: "AI-Powered Security Analysis Platform",
   favicon: "img/favicon.ico",
 
@@ -15,7 +15,7 @@ const config: Config = {
   },
 
   // Production url of documentation
-  url: "https://docs.crashwise.ai",
+  url: "",
   // The /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: "/",
@@ -81,7 +81,7 @@ const config: Config = {
     ],
     image: "img/crashwise-social-card.jpg",
     navbar: {
-      title: "Crashwise Docs",
+      title: "Crashwise",
       logo: {
         alt: "Crashwise Logo",
         src: "img/crashwise-logo-1024-rounded.png",
@@ -135,7 +135,7 @@ const config: Config = {
           items: [
             {
               label: "Website",
-              href: "https://crashwise.ai/",
+              href: "/",
             },
             {
               label: "Discord",

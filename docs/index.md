@@ -1,4 +1,4 @@
-# Crashwise Documentation
+# Crashwise
 
 Welcome to Crashwise, a comprehensive security analysis platform built on Temporal that automates security testing workflows. Crashwise provides production-ready workflows that run static analysis, secret detection, infrastructure scanning, penetration testing, and custom fuzzing campaigns with Docker-based isolation and SARIF-compliant reporting.
 
