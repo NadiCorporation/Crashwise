@@ -178,7 +178,7 @@ docker compose up -d worker-python
 ```bash
 # 5. Run your first workflow (files are automatically uploaded)
 cd test_projects/vulnerable_app/
-crashwise init                           # Initialize Crashwise project
+cw init                           # Initialize Crashwise project
 cw workflow run security_assessment .    # Start workflow - CLI uploads files automatically!
 
 # The CLI will:
