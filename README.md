@@ -228,7 +228,7 @@ Planned features and improvements:
 - ☁️ Multi-tenant SaaS platform with team collaboration
 - 📊 Advanced reporting & analytics
 
-👉 Follow updates in the [GitHub issues](../../issues) and [Discord](https://discord.gg/8XEX33UUwZ)
+👉 Follow updates in the [GitHub issues](../../issues)
 
 ---
 
