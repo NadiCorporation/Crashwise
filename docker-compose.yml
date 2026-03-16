@@ -498,6 +498,137 @@ services:
           memory: 1G
 
   # ============================================================================
+  # Vertical Worker: Crash Triage
+  # ============================================================================
+  worker-crash-triage:
+    build:
+      context: ./workers/crash-triage
+      dockerfile: Dockerfile
+    container_name: crashwise-worker-crash-triage
+    profiles:
+      - workers
+      - crash-triage
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      # Temporal configuration
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+
+      # Worker configuration
+      WORKER_VERTICAL: crash-triage
+      WORKER_TASK_QUEUE: crash-triage-queue
+      MAX_CONCURRENT_ACTIVITIES: 5
+
+      # Storage configuration (MinIO)
+      STORAGE_BACKEND: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: crashwise
+      S3_SECRET_KEY: crashwise123
+      S3_BUCKET: targets
+      S3_REGION: us-east-1
+      S3_USE_SSL: "false"
+
+      # Cache configuration
+      CACHE_DIR: /cache
+      CACHE_MAX_SIZE: 10GB
+      CACHE_TTL: 7d
+
+      # Logging
+      LOG_LEVEL: INFO
+      PYTHONUNBUFFERED: 1
+
+      # LiteLLM proxy configuration (for Grok/Claude triage)
+      LITELLM_BASE_URL: http://llm-proxy:4000/v1
+      LITELLM_API_KEY: sk-no-key-needed
+
+      # GitHub integration (optional)
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_REPO: ${GITHUB_REPO:-}
+      GITHUB_ISSUE_LABELS: crashwise-found,security,auto-triage
+
+      # Notification webhooks (optional)
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      NOTIFICATION_COOLDOWN_SECONDS: ${NOTIFICATION_COOLDOWN_SECONDS:-300}
+
+      # Fuzzing configuration
+      FUZZ_INPUT_DIR: /fuzz/input
+      FUZZ_OUTPUT_DIR: /fuzz/output
+      FUZZ_CRASH_DIR: /fuzz/crashes
+    volumes:
+      # Mount workflow code (read-only) for dynamic discovery
+      - ./backend/toolbox:/app/toolbox:ro
+      # Worker cache for downloaded targets
+      - worker_crash_triage_cache:/cache
+      # ChromaDB persistent storage for crash deduplication
+      - worker_crash_triage_chroma:/app/chroma_data
+      # Fuzzing work directories
+      - fuzz_campaign_data:/fuzz
+    networks:
+      - crashwise-network
+    restart: "no"
+    # Resource limits (moderate - crash analysis needs CPU for parsing)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+  # ============================================================================
+  # Streamlit Dashboard - Web UI for Fuzz Campaigns
+  # ============================================================================
+  dashboard:
+    build:
+      context: ./frontend/dashboard
+      dockerfile: Dockerfile
+    container_name: crashwise-dashboard
+    depends_on:
+      temporal:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      # Temporal configuration
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      
+      # MinIO configuration (for PoC download links)
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: crashwise
+      MINIO_SECRET_KEY: crashwise123
+      MINIO_BUCKET: results
+      MINIO_USE_SSL: "false"
+      
+      # LiteLLM configuration (for AI features)
+      LITELLM_BASE_URL: http://llm-proxy:4000/v1
+      
+      # Python configuration
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "8501:8501"
+    volumes:
+      # Hot-reload for development
+      - ./frontend/dashboard:/app:ro
+    networks:
+      - crashwise-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ============================================================================
   # Crashwise Backend API
   # ============================================================================
   backend:
@@ -656,10 +787,18 @@ volumes:
     name: crashwise_worker_ossfuzz_cache
   worker_ossfuzz_build:
     name: crashwise_worker_ossfuzz_build
+  worker_crash_triage_cache:
+    name: crashwise_worker_crash_triage_cache
+  worker_crash_triage_chroma:
+    name: crashwise_worker_crash_triage_chroma
   litellm_proxy_data:
     name: crashwise_litellm_proxy_data
   litellm_proxy_db:
     name: crashwise_litellm_proxy_db
+  fuzz_campaign_data:
+    name: crashwise_fuzz_campaign_data
+  dashboard_data:
+    name: crashwise_dashboard_data
   # Add more worker caches as you add verticals:
   # worker_web_cache:
   # worker_ios_cache:

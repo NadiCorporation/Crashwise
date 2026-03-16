@@ -1,238 +1,297 @@
-<h1 align="center">🚧 Crashwise is under active development</h1>
-
-<p align="center"><strong>AI-powered workflow automation and AI Agents for AppSec, Fuzzing & Offensive Security</strong></p>
+<h1 align="center">🛡️ CrashWise</h1>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSL%201.1-orange" alt="License: BSL 1.1"></a>
+  <strong>Autonomous AI-Powered Fuzzing & Crash Triage Platform</strong>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License: Apache 2.0"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"/></a>
-  <img src="https://img.shields.io/badge/version-0.7.3-green" alt="Version">
+  <img src="https://img.shields.io/badge/temporal-✓-purple" alt="Temporal">
+  <img src="https://img.shields.io/badge/streamlit-✓-red" alt="Streamlit">
+  <img src="https://img.shields.io/badge/docker-✓-blue" alt="Docker">
   <a href="https://github.com/YahyaToubali/Crashwise/stargazers"><img src="https://img.shields.io/github/stars/YahyaToubali/Crashwise?style=social" alt="GitHub Stars"></a>
-  
 </p>
 
 <p align="center">
   <sub>
-    <a href="#-overview"><b>Overview</b></a>
-    • <a href="#-key-features"><b>Features</b></a>
+    <a href="#-features"><b>Features</b></a>
+    • <a href="#-screenshots"><b>Screenshots</b></a>
     • <a href="#-installation"><b>Installation</b></a>
-    • <a href="#-quickstart"><b>Quickstart</b></a>
-    • <a href="#ai-powered-workflow-execution"><b>AI Demo</b></a>
+    • <a href="#-quick-start"><b>Quick Start</b></a>
+    • <a href="#-architecture"><b>Architecture</b></a>
+    • <a href="#-environment-variables"><b>Configuration</b></a>
     • <a href="#-contributing"><b>Contributing</b></a>
-    • <a href="#%EF%B8%8F-roadmap"><b>Roadmap</b></a>
   </sub>
 </p>
 
 ---
 
-## 🚀 Overview
+## 🎯 What is CrashWise?
 
-**Crashwise** helps security researchers and engineers automate **application security** and **offensive security** workflows with the power of AI and fuzzing frameworks.
+**CrashWise** is an autonomous security testing platform that combines continuous fuzzing with intelligent crash analysis:
 
-- Orchestrate static & dynamic analysis
-- Automate vulnerability research
-- Scale AppSec testing with AI agents
-- Build, share & reuse workflows across teams
+- **🤖 AI-Powered Triage**: LLM-based vulnerability assessment, exploitability scoring, and automatic GitHub issue creation
+- **🎯 Self-Healing Coverage**: Detects coverage stalls and intelligently responds with seed mutations, harness variants, and parameter adjustments
+- **📊 Web Dashboard**: Real-time campaign monitoring, crash visualization, and coverage tracking
+- **🔔 Smart Notifications**: Slack/Discord alerts for high-severity crashes
+- **📤 SARIF Export**: Generate SARIF reports for CI/CD integration
 
-Crashwise is **open source**, built to empower security teams, researchers, and the community.
-
-> 🚧 Crashwise is under active development. Expect breaking changes.
->
-> **Note:** Fuzzing workflows (`atheris_fuzzing`, `cargo_fuzzing`, `ossfuzz_campaign`) are in early development. OSS-Fuzz integration is under heavy active development. For stable workflows, use: `security_assessment`, `gitleaks_detection`, `trufflehog_detection`, or `llm_secret_detection`.
+> **Zero-effort fuzzing**: Upload a binary → CrashWise analyzes it, generates a harness, creates seeds, fuzzes it, triages crashes, and reports bugs.
 
 ---
 
-## ✨ Key Features
+## ✨ Features
 
-- 🤖 **AI Agents for Security** – Specialized agents for AppSec, reversing, and fuzzing
-- 🛠 **Workflow Automation** – Define & execute AppSec workflows as code
-- 📈 **Vulnerability Research at Scale** – Rediscover 1-days & find 0-days with automation
-- 🔗 **Fuzzer Integration** – Atheris (Python), cargo-fuzz (Rust), OSS-Fuzz campaigns
-- 🌐 **Community Marketplace** – Share workflows, corpora, PoCs, and modules
-- 🔒 **Enterprise Ready** – Team/Corp cloud tiers for scaling offensive security
+### AI Auto-Mode
+- Binary analysis (language detection, entry points, symbols)
+- Automatic fuzz harness generation (C, C++, Python, Go)
+- LLM-generated seed corpus
+- AFL dictionary creation
+
+### Continuous Fuzzing
+- AFL++ integration with crash monitoring
+- Coverage progress tracking with stall detection
+- Automatic crash collection and deduplication
+
+### Intelligent Triage
+- ASan/UBSan/GDB crash parsing
+- LLM-powered vulnerability classification
+- Exploitability scoring (1-10)
+- ChromaDB semantic deduplication
+
+### Self-Healing Coverage
+- Automatic stall detection
+- Supervisor decides: mutate seeds, change params, new harness, add dictionary
+- Continuous optimization loop
+
+### Web Dashboard
+- Real-time campaign list with status
+- Crash cards with severity badges
+- Coverage line charts
+- SARIF export buttons
+- Campaign launch forms
+
+### Integrations
+- GitHub issue creation (auto-report high-severity bugs)
+- Slack/Discord notifications
+- SARIF export for security scanners
 
 ---
 
-## ⭐ Support the Project
+## 📸 Screenshots
 
-<a href="https://github.com/YahyaToubali/Crashwise/stargazers">
-  <img src="https://img.shields.io/github/stars/YahyaToubali/Crashwise?style=social" alt="GitHub Stars">
-</a>
+### Dashboard Home
+> *Dashboard showing campaign list, quick stats, and recent activity*
 
-If you find Crashwise useful, please star the repo to support development 🚀
+The main dashboard shows all fuzzing campaigns with real-time status, crash counts, and coverage progress.
 
----
+### Campaigns Page
+> *Campaign list with filtering, export options, and coverage charts*
 
-## 🔍 Secret Detection Benchmarks
+Filter by status (running/completed/failed), view coverage history, and export campaign data.
 
-Crashwise includes three secret detection workflows benchmarked on a controlled dataset of **32 documented secrets** (12 Easy, 10 Medium, 10 Hard):
+### Crashes Page
+> *Crash triage results with severity badges, exploitability scores, and PoC downloads*
 
-| Tool | Recall | Secrets Found | Speed |
-|------|--------|---------------|-------|
-| **LLM (gpt-5-mini)** | **84.4%** | 41 | 618s |
-| **LLM (gpt-4o-mini)** | 56.2% | 30 | 297s |
-| **Gitleaks** | 37.5% | 12 | 5s |
-| **TruffleHog** | 0.0% | 1 | 5s |
+Detailed crash cards showing vulnerability class, exploitability score, triage JSON, and PoC download links.
 
-📊 [Full benchmark results and analysis](backend/benchmarks/by_category/secret_detection/results/comparison_report.md)
+### Start New Campaign
+> *Form for launching new fuzz campaigns with auto-mode toggle*
 
-The LLM-based detector excels at finding obfuscated and hidden secrets through semantic analysis, while pattern-based tools (Gitleaks) offer speed for standard secret formats.
+Configure target binary, duration, seed corpus, and enable AI auto-mode for zero-effort fuzzing.
 
 ---
 
 ## 📦 Installation
 
-### Requirements
+### Prerequisites
+- Docker & Docker Compose
+- 8GB RAM minimum (16GB recommended)
+- Linux or macOS
 
-**Python 3.11+**
-Python 3.11 or higher is required.
-
-**uv Package Manager**
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-**Docker**
-For containerized workflows, see the [Docker Installation Guide](https://docs.docker.com/get-docker/).
-
-#### Configure AI Agent Credentials (Optional)
-
-For AI-powered workflows, authenticate via OAuth (preferred):
-
-```bash
-cw oauth setup -p openai_codex
-# or
-cw oauth setup -p gemini_cli
-```
-
-Environment variables can still be used if your policy allows it:
-
-```bash
-cp volumes/env/.env.template volumes/env/.env
-# Add provider keys only if you explicitly want env-based auth
-```
-
-This is required for:
-- `llm_secret_detection` workflow
-- AI agent features (`cw ai agent`)
-
-Basic security workflows (gitleaks, trufflehog, security_assessment) work without this configuration.
-
-### CLI Installation
-
-After installing the requirements, install the Crashwise CLI:
+### Quick Install
 
 ```bash
 # Clone the repository
 git clone https://github.com/YahyaToubali/Crashwise.git
 cd Crashwise
 
-# Install CLI with uv (from the root directory)
-uv tool install --python python3.12 .
+# Copy environment template
+cp volumes/env/.env.template volumes/env/.env
+
+# Edit .env and add your API keys
+# Required: OPENCODE_API_KEY (get from opencode.ai/auth)
+# Optional: GITHUB_TOKEN, SLACK_WEBHOOK_URL, DISCORD_WEBHOOK_URL
+
+# Start services
+docker compose up -d
+
+# Check status
+docker compose ps
+```
+
+### Services
+| Service | Port | Description |
+|---------|------|-------------|
+| Dashboard | 8501 | Streamlit web UI |
+| Temporal UI | 8080 | Workflow visualization |
+| MinIO Console | 9001 | Object storage browser |
+| LLM Proxy | 10999 | LiteLLM proxy UI |
+
+---
+
+## 🚀 Quick Start
+
+### Option 1: Dashboard (Recommended)
+
+1. Open http://localhost:8501
+2. Go to **Start New** page
+3. Enter target binary path (or upload)
+4. Toggle **Auto Mode** ✓
+5. Click **Launch Campaign**
+6. Watch crashes appear in real-time
+
+### Option 2: CLI
+
+```bash
+# Install CLI
+pip install crashwise-cli
+
+# Start autonomous fuzz campaign
+cw auto /path/to/binary --duration 2h --model opencode/minimax-m2.5
+
+# Check status
+cw fuzz status <campaign-id> --live
+
+# List all campaigns
+cw fuzz list
+```
+
+### Example: Fuzz a Binary
+
+```bash
+# Start campaign with CLI
+cw fuzz start ./target_binary \
+  --seeds ./corpus \
+  --duration 4h \
+  --max-crashes 100 \
+  --triage \
+  --minimize
+
+# Monitor progress
+cw fuzz status <id> --live
+
+# View crash results
+cw fuzz crashes <id>
 ```
 
 ---
 
-## ⚡ Quickstart
+## 🏗 Architecture
 
-Run your first workflow with **Temporal orchestration** and **automatic file upload**:
-
-```bash
-# 1. Clone the repo
-git clone https://github.com/YahyaToubali/Crashwise.git
-cd Crashwise
-
-# 2. Copy the default LLM env config
-cp volumes/env/.env.template volumes/env/.env
-
-# 3. Start Crashwise with Temporal
-docker compose up -d
-
-# 4. Start the Python worker (needed for security_assessment workflow)
-docker compose up -d worker-python
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        CrashWise Platform                        │
+├─────────────────────────────────────────────────────────────────┤
+│  Web Dashboard (Streamlit)    │    CLI (Typer)                  │
+├─────────────────────────────────────────────────────────────────┤
+│                      Temporal Workflow Engine                    │
+├──────────────┬──────────────┬──────────────┬──────────────────┤
+│   Crash       │  Continuous  │    Auto      │   Crash Triage   │
+│   Triage      │   Fuzz       │   Fuzz       │   Supervisor     │
+│   Pipeline    │  Campaign    │  Campaign    │   (LangGraph)    │
+├──────────────┴──────────────┴──────────────┴──────────────────┤
+│                     Workers (Docker Containers)                  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
+│  │ Crash Triage │  │    AFL++    │  │   LLM Proxy │            │
+│  │   Worker     │  │   Fuzzer    │  │  (LiteLLM)  │            │
+│  └─────────────┘  └─────────────┘  └─────────────┘            │
+├─────────────────────────────────────────────────────────────────┤
+│  MinIO (Storage)  │  Temporal Server  │  ChromaDB (Vectors)   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-> The first launch can take 2-3 minutes for services to initialize ☕
->
-> Workers don't auto-start by default (saves RAM). Start the worker you need before running workflows.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system design.
 
-**Workflow-to-Worker Quick Reference:**
+---
 
-| Workflow | Worker Required | Startup Command |
-|----------|----------------|-----------------|
-| `security_assessment`, `python_sast`, `llm_analysis`, `atheris_fuzzing` | worker-python | `docker compose up -d worker-python` |
-| `android_static_analysis` | worker-android | `docker compose up -d worker-android` |
-| `cargo_fuzzing` | worker-rust | `docker compose up -d worker-rust` |
-| `ossfuzz_campaign` | worker-ossfuzz | `docker compose up -d worker-ossfuzz` |
-| `llm_secret_detection`, `trufflehog_detection`, `gitleaks_detection` | worker-secrets | `docker compose up -d worker-secrets` |
+## ⚙️ Environment Variables
 
-```bash
-# 5. Run your first workflow (files are automatically uploaded)
-cd test_projects/vulnerable_app/
-cw init                           # Initialize Crashwise project
-cw workflow run security_assessment .    # Start workflow - CLI uploads files automatically!
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENCODE_API_KEY` | ✓ | - | OpenCode Go API key for LLM triage |
+| `GITHUB_TOKEN` | ○ | - | GitHub token for issue creation |
+| `GITHUB_REPO` | ○ | - | Target repo for issues (owner/repo) |
+| `SLACK_WEBHOOK_URL` | ○ | - | Slack webhook for notifications |
+| `DISCORD_WEBHOOK_URL` | ○ | - | Discord webhook for notifications |
+| `LITELLM_BASE_URL` | | `http://llm-proxy:4000/v1` | LLM proxy endpoint |
+| `TEMPORAL_ADDRESS` | | `temporal:7233` | Temporal server address |
+| `MINIO_ENDPOINT` | | `http://minio:9000` | MinIO storage endpoint |
 
-# The CLI will:
-# - Detect the local directory
-# - Create a compressed tarball
-# - Upload to backend (via MinIO)
-# - Start the workflow on vertical worker
+---
+
+## 📁 Project Structure
+
+```
+CrashWise/
+├── backend/           # FastAPI backend + Temporal workflows
+│   ├── src/          # API endpoints
+│   └── toolbox/      # Workflow definitions & activities
+├── frontend/
+│   └── dashboard/    # Streamlit web UI
+├── workers/
+│   └── crash-triage/ # Crash analysis worker
+├── cli/              # Typer CLI
+├── sdk/              # Python SDK
+└── volumes/          # Docker volumes (env, data)
 ```
 
-**What's running:**
-- **Temporal**: Workflow orchestration (UI at http://localhost:8080)
-- **MinIO**: File storage for targets (Console at http://localhost:9001)
-- **Vertical Workers**: Pre-built workers with security toolchains
-- **Backend API**: Crashwise REST API (http://localhost:8000)
+---
 
-## AI-Powered Workflow Execution
+## 🧪 Testing
 
-![LLM Workflow Demo](docs/static/videos/llm_workflow.gif)
+```bash
+# Run all tests
+make test
 
-_AI agents automatically analyzing code and providing security insights_
+# Run specific workflow tests
+pytest backend/tests/workflows/test_auto_fuzz_campaign.py
 
-## 📚 Resources
-
+# Run with coverage
+pytest --cov=backend --cov=cli
+```
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions from the community!  
-There are many ways to help:
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-- Report bugs by opening an [issue](../../issues)
-- Suggest new features or improvements
-- Submit pull requests with fixes or enhancements
-- Share workflows, corpora, or modules with the community
-
-See our [Contributing Guide](CONTRIBUTING.md) for details.
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ---
-
-## 🗺️ Roadmap
-
-Planned features and improvements:
-
-- 📦 Public workflow & module marketplace
-- 🤖 New specialized AI agents (Rust, Go, Android, Automotive)
-- 🔗 Expanded fuzzer integrations (LibFuzzer, Jazzer, more network fuzzers)
-- ☁️ Multi-tenant SaaS platform with team collaboration
-- 📊 Advanced reporting & analytics
-
-👉 Follow updates in the [GitHub issues](../../issues)
-
----
-
-
-## 🙌 Attribution
-
-Crashwise is based on the original open-source work of **FuzzForge** by FuzzingLabs.
-The project has been rebranded and extended, but we credit the original authors
-and community for the foundation.
 
 ## 📜 License
 
-Crashwise is released under the **Business Source License 1.1 (BSL)**.
-Production use requires a commercial license until the change date, when Apache 2.0 applies.  
-See [LICENSE](LICENSE) and [LICENSE-APACHE](LICENSE-APACHE) for details.
+Apache License 2.0 - see [LICENSE](LICENSE) for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- [Temporal](https://temporal.io/) - Workflow orchestration
+- [AFL++](https://github.com/AFLplusplus/AFLplusplus) - Fuzzing framework
+- [LangGraph](https://github.com/langchain-ai/langgraph) - Agent orchestration
+- [Streamlit](https://streamlit.io/) - Dashboard framework
+- [ChromaDB](https://www.trychroma.com/) - Vector database
+
+---
+
+<p align="center">
+  Made with ❤️ by <a href="https://github.com/YahyaToubali">Yahya Toubali</a>
+</p>
