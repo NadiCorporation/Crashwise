@@ -1,200 +1,116 @@
 # Changelog
 
-All notable changes to Crashwise will be documented in this file.
+All notable changes to CrashWise will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2025-03-16
+
+### 🎉 First Public Release
+
+**CrashWise v1.0.0** - Autonomous AI-Powered Fuzzing & Crash Triage Platform
+
+### ✨ Major Features
+
+#### AI Auto-Mode
+- **Binary Analysis**: Automatic language detection, entry point identification, symbol extraction
+- **Harness Generation**: LLM-generated fuzz harnesses for C, C++, Python, Go
+- **Seed Generation**: AI-created initial corpus with intelligent test cases
+- **Dictionary Creation**: Automatic AFL dictionary from binary strings
+
+#### Continuous Fuzzing
+- **Campaign Management**: Start, monitor, stop fuzzing campaigns via CLI or dashboard
+- **Crash Monitoring**: Real-time crash detection and collection
+- **Coverage Tracking**: Edge/block coverage with stall detection
+- **Self-Healing Coverage**: Automatic response to coverage stalls
+
+#### Intelligent Crash Triage
+- **Multi-Format Parsing**: ASan, UBSan, GDB, coredump support
+- **LLM Vulnerability Assessment**: Automatic classification and exploitability scoring
+- **Semantic Deduplication**: ChromaDB-powered crash similarity detection
+- **Crash Minimization**: AFL-tmin PoC reduction
+
+#### LangGraph Supervisor
+- **ReAct-Style Reasoning**: Think → Act → Observe loop
+- **Autonomous Decisions**: triage, dedup, minimize, report actions
+- **GitHub Integration**: Automatic issue creation for high-severity bugs
+- **Self-Healing**: Stall detection with intelligent recovery actions
+
+#### Web Dashboard
+- **Real-Time Monitoring**: Campaign status, crash counts, coverage charts
+- **Crash Visualization**: Severity badges, exploitability scores, triage JSON
+- **SARIF Export**: Generate industry-standard security reports
+- **Campaign Launch Forms**: One-click auto-mode fuzzing
+
+#### Notifications
+- **Slack Integration**: Webhook notifications for high-severity crashes
+- **Discord Integration**: Rich embed notifications with crash details
+- **Rate Limiting**: Configurable cooldown per campaign
+
+### 🔧 CLI Commands
+- `cw fuzz start` - Start a fuzz campaign
+- `cw fuzz status` - Check campaign status
+- `cw fuzz stop` - Stop a running campaign
+- `cw fuzz list` - List all campaigns
+- `cw auto` - Launch AI-powered autonomous campaign
+
+### 📚 Documentation
+- Full README with installation and quick start
+- ARCHITECTURE.md with system design
+- API documentation for SDK
+
+### 🛠 Technical Details
+- Python 3.11+
+- Temporal.io for workflow orchestration
+- LangGraph for supervisor agent
+- Streamlit for web dashboard
+- ChromaDB for vector similarity
+- AFL++ for fuzzing
+- Docker Compose for deployment
+
+---
+
 ## [Unreleased]
 
-### 📝 Documentation
-- Added comprehensive worker startup documentation across all guides
-- Added workflow-to-worker mapping tables in README, troubleshooting guide, getting started guide, and docker setup guide
-- Fixed broken documentation links in CLI reference
-- Added WEEK_SUMMARY*.md pattern to .gitignore
+### ✨ New Features
 
----
+#### Continuous Fuzz Campaign Workflow
+- **Added continuous fuzzing with autonomous crash triage**:
+  - `start_fuzzer`: Launches AFL fuzzer process with configurable options
+  - `stop_fuzzer`: Graceful (SIGTERM) then forced (SIGKILL) fuzzer shutdown
+  - `monitor_crashes`: Polls AFL output directory for new crash files
+  - `setup_campaign_workspace`: Creates isolated workspace per campaign
+  - `cleanup_campaign_workspace`: Removes temporary files after completion
+  - `copy_crash_to_workspace`: Prepares crash files for triage
+  - `trigger_triage`: Invokes LangGraph supervisor on each crash
+  - `get_fuzzer_stats`: Reads AFL fuzzer statistics
+- **ContinuousFuzzCampaignWorkflow**: Orchestrates fuzzing loop
+  - Monitors for crashes at configurable intervals
+  - Triggers supervisor triage on each new crash
+  - Stops on: max_duration, max_crashes, or time limit
+  - Automatic cleanup of fuzzer process on workflow end
 
-## [0.7.3] - 2025-10-30
+#### Crash Triage Workflow
+- **Added crash-triage-worker for automated crash analysis**:
+  - `collect_crash_data`: Scans directories for crash artifacts (.log, .asan, .ubsan, .core)
+  - `parse_crash_reports`: Parses ASan, UBSan, GDB backtraces with stack hashing
+  - `llm_crash_triage`: LLM-powered vulnerability assessment (via LiteLLM proxy)
+  - `check_crash_duplicate`: ChromaDB semantic search for crash similarity (distance threshold 0.25), with hash-based fallback
+  - `minimize_crash_poc`: AFL-tmin crash minimization with optional LLM hints
+  - `create_github_issue`: Create GitHub issues for high-severity new crashes (exploitability >= 7)
 
-### 🎯 Major Features
+#### LangGraph Supervisor Agent
+- **Autonomous crash triage with ReAct-style reasoning**:
+  - Analyzes crash state → decides action → executes → repeats
+  - Actions: triage, dedup, minimize, report, end
+  - Reports high-severity unique crashes to GitHub (when configured)
+  - `minimize_crash_poc`: AFL-tmin crash minimization with optional LLM hints for further reduction
+- **CrashTriagePipelineWorkflow**: Orchestrates full crash analysis pipeline
+  - Configurable triage via `enable_triage` parameter (default: True)
+  - Configurable deduplication via `enable_deduplication` parameter
+- **Worker integration**: `worker-crash-triage` service in docker-compose
 
-#### Android Static Analysis Workflow
-- **Added comprehensive Android security testing workflow** (`android_static_analysis`):
-  - Jadx decompiler for APK → Java source code decompilation
-  - OpenGrep/Semgrep static analysis with custom Android security rules
-  - MobSF integration for comprehensive mobile security scanning
-  - SARIF report generation with unified findings format
-  - Test results: Successfully decompiled 4,145 Java files, found 8 security vulnerabilities
-  - Full workflow completes in ~1.5 minutes
-
-#### Platform-Aware Worker Architecture
-- **ARM64 (Apple Silicon) support**:
-  - Automatic platform detection (ARM64 vs x86_64) in CLI using `platform.machine()`
-  - Worker metadata convention (`metadata.yaml`) for platform-specific capabilities
-  - Multi-Dockerfile support: `Dockerfile.amd64` (full toolchain) and `Dockerfile.arm64` (optimized)
-  - Conditional module imports for graceful degradation (MobSF skips on ARM64)
-  - Backend path resolution via `CRASHWISE_HOST_ROOT` for CLI worker management
-- **Worker selection logic**:
-  - CLI automatically selects appropriate Dockerfile based on detected platform
-  - Multi-strategy path resolution (API → .crashwise marker → environment variable)
-  - Platform-specific tool availability documented in metadata
-
-#### Python SAST Workflow
-- **Added Python Static Application Security Testing workflow** (`python_sast`):
-  - Bandit for Python security linting (SAST)
-  - MyPy for static type checking
-  - Safety for dependency vulnerability scanning
-  - Integrated SARIF reporter for unified findings format
-  - Auto-start Python worker on-demand
-
-### ✨ Enhancements
-
-#### CI/CD Improvements
-- Added automated worker validation in CI pipeline
-- Docker build checks for all workers before merge
-- Worker file change detection for selective builds
-- Optimized Docker layer caching for faster builds
-- Dev branch testing workflow triggers
-
-#### CLI Improvements
-- Fixed live monitoring bug in `ff monitor live` command
-- Enhanced `ff findings` command with better table formatting
-- Improved `ff monitor` with clearer status displays
-- Auto-start workers on-demand when workflows require them
-- Better error messages with actionable manual start commands
-
-#### Worker Management
-- Standardized worker service names (`worker-python`, `worker-android`, etc.)
-- Added missing `worker-secrets` to repository
-- Improved worker naming consistency across codebase
-
-#### LiteLLM Integration
-- Centralized LLM provider management with proxy
-- Governance and request/response routing
-- OTEL collector integration for observability
-- Environment-based configurable timeouts
-- Optional `.env.litellm` configuration
-
-### 🐛 Bug Fixes
-
-- Fixed MobSF API key generation from secret file (SHA256 hash)
-- Corrected Temporal activity names (decompile_with_jadx, scan_with_opengrep, scan_with_mobsf)
-- Resolved linter errors across codebase
-- Fixed unused import issues to pass CI checks
-- Removed deprecated workflow parameters
-- Docker Compose version compatibility fixes
-
-### 🔧 Technical Changes
-
-- Conditional import pattern for optional dependencies (MobSF on ARM64)
-- Multi-platform Dockerfile architecture
-- Worker metadata convention for capability declaration
-- Improved CI worker build optimization
-- Enhanced storage activity error handling
-
-### 📝 Test Projects
-
-- Added `test_projects/android_test/` with BeetleBug.apk and shopnest.apk
-- Android workflow validation with real APK samples
-- ARM64 platform testing and validation
-
----
-
-## [0.7.2] - 2025-10-22
-
-### 🐛 Bug Fixes
-- Fixed worker naming inconsistencies across codebase
-- Improved monitor command consolidation and usability
-- Enhanced findings CLI with better formatting and display
-- Added missing secrets worker to repository
-
-### 📝 Documentation
-- Added benchmark results files to git for secret detection workflows
-
-**Note:** v0.7.1 was re-tagged as v0.7.2 (both point to the same commit)
-
----
-
-## [0.7.0] - 2025-10-16
-
-### 🎯 Major Features
-
-#### Secret Detection Workflows
-- **Added three secret detection workflows**:
-  - `gitleaks_detection` - Pattern-based secret scanning
-  - `trufflehog_detection` - Entropy-based secret detection with verification
-  - `llm_secret_detection` - AI-powered semantic secret detection using LLMs
-- **Comprehensive benchmarking infrastructure**:
-  - 32-secret ground truth dataset for precision/recall testing
-  - Difficulty levels: 12 Easy, 10 Medium, 10 Hard secrets
-  - SARIF-formatted output for all workflows
-  - Achieved 100% recall with LLM-based detection on benchmark dataset
-
-#### AI Module & Agent Integration
-- Added A2A (Agent-to-Agent) wrapper for multi-agent orchestration
-- Task agent implementation with Google ADK
-- LLM analysis workflow for code security analysis
-- Reactivated AI agent command (`ff ai agent`)
-
-#### Temporal Migration Complete
-- Fully migrated from Prefect to Temporal for workflow orchestration
-- MinIO storage for unified file handling (replaces volume mounts)
-- Vertical workers with pre-built security toolchains
-- Improved worker lifecycle management
-
-#### CI/CD Integration
-- Ephemeral deployment model for testing
-- Automated workflow validation in CI pipeline
-
-### ✨ Enhancements
-
-#### Documentation
-- Updated README for Temporal + MinIO architecture
-- Added `.env` configuration guide for AI agent API keys
-- Fixed worker startup instructions with correct service names
-- Updated docker compose commands to modern syntax
-
-#### Worker Management
-- Added `worker_service` field to API responses for correct service naming
-- Improved error messages with actionable manual start commands
-- Fixed default parameters for gitleaks (now uses `no_git=True` by default)
-
-### 🐛 Bug Fixes
-
-- Fixed default parameters from metadata.yaml not being applied to workflows when no parameters provided
-- Fixed gitleaks workflow failing on uploaded directories without Git history
-- Fixed worker startup command suggestions (now uses `docker compose up -d` with service names)
-- Fixed missing `cognify_text` method in CogneeProjectIntegration
-
-### 🔧 Technical Changes
-
-- Updated all package versions to 0.7.0
-- Improved SARIF output formatting for secret detection workflows
-- Enhanced benchmark validation with ground truth JSON
-- Better integration between CLI and backend for worker management
-
-### 📝 Test Projects
-
-- Added `secret_detection_benchmark` with 32 documented secrets
-- Ground truth JSON for automated precision/recall calculations
-- Updated `vulnerable_app` for comprehensive security testing
-
----
-
-## [0.6.0] - Undocumented
-
-### Features
-- Initial Temporal migration
-- Fuzzing workflows (Atheris, Cargo, OSS-Fuzz)
-- Security assessment workflow
-- Basic CLI commands
-
-**Note:** No git tag exists for v0.6.0. Release date undocumented.
-
----
-
-[0.7.3]: https://github.com/YahyaToubali/Crashwise/compare/v0.7.2...v0.7.3
-[0.7.2]: https://github.com/YahyaToubali/Crashwise/compare/v0.7.0...v0.7.2
-[0.7.0]: https://github.com/YahyaToubali/Crashwise/releases/tag/v0.7.0
-[0.6.0]: https://github.com/YahyaToubali/Crashwise/tree/v0.6.0
+#### OpenCode Go LLM Integration
+- **LLM triage now uses OpenCode Go subscription models**:
+  - Primary: `opencode/glm-5` (strong reasoning for vuln triage)
