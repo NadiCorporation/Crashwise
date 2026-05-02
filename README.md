@@ -3,13 +3,7 @@
   Copyright (c) 2026 CrashWise Contributors
 -->
 
-<h1 align="center">
-  <br>
-  <img src="https://raw.githubusercontent.com/anomalyco/crashwise/main/docs/logo.png" alt="CrashWise" width="200">
-  <br>
-  CrashWise
-  <br>
-</h1>
+<h1 align="center">CrashWise</h1>
 
 <h4 align="center">Autonomous AI-Powered Fuzzing & Crash Triage Platform</h4>
 
@@ -134,7 +128,7 @@
 
 ```bash
 # 1. Clone
-git clone https://github.com/anomalyco/crashwise.git
+git clone https://github.com/yahyatoubali/Crashwise.git
 cd crashwise
 
 # 2. Configure (edit secrets as needed)
