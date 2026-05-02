@@ -1,0 +1,558 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 CrashWise Contributors
+"""Shared Pydantic data models for the CrashWise control plane.
+
+These models form the **type-safe boundary** between Temporal workflows,
+activities, and downstream LangGraph agents. Every cross-component payload
+in the system MUST be a model defined here (or extending one of these
+base models). Doing so keeps the multi-LLM build coherent: every author
+codes against the same contracts.
+
+Models are intentionally narrow and immutable-by-convention; mutation is
+discouraged. New fields must be additive and default-valued so existing
+serialised workflow histories remain replayable.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from enum import StrEnum
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+
+
+# ── Enums ────────────────────────────────────────────────────────────────────
+class FuzzerType(StrEnum):
+    """Supported fuzzing back-ends."""
+
+    AFLPP = "afl++"
+    LIBFUZZER = "libfuzzer"
+    HONGGFUZZ = "honggfuzz"
+
+
+class CrashSeverity(StrEnum):
+    """Coarse severity classification used by the triage engine."""
+
+    UNKNOWN = "unknown"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class SeedSource(StrEnum):
+    """Origin of a fuzzing seed."""
+
+    GITHUB = "github"
+    CVE = "cve"
+    MANUAL = "manual"
+
+
+class WorkflowStage(StrEnum):
+    """Lifecycle stages for the main fuzzing workflow."""
+
+    PENDING = "pending"
+    SEEDING = "seeding"
+    SETUP = "setup"
+    EXECUTING = "executing"
+    TRIAGE = "triage"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+# ── Base ─────────────────────────────────────────────────────────────────────
+class _StrictModel(BaseModel):
+    """Project-wide base: strict validation, JSON-friendly serialisation."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=False,
+        str_strip_whitespace=True,
+        validate_assignment=True,
+        populate_by_name=True,
+    )
+
+
+# ── Top-level workflow I/O ───────────────────────────────────────────────────
+class FuzzingInput(_StrictModel):
+    """Input payload for :class:`MainFuzzingWorkflow`.
+
+    Attributes
+    ----------
+    target_repo:
+        Git URL of the C/C++/Rust project to fuzz.
+    fuzzer_type:
+        Which fuzzing engine to deploy.
+    timeout_seconds:
+        Hard wall-clock cap for the ``ExecuteFuzzing`` activity.
+    target_branch:
+        Optional branch / tag / commit SHA to check out. Defaults to HEAD.
+    harness_path:
+        Path *inside the cloned repo* to a pre-existing harness. If
+        ``None``, Phase 2's harness-synthesis agent will produce one.
+    sanitizers:
+        Comma-separated sanitizer list (``address,undefined`` etc.).
+    campaign_id:
+        Optional UUID of a pre-created campaign record.  When present,
+        activities will log their results to the persistence layer.
+    """
+
+    target_repo: HttpUrl = Field(..., description="Git URL of target project")
+    fuzzer_type: FuzzerType = Field(default=FuzzerType.LIBFUZZER)
+    timeout_seconds: int = Field(default=600, ge=10, le=86_400)
+
+    target_branch: str | None = Field(default=None, max_length=255)
+    harness_path: str | None = Field(default=None, max_length=512)
+    sanitizers: str = Field(default="address,undefined")
+    max_iterations: int = Field(default=5, ge=1, le=20)
+    campaign_id: str | None = Field(default=None, max_length=36)
+
+
+class FuzzingOutput(_StrictModel):
+    """Final output payload of :class:`MainFuzzingWorkflow`.
+
+    Attributes
+    ----------
+    crash_found:
+        Whether at least one crash was triggered during execution.
+    logs_path:
+        Filesystem path (worker-local) to the captured fuzzer logs / artefacts.
+    crash_count:
+        Total distinct crashes observed.
+    severity:
+        Coarse severity, derived by the triage engine.
+    started_at / finished_at:
+        UTC timestamps bounding the run.
+    summary:
+        Human-readable rollup populated by the triage stage.
+    """
+
+    crash_found: bool
+    logs_path: Path
+
+    crash_count: int = Field(default=0, ge=0)
+    severity: CrashSeverity = Field(default=CrashSeverity.UNKNOWN)
+    started_at: datetime
+    finished_at: datetime
+    summary: str = Field(default="")
+
+    @classmethod
+    def now(cls) -> datetime:
+        """Helper for callers wanting a coherent UTC timestamp."""
+        return datetime.now(tz=UTC)
+
+
+# ── Per-activity I/O ─────────────────────────────────────────────────────────
+class SetupTargetInput(_StrictModel):
+    """Input to the ``setup_target`` activity."""
+
+    target_repo: HttpUrl
+    target_branch: str | None = None
+    sanitizers: str = "address,undefined"
+    # Optional path (inside the cloned repo) to the source file the harness
+    # synthesiser should target. When ``None``, ``setup_target`` skips
+    # synthesis and Phase 1 stub data is returned unchanged.
+    target_source_path: str | None = None
+    synthesize_harness: bool = False
+    max_synth_retries: int = Field(default=4, ge=0, le=10)
+
+
+class SetupTargetOutput(_StrictModel):
+    """Result of cloning + preparing the target."""
+
+    workdir: Path = Field(..., description="Local checkout directory")
+    commit_sha: str = Field(..., min_length=7, max_length=64)
+    harness_path: Path | None = None
+
+
+class ExecuteFuzzingInput(_StrictModel):
+    """Input to the ``execute_fuzzing`` activity."""
+
+    workdir: Path
+    harness_path: Path | None
+    fuzzer_type: FuzzerType
+    timeout_seconds: int = Field(..., ge=10, le=86_400)
+    sanitizers: str = "address,undefined"
+    corpus_dir: Path | None = None
+    campaign_id: str | None = Field(default=None, max_length=36)
+    iteration: int = Field(default=0, ge=0)
+
+
+class ExecuteFuzzingOutput(_StrictModel):
+    """Result of an execution campaign."""
+
+    logs_path: Path
+    crashes_dir: Path
+    crash_count: int = Field(default=0, ge=0)
+    executions: int = Field(default=0, ge=0, description="Total fuzzer iterations")
+    duration_seconds: float = Field(default=0.0, ge=0.0)
+
+
+class SeedCorpusInput(_StrictModel):
+    """Input to the ``seed_corpus`` activity."""
+
+    target_name: str = Field(..., min_length=1, max_length=128)
+    workdir: Path
+    max_seeds: int = Field(default=10, ge=1, le=100)
+    campaign_id: str | None = Field(default=None, max_length=36)
+
+
+class AnalyzeProgressInput(_StrictModel):
+    """Input to the ``analyze_progress`` activity."""
+
+    fuzz_output: ExecuteFuzzingOutput
+    campaign: FuzzingCampaignState
+
+
+class TriageInput(_StrictModel):
+    """Input to the ``triage_results`` activity."""
+
+    logs_path: Path
+    crashes_dir: Path
+    crash_count: int = Field(default=0, ge=0)
+    campaign_id: str | None = Field(default=None, max_length=36)
+
+
+class TriageOutput(_StrictModel):
+    """Result of the triage pass."""
+
+    severity: CrashSeverity = CrashSeverity.UNKNOWN
+    summary: str = ""
+    triaged_crash_count: int = Field(default=0, ge=0)
+
+
+class ExecutionBackend(StrEnum):
+    """Supported execution backends for fuzzing jobs."""
+
+    DOCKER = "docker"
+    QEMU = "qemu"
+    LOCAL = "local"
+
+
+class FuzzJob(_StrictModel):
+    """Input to the ``execute_job`` activity.
+
+    Attributes
+    ----------
+    job_id:
+        Unique identifier for this fuzzing run.
+    backend:
+        Whether to run in Docker, QEMU, or locally.
+    harness_path:
+        Path to the compiled fuzzer binary.
+    corpus_dir:
+        Seed corpus directory.
+    output_dir:
+        Where crashes and logs will be written.
+    timeout_seconds:
+        Wall-clock cap for the job.
+    cpu_limit:
+        CPU cores to allocate (Docker only).
+    memory_limit_mb:
+        RAM cap in MiB (Docker only).
+    qemu_kernel:
+        Path to kernel image (QEMU only).
+    qemu_initrd:
+        Path to initrd (QEMU only).
+    qemu_append:
+        Additional kernel cmdline args (QEMU only).
+    env_vars:
+        Extra environment variables injected into the container/VM.
+    """
+
+    job_id: str
+    backend: ExecutionBackend = ExecutionBackend.DOCKER
+    harness_path: Path
+    corpus_dir: Path
+    output_dir: Path
+    timeout_seconds: int = Field(default=600, ge=10, le=86_400)
+    cpu_limit: float = Field(default=2.0, ge=0.1)
+    memory_limit_mb: int = Field(default=2048, ge=256)
+    qemu_kernel: Path | None = None
+    qemu_initrd: Path | None = None
+    qemu_append: str = ""
+    env_vars: dict[str, str] = Field(default_factory=dict)
+
+
+# ── Coverage & Campaign State ────────────────────────────────────────────────
+class CoverageReport(_StrictModel):
+    """Snapshot of fuzzer coverage metrics.
+
+    Attributes
+    ----------
+    edges_hit:
+        Number of control-flow edges discovered.
+    blocks_hit:
+        Basic blocks reached.
+    functions_hit:
+        Distinct functions exercised.
+    exec_per_sec:
+        Current executions per second.
+    total_execs:
+        Cumulative fuzzer iterations.
+    stability:
+        AFL stability percentage (0-100).
+    map_density:
+        Bitmap utilisation percentage.
+    pending_favs:
+        AFL pending favourite seeds.
+    corpus_count:
+        Total seeds in corpus.
+    """
+
+    edges_hit: int = Field(default=0, ge=0)
+    blocks_hit: int = Field(default=0, ge=0)
+    functions_hit: int = Field(default=0, ge=0)
+    exec_per_sec: float = Field(default=0.0, ge=0.0)
+    total_execs: int = Field(default=0, ge=0)
+    stability: float = Field(default=0.0, ge=0.0, le=100.0)
+    map_density: float = Field(default=0.0, ge=0.0, le=100.0)
+    pending_favs: int = Field(default=0, ge=0)
+    corpus_count: int = Field(default=0, ge=0)
+
+
+class CampaignStatus(StrEnum):
+    """Lifecycle states for a fuzzing campaign."""
+
+    RUNNING = "running"
+    STALLED = "stalled"
+    CRASHED = "crashed"
+    COMPLETE = "complete"
+    MUTATING = "mutating"
+
+
+class VerificationStatus(StrEnum):
+    """Lifecycle states for patch verification."""
+
+    PENDING = "pending"
+    FIXED = "fixed"
+    FAILED_VERIFICATION = "failed_verification"
+    BUILD_FAILED = "build_failed"
+    ERROR = "error"
+
+
+class VerifyPatchInput(_StrictModel):
+    """Input to the ``VerifyPatchWorkflow``."""
+
+    crash_id: str = Field(..., min_length=1, max_length=36)
+    campaign_id: str = Field(..., min_length=1, max_length=36)
+    repo_url: str = Field(..., min_length=1, max_length=512)
+    patch: str = Field(..., min_length=1, max_length=16384)
+    seed_path: Path = Field(...)
+    harness_path: Path | None = None
+    fuzzer_type: FuzzerType = Field(default=FuzzerType.LIBFUZZER)
+    timeout_seconds: int = Field(default=60, ge=10, le=600)
+
+
+class VerifyPatchOutput(_StrictModel):
+    """Result of patch verification."""
+
+    status: VerificationStatus = Field(default=VerificationStatus.PENDING)
+    patch_applied: bool = False
+    build_success: bool = False
+    crash_reproduced: bool | None = None
+    stdout: str = Field(default="", max_length=8192)
+    stderr: str = Field(default="", max_length=8192)
+
+
+class FuzzingCampaignState(_StrictModel):
+    """Mutable state that tracks a multi-iteration fuzzing campaign.
+
+    Attributes
+    ----------
+    iteration:
+        Current loop iteration (0-indexed).
+    max_iterations:
+        Hard cap on iterations before forced exit.
+    best_coverage:
+        Highest ``edges_hit`` seen so far.
+    last_coverage:
+        Coverage from the most recent iteration.
+    harness_path:
+        Path to the harness used in the current iteration.
+    status:
+        Current campaign phase.
+    should_continue:
+        ``True`` when the workflow loop should schedule another iteration.
+    mutation_hint:
+        Structured feedback from the analyzer to the harness synth agent.
+    crash_count:
+        Total distinct crashes observed across all iterations.
+    """
+
+    iteration: int = Field(default=0, ge=0)
+    max_iterations: int = Field(default=5, ge=1, le=20)
+    best_coverage: CoverageReport = Field(default_factory=CoverageReport)
+    last_coverage: CoverageReport = Field(default_factory=CoverageReport)
+    harness_path: Path | None = None
+    status: CampaignStatus = CampaignStatus.RUNNING
+    should_continue: bool = True
+    mutation_hint: str = ""
+    crash_count: int = Field(default=0, ge=0)
+
+
+class SeedMetadata(_StrictModel):
+    """Metadata for a single fuzzing seed.
+
+    Attributes
+    ----------
+    seed_id:
+        Unique identifier (e.g., CVE-2023-1234 or GitHub issue URL hash).
+    source:
+        Where the seed was discovered.
+    target_name:
+        Human-readable target (e.g., ``openssl``, ``libpng``).
+    url:
+        Original URL of the PoC / advisory.
+    description:
+        Short summary of the vulnerability.
+    language:
+        Programming language of the PoC (``c``, ``python``, ``binary``, etc.).
+    tags:
+        Free-form labels for filtering (``heap-overflow``, ``use-after-free``).
+    created_at:
+        UTC timestamp when the seed record was created.
+    downloaded_path:
+        Local filesystem path to the original PoC file.
+    seed_path:
+        Local filesystem path to the transformed binary seed ready for the fuzzer.
+    """
+
+    seed_id: str = Field(..., min_length=1, max_length=256)
+    source: SeedSource = Field(default=SeedSource.MANUAL)
+    target_name: str = Field(..., min_length=1, max_length=128)
+    url: HttpUrl | None = None
+    description: str = Field(default="", max_length=1024)
+    language: str = Field(default="", max_length=32)
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    downloaded_path: Path | None = None
+    seed_path: Path | None = None
+
+
+# ── Exploit Generation ───────────────────────────────────────────────────────
+class ExploitabilityScore(StrEnum):
+    """Reachability / exploitability rating for a vulnerability."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    UNKNOWN = "unknown"
+
+
+class ExploitGenInput(_StrictModel):
+    """Input to the exploit-generation agent.
+
+    Attributes
+    ----------
+    crash_id:
+        Database UUID of the crash to generate a PoC for.
+    crash_context:
+        Concatenated crash report (ASAN + GDB + stack trace + registers).
+    bug_type:
+        Classified bug category (e.g. ``heap-buffer-overflow``).
+    target_repo:
+        Git URL of the vulnerable project.
+    target_source_path:
+        Path within the repo to the vulnerable source file.
+    vulnerable_function:
+        Name of the function containing the bug.
+    """
+
+    crash_id: str = Field(..., min_length=1, max_length=36)
+    crash_context: str = Field(..., min_length=1, max_length=32768)
+    bug_type: str = Field(default="unknown", max_length=64)
+    target_repo: str = Field(default="", max_length=512)
+    target_source_path: str = Field(default="", max_length=512)
+    vulnerable_function: str = Field(default="", max_length=256)
+
+
+class ExploitGenOutput(_StrictModel):
+    """Result of the exploit-generation agent.
+
+    Attributes
+    ----------
+    poc_code:
+        Standalone C exploit script ready to compile and run.
+    primitive:
+        Detected memory-safety primitive (e.g. ``out-of-bounds-write``).
+    reachability:
+        How easily the bug is triggered from untrusted input.
+    reachability_score:
+        Numeric 0.0-10.0 score for reachability.
+    confidence:
+        0.0-1.0 confidence in the generated PoC.
+    compilation_command:
+        Suggested ``gcc`` / ``clang`` invocation.
+    notes:
+        Human-readable notes from the architect agent.
+    """
+
+    poc_code: str = Field(default="", max_length=65536)
+    primitive: str = Field(default="unknown", max_length=128)
+    reachability: ExploitabilityScore = Field(default=ExploitabilityScore.UNKNOWN)
+    reachability_score: float = Field(default=0.0, ge=0.0, le=10.0)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    compilation_command: str = Field(default="", max_length=1024)
+    notes: str = Field(default="", max_length=4096)
+
+
+class PocVerifyInput(_StrictModel):
+    """Input to the ``verify_poc`` activity.
+
+    Attributes
+    ----------
+    crash_id:
+        Database UUID of the crash being verified.
+    poc_code:
+        C source code of the generated PoC.
+    compilation_command:
+        Suggested compiler invocation (fallback to auto-detect).
+    target_repo:
+        Git URL to clone for headers / libraries.
+    expected_signal:
+        The signal the PoC should trigger (e.g. ``SIGSEGV``).
+    expected_asan_pattern:
+        Substring expected in ASAN output (e.g. ``heap-buffer-overflow``).
+    timeout_seconds:
+        Wall-clock cap for compilation + execution.
+    """
+
+    crash_id: str = Field(..., min_length=1, max_length=36)
+    poc_code: str = Field(..., min_length=1, max_length=65536)
+    compilation_command: str = Field(default="", max_length=1024)
+    target_repo: str = Field(default="", max_length=512)
+    expected_signal: str = Field(default="SIGSEGV", max_length=32)
+    expected_asan_pattern: str = Field(default="", max_length=128)
+    timeout_seconds: int = Field(default=60, ge=10, le=600)
+
+
+class PocVerifyOutput(_StrictModel):
+    """Result of PoC verification.
+
+    Attributes
+    ----------
+    compiled:
+        Whether the PoC compiled successfully.
+    binary_path:
+        Path to the compiled binary (if compilation succeeded).
+    crash_reproduced:
+        Whether running the PoC triggered the expected crash.
+    stdout:
+        Captured stdout from compilation + execution.
+    stderr:
+        Captured stderr (contains ASAN / GDB output).
+    signal_received:
+        The signal that actually terminated the process.
+    notes:
+        Human-readable summary of the verification.
+    """
+
+    compiled: bool = False
+    binary_path: Path | None = None
+    crash_reproduced: bool = False
+    stdout: str = Field(default="", max_length=8192)
+    stderr: str = Field(default="", max_length=8192)
+    signal_received: str = Field(default="", max_length=32)
+    notes: str = Field(default="", max_length=4096)

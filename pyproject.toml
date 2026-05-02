@@ -1,0 +1,193 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# CrashWise — autonomous AI-powered fuzzing & crash triage platform.
+# Managed by `uv` (https://docs.astral.sh/uv/).
+# Licensed under the MIT License (see LICENSE).
+# ──────────────────────────────────────────────────────────────────────────────
+
+[project]
+name = "crashwise"
+version = "0.1.0"
+description = "Autonomous AI-powered platform for zero-day fuzzing, vulnerability discovery, and automated crash triage."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Yahya Toubali" },
+    { name = "CrashWise Contributors" },
+]
+keywords = [
+    "fuzzing",
+    "afl",
+    "libfuzzer",
+    "vulnerability",
+    "security",
+    "llm",
+    "langgraph",
+    "temporal",
+    "triage",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    # Orchestration & state
+    "temporalio>=1.7.0",
+
+    # Cognitive engine
+    "langgraph>=0.2.30",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-anthropic>=0.2.0",
+
+    # Validation & data models
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.4.0",
+
+    # CLI & UX
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+
+    # Logging
+    "structlog>=24.4.0",
+
+    # Networking / retries
+    "httpx>=0.27.0",
+    "tenacity>=9.0.0",
+
+    # Filesystem / process helpers
+    "anyio>=4.4.0",
+
+    # Persistence layer
+    "sqlalchemy[asyncio]>=2.0.0",
+    "aiosqlite>=0.20.0",
+
+    # Web API
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+
+    # Distributed storage (Cloudflare R2 / S3-compatible)
+    "aioboto3>=13.0.0",
+
+    # Distributed state (Redis)
+    "redis>=5.0.0",
+
+    # Intelligence Dashboard
+    "streamlit>=1.40.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/anomalyco/crashwise"
+Repository = "https://github.com/anomalyco/crashwise"
+Issues = "https://github.com/anomalyco/crashwise/issues"
+
+[project.scripts]
+crashwise = "crashwise.cli:app"
+
+# ── Build system ──────────────────────────────────────────────────────────────
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["crashwise"]
+
+# ── Dependency groups (uv / PEP 735) ──────────────────────────────────────────
+[dependency-groups]
+dev = [
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0.0",
+    "types-pyyaml>=6.0.12",
+    "pre-commit>=3.8.0",
+]
+
+# ── Ruff (lint + format) ──────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["harnesses", "corpus"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific rules
+    "TID", # flake8-tidy-imports
+    "ANN", # flake8-annotations
+]
+ignore = [
+    "E501",    # line too long (handled by formatter)
+    "ANN401",  # Dynamically typed expressions (Any) — too noisy for kwargs/loggers
+    "B008",    # Function calls in argument defaults — required by Typer / FastAPI
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ── MyPy ──────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_decorators = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["temporalio.*", "langgraph.*"]
+ignore_missing_imports = true
+
+# ── Pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "integration: integration tests (require docker-compose Temporal stack)",
+    "slow: long-running tests",
+]
+
+# ── Coverage ──────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+branch = true
+source = ["crashwise"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
