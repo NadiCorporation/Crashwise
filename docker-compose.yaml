@@ -1,0 +1,239 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# CrashWise — Full-Stack Production Docker Compose
+#
+# Services:
+#   temporal-server  — Temporal workflow engine (auto-setup)
+#   temporal-ui      — Temporal Web UI (port 8233)
+#   postgres         — Persistence layer (campaigns, crashes, runs)
+#   redis            — Distributed state / counters / dedup cache
+#   minio            — Local S3-compatible storage (R2 emulation)
+#   api              — FastAPI management server (port 8000)
+#   dashboard        — Streamlit intelligence dashboard (port 8501)
+#   worker           — Temporal worker(s) — scale with `docker compose up --scale worker=N`
+#
+# Usage:
+#   cp .env.example .env   # edit secrets
+#   docker compose up -d
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ════════════════════════════════════════════════════════════════════════════
+  # Temporal Server
+  # ════════════════════════════════════════════════════════════════════════════
+  temporal-server:
+    image: temporalio/auto-setup:1.25
+    container_name: crashwise-temporal
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      POSTGRES_SEEDS: postgres
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    ports:
+      - "7233:7233"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "tctl", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - crashwise
+
+  temporal-ui:
+    image: temporalio/ui:2.30
+    container_name: crashwise-temporal-ui
+    environment:
+      TEMPORAL_ADDRESS: temporal-server:7233
+      TEMPORAL_CORS_ORIGINS: "http://localhost:3000"
+    ports:
+      - "8233:8233"
+    depends_on:
+      temporal-server:
+        condition: service_healthy
+    networks:
+      - crashwise
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # PostgreSQL (shared by Temporal + CrashWise)
+  # ════════════════════════════════════════════════════════════════════════════
+  postgres:
+    image: postgres:16-alpine
+    container_name: crashwise-postgres
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crashwise
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Redis
+  # ════════════════════════════════════════════════════════════════════════════
+  redis:
+    image: redis:7-alpine
+    container_name: crashwise-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - crashwise
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # MinIO (S3-compatible, for local R2 emulation)
+  # ════════════════════════════════════════════════════════════════════════════
+  minio:
+    image: minio/minio:RELEASE.2024-06-13T22-53-21Z
+    container_name: crashwise-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: crashwise
+      MINIO_ROOT_PASSWORD: crashwise-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crashwise
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # CrashWise API (FastAPI)
+  # ════════════════════════════════════════════════════════════════════════════
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crashwise-api
+    command: ["crashwise", "api", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    environment:
+      CRASHWISE_ENV: production
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql+asyncpg://temporal:temporal@postgres:5432/temporal
+      TEMPORAL_HOST: temporal-server:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: crashwise
+      REDIS_URL: redis://redis:6379/0
+      REDIS_ENABLED: "true"
+      R2_ENABLED: "false"
+      R2_ENDPOINT_URL: http://minio:9000
+      R2_ACCESS_KEY_ID: crashwise
+      R2_SECRET_ACCESS_KEY: crashwise-secret
+      R2_BUCKET_NAME: crashwise
+      NOTIFICATIONS_ENABLED: "false"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - crashwise
+    restart: unless-stopped
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # CrashWise Dashboard (Streamlit)
+  # ════════════════════════════════════════════════════════════════════════════
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crashwise-dashboard
+    command: ["crashwise", "dashboard", "--host", "0.0.0.0", "--port", "8501", "--api-url", "http://api:8000"]
+    environment:
+      CRASHWISE_ENV: production
+      LOG_LEVEL: warning
+      CRASHWISE_API_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - crashwise
+    restart: unless-stopped
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # CrashWise Worker (Temporal)
+  # ════════════════════════════════════════════════════════════════════════════
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["crashwise", "worker"]
+    environment:
+      CRASHWISE_ENV: production
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql+asyncpg://temporal:temporal@postgres:5432/temporal
+      TEMPORAL_HOST: temporal-server:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: crashwise
+      REDIS_URL: redis://redis:6379/0
+      REDIS_ENABLED: "true"
+      R2_ENABLED: "false"
+      R2_ENDPOINT_URL: http://minio:9000
+      R2_ACCESS_KEY_ID: crashwise
+      R2_SECRET_ACCESS_KEY: crashwise-secret
+      R2_BUCKET_NAME: crashwise
+      NOTIFICATIONS_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal-server:
+        condition: service_healthy
+    networks:
+      - crashwise
+    restart: unless-stopped
+    deploy:
+      replicas: 1
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+
+networks:
+  crashwise:
+    driver: bridge
