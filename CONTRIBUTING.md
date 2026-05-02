@@ -285,8 +285,8 @@ under the [MIT License](./LICENSE).
 
 ## Questions?
 
-- Open a [Discussion](https://github.com/anomalyco/crashwise/discussions) for general questions.
-- Open an [Issue](https://github.com/anomalyco/crashwise/issues) for bugs or feature requests.
+- Open a [Discussion](https://github.com/yahyatoubali/Crashwise/discussions) for general questions.
+- Open an [Issue](https://github.com/yahyatoubali/Crashwise/issues) for bugs or feature requests.
 - Email crashwise@yahyatoubali.me for private inquiries.
 
 **Thank you for helping make CrashWise better!**

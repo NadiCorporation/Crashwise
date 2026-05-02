@@ -88,9 +88,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/anomalyco/crashwise"
-Repository = "https://github.com/anomalyco/crashwise"
-Issues = "https://github.com/anomalyco/crashwise/issues"
+Homepage = "https://github.com/yahyatoubali/Crashwise"
+Repository = "https://github.com/yahyatoubali/Crashwise"
+Issues = "https://github.com/yahyatoubali/Crashwise/issues"
 
 [project.scripts]
 crashwise = "crashwise.cli:app"
