@@ -194,12 +194,14 @@ services:
     restart: unless-stopped
 
   # ════════════════════════════════════════════════════════════════════════════
-  # CrashWise Worker (Temporal)
+  # CrashWise Worker (Temporal) — Master Fuzz-Node
   # ════════════════════════════════════════════════════════════════════════════
+  # Uses Dockerfile.worker which bundles AFL++, LibFuzzer, Clang, and all
+  # build dependencies. The host only needs Docker; heavy lifting is inside.
   worker:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.worker
     command: ["crashwise", "worker"]
     environment:
       CRASHWISE_ENV: production

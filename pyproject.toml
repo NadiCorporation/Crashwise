@@ -85,6 +85,9 @@ dependencies = [
 
     # Intelligence Dashboard
     "streamlit>=1.40.0",
+
+    # Manifest parsing
+    "pyyaml>=6.0.0",
 ]
 
 [project.urls]

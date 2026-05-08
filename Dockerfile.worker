@@ -1,0 +1,139 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# CrashWise — Master Worker Image
+# Self-contained fuzz-node with every fuzzer and build dependency pre-installed.
+#
+# Usage:
+#   docker build -f Dockerfile.worker -t crashwise-worker .
+#   docker run --rm -it --privileged crashwise-worker crashwise worker
+#
+# This image is designed to be the "heavy lifter" — the host only needs Docker;
+# all compilation and fuzzing happens inside this perfectly tuned container.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage 1 — AFL++ Builder
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM debian:bookworm-slim AS afl-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    wget \
+    ca-certificates \
+    cmake \
+    clang \
+    llvm \
+    lld \
+    python3 \
+    python3-dev \
+    libtool \
+    autoconf \
+    automake \
+    bison \
+    flex \
+    libglib2.0-dev \
+    libpixman-1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build AFL++ from source (latest stable)
+WORKDIR /opt
+RUN git clone --depth 1 --branch v4.21c https://github.com/AFLplusplus/AFLplusplus.git \
+    && cd AFLplusplus \
+    && make -j$(nproc) \
+    && make install
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage 2 — Python Builder (uv)
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS py-builder
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install system build deps for Python packages.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libffi-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
+
+COPY crashwise/ ./crashwise/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage 3 — Runtime (Master Worker)
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM debian:bookworm-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:/usr/local/bin:$PATH" \
+    AFL_PATH="/usr/local/bin" \
+    CC="clang" \
+    CXX="clang++"
+
+WORKDIR /app
+
+# Install ALL runtime dependencies in one layer.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core build tools
+    build-essential \
+    cmake \
+    clang \
+    clang-tools \
+    lld \
+    llvm \
+    llvm-dev \
+    gcc \
+    g++ \
+    # Version control
+    git \
+    # Python runtime
+    python3 \
+    python3-pip \
+    python3-venv \
+    # Docker CLI (so the worker can spawn fuzzer sibling containers)
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+    # Cleanup
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Copy AFL++ from builder.
+COPY --from=afl-builder /usr/local/bin/afl-* /usr/local/bin/
+COPY --from=afl-builder /usr/local/share/aflplusplus /usr/local/share/aflplusplus/
+COPY --from=afl-builder /usr/local/lib/afl /usr/local/lib/afl/
+
+# Copy Python environment from builder.
+COPY --from=py-builder /app/.venv /app/.venv
+COPY --from=py-builder /app/crashwise /app/crashwise
+
+# Verify key tools are present.
+RUN afl-fuzz -V \
+    && clang --version \
+    && cmake --version \
+    && python3 --version \
+    && docker --version
+
+# Health check.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD crashwise --version || exit 1
+
+# Default: start the Temporal worker.
+CMD ["crashwise", "worker"]
