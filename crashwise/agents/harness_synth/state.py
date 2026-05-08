@@ -118,6 +118,11 @@ class HarnessState(_StrictModel):
     simplified: bool = False
     error_history: list[str] = Field(default_factory=list)
 
+    # ── Phase 16: Target Profile ─────────────────────────────────────────────
+    target_profile: dict[str, object] = Field(default_factory=dict)
+    """Optional :class:`TargetProfile` dict injected by the profiler to tailor
+    the harness prompt (domain, attack surface, dangerous functions)."""
+
     # ── Feedback loop (Phase 6) ──────────────────────────────────────────────
     feedback: str = ""
     """Structured feedback from the coverage analyzer; injected into the

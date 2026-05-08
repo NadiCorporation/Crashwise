@@ -556,3 +556,112 @@ class PocVerifyOutput(_StrictModel):
     stderr: str = Field(default="", max_length=8192)
     signal_received: str = Field(default="", max_length=32)
     notes: str = Field(default="", max_length=4096)
+
+
+# ── Target Profiling ─────────────────────────────────────────────────────────
+class TargetDomain(StrEnum):
+    """High-level domain classification for a fuzzing target."""
+
+    IMAGE_PROCESSING = "image_processing"
+    NETWORK_PROTOCOL = "network_protocol"
+    FILESYSTEM = "filesystem"
+    CRYPTOGRAPHY = "cryptography"
+    COMPRESSION = "compression"
+    PARSER = "parser"
+    DATABASE = "database"
+    MULTIMEDIA = "multimedia"
+    KERNEL = "kernel"
+    GENERAL = "general"
+
+
+class DangerousFunction(StrEnum):
+    """Known dangerous functions that are common vulnerability sources."""
+
+    MEMCPY = "memcpy"
+    STRCPY = "strcpy"
+    STRCAT = "strcat"
+    STRNCPY = "strncpy"
+    MEMMOVE = "memmove"
+    MEMSET = "memset"
+    MALLOC = "malloc"
+    REALLOC = "realloc"
+    FREE = "free"
+    KMALLOC = "kmalloc"
+    VMALLOC = "vmalloc"
+    SPRINTF = "sprintf"
+    GETS = "gets"
+    READ = "read"
+    RECV = "recv"
+    COPY_FROM_USER = "copy_from_user"
+    COPY_TO_USER = "copy_to_user"
+
+
+class TargetProfile(_StrictModel):
+    """Structured profile of a fuzzing target produced by the profiler agent.
+
+    Attributes
+    ----------
+    domain:
+        High-level domain classification (e.g. ``image_processing``).
+    complexity_score:
+        Cyclomatic-complexity-derived score 0.0–10.0.
+    call_graph_depth:
+        Maximum depth of the call graph from public entry points.
+    attack_surface:
+        Public functions reachable from untrusted input.
+    dangerous_functions:
+        Dangerous libc/kernel functions found in the codebase.
+    language:
+        Primary language: ``c``, ``cpp``, ``rust``, ``go``.
+    lines_of_code:
+        Total lines of code (from ``cloc``).
+    file_count:
+        Number of source files.
+    has_custom_allocator:
+        Whether the project defines its own memory allocator.
+    has_syscall_handlers:
+        Whether syscall/ioctl handlers were detected.
+    has_network_parsers:
+        Whether network packet / protocol parsers were detected.
+    recommended_sanitizers:
+        Sanitizer flags tailored to the target (e.g. ``address,undefined``).
+    recommended_strategy:
+        High-level fuzzing strategy hint for the orchestrator.
+    notes:
+        Human-readable summary from the profiler.
+    """
+
+    domain: TargetDomain = Field(default=TargetDomain.GENERAL)
+    complexity_score: float = Field(default=0.0, ge=0.0, le=10.0)
+    call_graph_depth: int = Field(default=0, ge=0)
+    attack_surface: list[str] = Field(default_factory=list)
+    dangerous_functions: list[DangerousFunction] = Field(default_factory=list)
+    language: str = Field(default="c", max_length=16)
+    lines_of_code: int = Field(default=0, ge=0)
+    file_count: int = Field(default=0, ge=0)
+    has_custom_allocator: bool = False
+    has_syscall_handlers: bool = False
+    has_network_parsers: bool = False
+    recommended_sanitizers: str = Field(default="address,undefined", max_length=128)
+    recommended_strategy: str = Field(
+        default="standard",
+        max_length=64,
+        description="One of: standard, aggressive, kernel, network, minimal",
+    )
+    notes: str = Field(default="", max_length=4096)
+
+
+class ProfileTargetInput(_StrictModel):
+    """Input to the ``profile_target`` activity."""
+
+    workdir: Path = Field(..., description="Path to the cloned target repository")
+    source_paths: list[Path] = Field(default_factory=list, description="Specific files to analyse")
+    max_files: int = Field(default=50, ge=1, le=500, description="Cap on files to scan")
+
+
+class ProfileTargetOutput(_StrictModel):
+    """Result of the ``profile_target`` activity."""
+
+    profile: TargetProfile = Field(default_factory=TargetProfile)
+    duration_seconds: float = Field(default=0.0, ge=0.0)
+    files_scanned: int = Field(default=0, ge=0)
