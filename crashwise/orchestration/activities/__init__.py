@@ -18,6 +18,7 @@ from crashwise.orchestration.activities.execute_job import execute_job
 from crashwise.orchestration.activities.kernel_monitor import kernel_monitor
 from crashwise.orchestration.activities.mutate_harness import mutate_harness
 from crashwise.orchestration.activities.notify_stakeholders import notify_stakeholders
+from crashwise.orchestration.activities.hot_swap_harness import hot_swap_harness
 from crashwise.orchestration.activities.pivot_strategy import pivot_strategy
 from crashwise.orchestration.activities.profile_target import profile_target
 from crashwise.orchestration.activities.seed_corpus import seed_corpus
@@ -46,6 +47,7 @@ ALL_ACTIVITIES: list[Callable[..., Any]] = [
     build_patched,
     verify_with_seed,
     update_verification_status,
+    hot_swap_harness,
     notify_stakeholders,
     pivot_strategy,
     profile_target,
@@ -62,6 +64,7 @@ __all__ = [
     "execute_job",
     "kernel_monitor",
     "mutate_harness",
+    "hot_swap_harness",
     "notify_stakeholders",
     "pivot_strategy",
     "profile_target",
