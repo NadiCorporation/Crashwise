@@ -18,6 +18,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+import time
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
@@ -665,3 +666,113 @@ class ProfileTargetOutput(_StrictModel):
     profile: TargetProfile = Field(default_factory=TargetProfile)
     duration_seconds: float = Field(default=0.0, ge=0.0)
     files_scanned: int = Field(default=0, ge=0)
+
+
+# ── Multi-Armed Bandit Strategy Switcher ────────────────────────────────────
+class StrategyArm(_StrictModel):
+    """A single fuzzing strategy configuration (one "arm" of the MAB).
+
+    Attributes
+    ----------
+    arm_id:
+        Unique identifier (e.g. ``afl_default``, ``libfuzzer_custom``).
+    name:
+        Human-readable label.
+    fuzzer_type:
+        Which fuzzer engine this arm uses.
+    compiler_flags:
+        Extra CFLAGS / CXXFLAGS for this strategy.
+    env_vars:
+        Environment variables (e.g. ``AFL_FAST_CAL=1``).
+    cpu_limit:
+        CPU cores allocated when this arm is active.
+    memory_limit_mb:
+        RAM cap when this arm is active.
+    mutation_mode:
+        Description of the mutation strategy (e.g. ``aggressive``, ``havoc``).
+    """
+
+    arm_id: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(default="", max_length=128)
+    fuzzer_type: FuzzerType = Field(default=FuzzerType.LIBFUZZER)
+    compiler_flags: list[str] = Field(default_factory=list)
+    env_vars: dict[str, str] = Field(default_factory=dict)
+    cpu_limit: float = Field(default=2.0, ge=0.1)
+    memory_limit_mb: int = Field(default=2048, ge=256)
+    mutation_mode: str = Field(default="default", max_length=64)
+
+
+class MabState(_StrictModel):
+    """State of the Multi-Armed Bandit for a single campaign.
+
+    Attributes
+    ----------
+    arms:
+        All strategy arms available.
+    successes:
+        Per-arm success count (new coverage found).
+    failures:
+        Per-arm failure count (no new coverage).
+    trials:
+        Per-arm total pulls.
+    current_arm_id:
+        Which arm is currently running.
+    last_pivot_at:
+        UTC timestamp of the last strategy switch.
+    pivot_count:
+        How many times we've switched strategies.
+    coverage_history:
+        List of (timestamp, edges_hit) tuples for plateau detection.
+    """
+
+    arms: list[StrategyArm] = Field(default_factory=list)
+    successes: dict[str, int] = Field(default_factory=dict)
+    failures: dict[str, int] = Field(default_factory=dict)
+    trials: dict[str, int] = Field(default_factory=dict)
+    current_arm_id: str = ""
+    last_pivot_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    pivot_count: int = Field(default=0, ge=0)
+    coverage_history: list[tuple[float, int]] = Field(default_factory=list)
+
+    def record_trial(self, arm_id: str, new_coverage_found: bool) -> None:
+        """Record the outcome of one trial for ``arm_id``."""
+        self.trials[arm_id] = self.trials.get(arm_id, 0) + 1
+        if new_coverage_found:
+            self.successes[arm_id] = self.successes.get(arm_id, 0) + 1
+        else:
+            self.failures[arm_id] = self.failures.get(arm_id, 0) + 1
+
+    def is_plateaued(self, *, window_minutes: float = 30.0, threshold: float = 0.01) -> bool:
+        """Return True if coverage growth < ``threshold`` over ``window_minutes``."""
+        if len(self.coverage_history) < 2:
+            return False
+        cutoff = time.time() - window_minutes * 60
+        recent = [(t, c) for t, c in self.coverage_history if t >= cutoff]
+        if len(recent) < 2:
+            return False
+        first_cov = recent[0][1]
+        last_cov = recent[-1][1]
+        if first_cov == 0:
+            return False
+        growth = (last_cov - first_cov) / first_cov
+        return growth < threshold
+
+
+class PivotStrategyInput(_StrictModel):
+    """Input to the ``pivot_strategy`` activity."""
+
+    campaign_id: str = Field(..., min_length=1, max_length=36)
+    mab_state: MabState = Field(default_factory=MabState)
+    current_coverage: int = Field(default=0, ge=0)
+    current_exec_rate: float = Field(default=0.0, ge=0.0)
+    elapsed_seconds: float = Field(default=0.0, ge=0.0)
+
+
+class PivotStrategyOutput(_StrictModel):
+    """Result of the ``pivot_strategy`` activity."""
+
+    should_pivot: bool = False
+    new_arm_id: str = Field(default="", max_length=64)
+    new_arm: StrategyArm | None = None
+    reason: str = Field(default="", max_length=512)
+    mab_state: MabState = Field(default_factory=MabState)

@@ -171,6 +171,93 @@ class DockerManager:
                 stderr=asyncio.subprocess.DEVNULL,
             )
 
+    # ── Phase 17: MAB pivot support ──────────────────────────────────────────
+
+    async def preserve_corpus(self, job_id: str, preserve_dir: Path) -> Path:
+        """Copy the fuzzer's corpus/seeds from a running container to ``preserve_dir``.
+
+        Returns the path to the preserved corpus directory.
+        """
+        container_id = self._containers.get(job_id)
+        if not container_id:
+            log.warning("docker.preserve_corpus.unknown_job", job_id=job_id)
+            return preserve_dir
+
+        preserve_dir.mkdir(parents=True, exist_ok=True)
+
+        # Try common corpus locations inside the container.
+        corpus_paths = ["/corpus", "/out/queue", "/out/corpus", "/tmp/corpus"]
+        for src in corpus_paths:
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "cp",
+                f"{container_id}:{src}",
+                str(preserve_dir),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode == 0:
+                log.info(
+                    "docker.preserve_corpus.copied",
+                    job_id=job_id,
+                    src=src,
+                    dest=str(preserve_dir),
+                )
+                return preserve_dir
+
+        log.warning("docker.preserve_corpus.failed", job_id=job_id)
+        return preserve_dir
+
+    async def update_resource_limits(
+        self,
+        job_id: str,
+        *,
+        cpu_limit: float | None = None,
+        memory_limit_mb: int | None = None,
+    ) -> bool:
+        """Hot-update resource limits for a running container.
+
+        Docker does not support true hot-swap of CPU/memory limits for
+        running containers.  This method attempts ``docker update``; if it
+        fails, the caller should stop and restart the container.
+
+        Returns ``True`` if the update succeeded.
+        """
+        container_id = self._containers.get(job_id)
+        if not container_id:
+            log.warning("docker.update_limits.unknown_job", job_id=job_id)
+            return False
+
+        cmd: list[str] = ["docker", "update"]
+        if cpu_limit is not None:
+            cmd.extend(["--cpus", str(cpu_limit)])
+        if memory_limit_mb is not None:
+            cmd.extend(["--memory", f"{memory_limit_mb}m"])
+        cmd.append(container_id)
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            log.info(
+                "docker.update_limits.success",
+                job_id=job_id,
+                cpu=cpu_limit,
+                memory_mb=memory_limit_mb,
+            )
+            return True
+
+        log.warning(
+            "docker.update_limits.failed",
+            job_id=job_id,
+            error=stderr.decode("utf-8", errors="replace")[:200],
+        )
+        return False
+
     async def logs(self, job_id: str, *, tail: int = 100) -> str:
         """Fetch the last N lines of container stdout+stderr."""
         container_id = self._containers.get(job_id)
