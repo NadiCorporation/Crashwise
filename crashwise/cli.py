@@ -146,7 +146,7 @@ def init(
 
 async def _init_db_async(*, drop_all: bool = False) -> None:
     """Async helper for DB initialisation used by the init command."""
-    await init_db(drop_all=drop_all)
+    await init_db(drop=drop_all)
     await close_db()
 
 

@@ -29,7 +29,6 @@ services:
       POSTGRES_USER: temporal
       POSTGRES_PWD: temporal
       POSTGRES_SEEDS: postgres
-      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
     ports:
       - "7233:7233"
     depends_on:
@@ -103,7 +102,7 @@ services:
   # MinIO (S3-compatible, for local R2 emulation)
   # ════════════════════════════════════════════════════════════════════════════
   minio:
-    image: minio/minio:RELEASE.2024-06-13T22-53-21Z
+    image: minio/minio:latest
     container_name: crashwise-minio
     command: server /data --console-address ":9001"
     environment:
