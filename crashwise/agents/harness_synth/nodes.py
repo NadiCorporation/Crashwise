@@ -25,6 +25,7 @@ from crashwise.agents.harness_synth.compiler import compile_harness
 from crashwise.agents.harness_synth.llm import ChatModelLike, get_chat_model
 from crashwise.agents.harness_synth.prompts import (
     FEEDBACK_SECTION_TEMPLATE,
+    PROFILE_SECTION_TEMPLATE,
     RETRY_SECTION_TEMPLATE,
     SIMPLIFY_NOTE,
     SYSTEM_PROMPT,
@@ -226,6 +227,23 @@ def _summarise_stderr(stderr: str) -> str:
 def _build_user_prompt(state: HarnessState) -> str:
     ep = state.selected_entry_point
 
+    # Phase 16: inject TargetProfile context.
+    profile_section = ""
+    if state.target_profile:
+        profile = state.target_profile
+        domain = profile.get("domain", "general")
+        complexity = profile.get("complexity_score", 0.0)
+        attack_surface = profile.get("attack_surface", [])
+        dangerous = profile.get("dangerous_functions", [])
+        strategy = profile.get("recommended_strategy", "standard")
+        profile_section = PROFILE_SECTION_TEMPLATE.format(
+            domain=domain,
+            complexity=complexity,
+            attack_surface=", ".join(attack_surface[:10]) if attack_surface else "(unknown)",
+            dangerous_functions=", ".join(dangerous[:10]) if dangerous else "(none detected)",
+            strategy=strategy,
+        )
+
     # Feedback from previous fuzzing iteration (Phase 6).
     feedback_section = ""
     if state.feedback.strip():
@@ -253,6 +271,7 @@ def _build_user_prompt(state: HarnessState) -> str:
             entry_point_signature=ep.signature if ep else "(unknown)",
             entry_point_line=ep.line if ep else 0,
             language=state.language,
+            profile_section=profile_section,
             source_code=_truncate_source(state.source_code),
             feedback_section=feedback_section,
             retry_section=retry_section,
