@@ -757,6 +757,35 @@ class MabState(_StrictModel):
         growth = (last_cov - first_cov) / first_cov
         return growth < threshold
 
+    def is_global_plateau(
+        self,
+        *,
+        window_minutes: float = 60.0,
+        threshold: float = 0.01,
+    ) -> bool:
+        """Return True when ALL arms have plateaued (no arm found new coverage).
+
+        A global plateau triggers harness re-synthesis (Phase 18).
+        """
+        if not self.coverage_history:
+            return False
+        # Check if any arm has succeeded recently.
+        cutoff = time.time() - window_minutes * 60
+        recent_history = [(t, c) for t, c in self.coverage_history if t >= cutoff]
+        if len(recent_history) < 2:
+            return False
+        first_cov = recent_history[0][1]
+        last_cov = recent_history[-1][1]
+        if first_cov == 0:
+            return False
+        growth = (last_cov - first_cov) / first_cov
+        global_plateau = growth < threshold
+        # Also check: every arm must have at least one trial in this window.
+        total_trials_recent = sum(
+            self.trials.get(a.arm_id, 0) for a in self.arms
+        )
+        return global_plateau and total_trials_recent > 0
+
 
 class PivotStrategyInput(_StrictModel):
     """Input to the ``pivot_strategy`` activity."""
@@ -776,3 +805,176 @@ class PivotStrategyOutput(_StrictModel):
     new_arm: StrategyArm | None = None
     reason: str = Field(default="", max_length=512)
     mab_state: MabState = Field(default_factory=MabState)
+
+
+# ── Coverage-Guided Harness Evolution ─────────────────────────────────────────
+class BlockerType(StrEnum):
+    """Classification of coverage blockers."""
+
+    MAGIC_VALUE = "magic_value"
+    LENGTH_CHECK = "length_check"
+    NULL_CHECK = "null_check"
+    FORMAT_CHECK = "format_check"
+    CHECKSUM = "checksum"
+    STATE_MACHINE = "state_machine"
+    INITIALIZATION = "initialization"
+    UNKNOWN = "unknown"
+
+
+class CoverageBlocker(_StrictModel):
+    """A single coverage blocker identified by the analysis agent.
+
+    Attributes
+    ----------
+    blocker_type:
+        What kind of check is blocking coverage (magic value, length, etc.).
+    line_number:
+        Source line of the blocking condition.
+    function_name:
+        Function containing the blocker.
+    condition_text:
+        The actual condition expression (e.g. ``if (header.magic != 0x89PNG)``).
+    expected_value:
+        The value needed to pass the check (if known).
+    distance_from_entry:
+        Number of basic blocks from the entry point to this blocker.
+    confidence:
+        0.0-1.0 confidence that this is the actual blocker.
+    """
+
+    blocker_type: BlockerType = Field(default=BlockerType.UNKNOWN)
+    line_number: int = Field(default=0, ge=0)
+    function_name: str = Field(default="", max_length=256)
+    condition_text: str = Field(default="", max_length=1024)
+    expected_value: str = Field(default="", max_length=256)
+    distance_from_entry: int = Field(default=0, ge=0)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class CoverageAnalysis(_StrictModel):
+    """Result of coverage analysis for a single campaign iteration.
+
+    Attributes
+    ----------
+    total_edges:
+        Total control-flow edges in the target.
+    edges_hit:
+        Edges actually reached by the fuzzer.
+    edges_missed:
+        Edges never reached.
+    hit_rate:
+        Fraction of edges reached (0.0-1.0).
+    blockers:
+        Ordered list of suspected coverage blockers, best-first.
+    unreachable_functions:
+        Functions never called by any seed.
+    notes:
+        Human-readable summary.
+    """
+
+    total_edges: int = Field(default=0, ge=0)
+    edges_hit: int = Field(default=0, ge=0)
+    edges_missed: int = Field(default=0, ge=0)
+    hit_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    blockers: list[CoverageBlocker] = Field(default_factory=list)
+    unreachable_functions: list[str] = Field(default_factory=list)
+    notes: str = Field(default="", max_length=4096)
+
+
+class EvolveHarnessInput(_StrictModel):
+    """Input to the harness evolution agent.
+
+    Attributes
+    ----------
+    current_harness_code:
+        The harness that produced the plateaued coverage.
+    blocker:
+        The coverage blocker to bypass.
+    target_source_path:
+        Path to the source file containing the blocker.
+    target_function:
+        Function being fuzzed.
+    iteration:
+        Evolution iteration count (0 = first attempt).
+    max_iterations:
+        Hard cap on evolution attempts.
+    """
+
+    current_harness_code: str = Field(..., min_length=1, max_length=65536)
+    blocker: CoverageBlocker = Field(default_factory=CoverageBlocker)
+    target_source_path: str = Field(default="", max_length=512)
+    target_function: str = Field(default="", max_length=256)
+    iteration: int = Field(default=0, ge=0)
+    max_iterations: int = Field(default=3, ge=1, le=10)
+
+
+class EvolveHarnessOutput(_StrictModel):
+    """Result of harness evolution.
+
+    Attributes
+    ----------
+    evolved_harness_code:
+        The rewritten harness that attempts to bypass the blocker.
+    bypass_strategy:
+        Description of how the evolution tries to bypass the blocker.
+    confidence:
+        0.0-1.0 confidence in the evolved harness.
+    compilation_command:
+        Suggested compiler invocation.
+    notes:
+        Human-readable explanation.
+    """
+
+    evolved_harness_code: str = Field(default="", max_length=65536)
+    bypass_strategy: str = Field(default="", max_length=512)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    compilation_command: str = Field(default="", max_length=1024)
+    notes: str = Field(default="", max_length=4096)
+
+
+class HotSwapInput(_StrictModel):
+    """Input to the ``hot_swap_harness`` activity.
+
+    Attributes
+    ----------
+    job_id:
+        Running fuzzing job to hot-swap.
+    new_harness_code:
+        Evolved harness source code.
+    compilation_command:
+        Compiler invocation for the new harness.
+    preserve_corpus:
+        Whether to copy the existing corpus before swap.
+    """
+
+    job_id: str = Field(..., min_length=1, max_length=64)
+    new_harness_code: str = Field(..., min_length=1, max_length=65536)
+    compilation_command: str = Field(default="", max_length=1024)
+    preserve_corpus: bool = True
+
+
+class HotSwapOutput(_StrictModel):
+    """Result of hot-swapping a harness.
+
+    Attributes
+    ----------
+    swapped:
+        Whether the swap succeeded.
+    binary_path:
+        Path to the newly compiled binary.
+    preserved_corpus_path:
+        Where the old corpus was saved (if preserved).
+    stdout:
+        Compilation output.
+    stderr:
+        Compilation errors.
+    notes:
+        Human-readable summary.
+    """
+
+    swapped: bool = False
+    binary_path: Path | None = None
+    preserved_corpus_path: Path | None = None
+    stdout: str = Field(default="", max_length=8192)
+    stderr: str = Field(default="", max_length=8192)
+    notes: str = Field(default="", max_length=4096)
