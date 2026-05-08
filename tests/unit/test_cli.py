@@ -53,8 +53,12 @@ def test_init_creates_tables() -> None:
 
 def test_init_force_recreate() -> None:
     with patch("crashwise.cli.init_db", new_callable=AsyncMock) as mock_init, \
-         patch("crashwise.cli.close_db", new_callable=AsyncMock) as mock_close:
-        result = runner.invoke(app, ["init", "--force"])
+         patch("crashwise.cli.close_db", new_callable=AsyncMock) as mock_close, \
+         patch("crashwise.core.discovery.discover_project", return_value=None), \
+         patch("crashwise.core.discovery.DiscoveredProfile") as mock_profile_cls, \
+         patch("crashwise.cli.CrashwiseManifest") as mock_manifest_cls:
+        mock_manifest_cls.return_value.to_file = MagicMock()
+        result = runner.invoke(app, ["init", "--db-force"])
         assert result.exit_code == 0
         assert "recreated successfully" in result.output
         mock_init.assert_awaited_once_with(drop_all=True)

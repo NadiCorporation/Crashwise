@@ -1,0 +1,499 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 CrashWise Contributors
+"""Unit tests for Phase 20 — System Sentinel & Unified Provisioner."""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from crashwise.core.sentinel import (
+    CheckResult,
+    CheckStatus,
+    SentinelReport,
+    _get_cpu_cores,
+    _get_free_disk_gb,
+    _get_total_ram_gb,
+    _parse_meminfo_kb,
+    _run,
+    _which,
+    check_build_afl,
+    check_build_clang,
+    check_build_cmake,
+    check_build_gcc,
+    check_build_libfuzzer,
+    check_build_llvm,
+    check_hardware_cpu,
+    check_hardware_disk,
+    check_hardware_ram,
+    check_runtime_docker,
+    check_runtime_docker_compose,
+    check_runtime_python,
+    check_service_llm,
+    check_service_redis,
+    check_service_temporal,
+    generate_setup_script,
+    get_missing_packages,
+    run_all_checks,
+)
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+
+def test_run_command_found() -> None:
+    rc, out, err = _run(["echo", "hello"])
+    assert rc == 0
+    assert out == "hello"
+
+
+def test_run_command_not_found() -> None:
+    rc, out, err = _run(["nonexistent_command_xyz"])
+    assert rc == 127
+    assert "not found" in err.lower() or err == ""
+
+
+def test_run_command_timeout() -> None:
+    rc, out, err = _run(["sleep", "10"], timeout=0.1)
+    assert rc == -1
+    assert "timed out" in err.lower()
+
+
+def test_which_found() -> None:
+    path = _which("python3")
+    assert path is not None
+
+
+def test_which_not_found() -> None:
+    path = _which("nonexistent_binary_xyz")
+    assert path is None
+
+
+# ── Hardware Checks ──────────────────────────────────────────────────────────
+
+
+def test_parse_meminfo_kb() -> None:
+    with tempfile.NamedTemporaryFile(mode="w", suffix="_meminfo", delete=False) as fh:
+        fh.write("MemTotal:       16384000 kB\n")
+        fh.write("MemFree:         8192000 kB\n")
+        fh.flush()
+        with patch("crashwise.core.sentinel.open", create=True) as mock_open:
+            mock_open.return_value.__enter__.return_value = fh
+            # We can't easily patch open for a specific path; test via the real file
+            pass
+    # Test with real /proc/meminfo if available
+    kb = _parse_meminfo_kb("MemTotal")
+    if kb is not None:
+        assert isinstance(kb, int)
+        assert kb > 0
+
+
+def test_get_total_ram_gb() -> None:
+    gb = _get_total_ram_gb()
+    if gb is not None:
+        assert isinstance(gb, float)
+        assert gb > 0
+
+
+def test_get_cpu_cores() -> None:
+    cores = _get_cpu_cores()
+    assert cores is not None
+    assert isinstance(cores, int)
+    assert cores > 0
+
+
+def test_get_free_disk_gb() -> None:
+    gb = _get_free_disk_gb()
+    assert gb is not None
+    assert isinstance(gb, float)
+    assert gb >= 0
+
+
+def test_check_hardware_ram_ok() -> None:
+    with patch("crashwise.core.sentinel._get_total_ram_gb", return_value=16.0):
+        result = check_hardware_ram(min_gb=8.0)
+        assert result.status == CheckStatus.OK
+        assert "16.0" in result.message
+
+
+def test_check_hardware_ram_warn() -> None:
+    with patch("crashwise.core.sentinel._get_total_ram_gb", return_value=4.0):
+        result = check_hardware_ram(min_gb=8.0)
+        assert result.status == CheckStatus.WARN
+        assert "4.0" in result.message
+        assert result.remediation != ""
+
+
+def test_check_hardware_ram_skip() -> None:
+    with patch("crashwise.core.sentinel._get_total_ram_gb", return_value=None):
+        result = check_hardware_ram()
+        assert result.status == CheckStatus.SKIP
+
+
+def test_check_hardware_cpu_ok() -> None:
+    with patch("crashwise.core.sentinel._get_cpu_cores", return_value=8):
+        result = check_hardware_cpu(min_cores=4)
+        assert result.status == CheckStatus.OK
+        assert "8" in result.message
+
+
+def test_check_hardware_cpu_warn() -> None:
+    with patch("crashwise.core.sentinel._get_cpu_cores", return_value=2):
+        result = check_hardware_cpu(min_cores=4)
+        assert result.status == CheckStatus.WARN
+
+
+def test_check_hardware_cpu_skip() -> None:
+    with patch("crashwise.core.sentinel._get_cpu_cores", return_value=None):
+        result = check_hardware_cpu()
+        assert result.status == CheckStatus.SKIP
+
+
+def test_check_hardware_disk_ok() -> None:
+    with patch("crashwise.core.sentinel._get_free_disk_gb", return_value=100.0):
+        result = check_hardware_disk(min_free_gb=50.0)
+        assert result.status == CheckStatus.OK
+
+
+def test_check_hardware_disk_warn() -> None:
+    with patch("crashwise.core.sentinel._get_free_disk_gb", return_value=10.0):
+        result = check_hardware_disk(min_free_gb=50.0)
+        assert result.status == CheckStatus.WARN
+
+
+def test_check_hardware_disk_skip() -> None:
+    with patch("crashwise.core.sentinel._get_free_disk_gb", return_value=None):
+        result = check_hardware_disk()
+        assert result.status == CheckStatus.SKIP
+
+
+# ── Runtime Checks ─────────────────────────────────────────────────────────────
+
+
+def test_check_runtime_docker_ok() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(0, "24.0.7", "")):
+        result = check_runtime_docker()
+        assert result.status == CheckStatus.OK
+        assert "24.0.7" in result.message
+
+
+def test_check_runtime_docker_cli_found_daemon_dead() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(1, "", "Cannot connect")), \
+         patch("crashwise.core.sentinel._which", return_value="/usr/bin/docker"):
+        result = check_runtime_docker()
+        assert result.status == CheckStatus.FAIL
+        assert "daemon" in result.message.lower()
+
+
+def test_check_runtime_docker_not_installed() -> None:
+    with patch("crashwise.core.sentinel._which", return_value=None), \
+         patch("crashwise.core.sentinel._run", return_value=(127, "", "not found")):
+        result = check_runtime_docker()
+        assert result.status == CheckStatus.FAIL
+        assert "not installed" in result.message.lower()
+
+
+def test_check_runtime_docker_compose_ok_plugin() -> None:
+    with patch("crashwise.core.sentinel._run", side_effect=[
+        (0, "Docker Compose version v2.20.0", ""),  # first cmd succeeds
+    ]):
+        result = check_runtime_docker_compose()
+        assert result.status == CheckStatus.OK
+
+
+def test_check_runtime_docker_compose_ok_standalone() -> None:
+    with patch("crashwise.core.sentinel._run", side_effect=[
+        (1, "", ""),  # docker compose fails
+        (0, "docker-compose version 1.29.2", ""),  # docker-compose succeeds
+    ]):
+        result = check_runtime_docker_compose()
+        assert result.status == CheckStatus.OK
+
+
+def test_check_runtime_docker_compose_fail() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(1, "", "not found")):
+        result = check_runtime_docker_compose()
+        assert result.status == CheckStatus.FAIL
+
+
+def test_check_runtime_python_ok() -> None:
+    with patch("crashwise.core.sentinel.platform.python_version_tuple", return_value=("3", "11", "0")):
+        result = check_runtime_python()
+        assert result.status == CheckStatus.OK
+
+
+def test_check_runtime_python_fail() -> None:
+    with patch("crashwise.core.sentinel.platform.python_version_tuple", return_value=("3", "9", "0")):
+        result = check_runtime_python()
+        assert result.status == CheckStatus.FAIL
+
+
+# ── Build Tool Checks ──────────────────────────────────────────────────────────
+
+
+def test_check_build_cmake_ok() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(0, "cmake version 3.28.0", "")):
+        result = check_build_cmake()
+        assert result.status == CheckStatus.OK
+
+
+def test_check_build_cmake_fail() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(127, "", "not found")):
+        result = check_build_cmake()
+        assert result.status == CheckStatus.FAIL
+
+
+def test_check_build_clang_ok() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(0, "clang version 16.0.0", "")):
+        result = check_build_clang()
+        assert result.status == CheckStatus.OK
+
+
+def test_check_build_clang_fail() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(127, "", "not found")):
+        result = check_build_clang()
+        assert result.status == CheckStatus.FAIL
+
+
+def test_check_build_gcc_ok() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(0, "gcc (Debian 12.0.0)", "")):
+        result = check_build_gcc()
+        assert result.status == CheckStatus.OK
+
+
+def test_check_build_gcc_fail() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(127, "", "not found")):
+        result = check_build_gcc()
+        assert result.status == CheckStatus.FAIL
+
+
+def test_check_build_llvm_ok() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(0, "16.0.0", "")):
+        result = check_build_llvm()
+        assert result.status == CheckStatus.OK
+
+
+def test_check_build_llvm_ok_with_suffix() -> None:
+    with patch("crashwise.core.sentinel._run", side_effect=[
+        (127, "", "not found"),  # llvm-config fails
+        (127, "", "not found"),  # llvm-config-18 fails
+        (0, "17.0.0", ""),       # llvm-config-17 succeeds
+    ]):
+        result = check_build_llvm()
+        assert result.status == CheckStatus.OK
+        assert "llvm-config-17" in result.message
+
+
+def test_check_build_llvm_fail() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(127, "", "not found")):
+        result = check_build_llvm()
+        assert result.status == CheckStatus.FAIL
+
+
+def test_check_build_afl_ok() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(0, "", "")):
+        result = check_build_afl()
+        assert result.status == CheckStatus.OK
+
+
+def test_check_build_afl_warn() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(127, "", "not found")):
+        result = check_build_afl()
+        assert result.status == CheckStatus.WARN
+        assert "Docker worker" in result.remediation
+
+
+def test_check_build_libfuzzer_ok() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(1, "", "linker input file")):
+        result = check_build_libfuzzer()
+        assert result.status == CheckStatus.OK
+
+
+def test_check_build_libfuzzer_warn() -> None:
+    with patch("crashwise.core.sentinel._run", return_value=(1, "", "unrecognized argument")):
+        result = check_build_libfuzzer()
+        assert result.status == CheckStatus.WARN
+
+
+# ── Service Checks (async) ───────────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_check_service_temporal_ok() -> None:
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+
+    async def _mock_get(*args, **kwargs):
+        return mock_resp
+
+    mock_client = AsyncMock()
+    mock_client.get = _mock_get
+    mock_client.__aenter__.return_value = mock_client  # crucial: __aenter__ must return self
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await check_service_temporal()
+        assert result.status == CheckStatus.OK
+
+
+@pytest.mark.anyio
+async def test_check_service_temporal_warn() -> None:
+    async def _mock_get(*args, **kwargs):
+        raise Exception("connection refused")
+
+    mock_client = AsyncMock()
+    mock_client.get = _mock_get
+    mock_client.__aenter__.return_value = mock_client
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await check_service_temporal()
+        assert result.status == CheckStatus.WARN
+
+
+@pytest.mark.anyio
+async def test_check_service_redis_ok() -> None:
+    mock_redis = AsyncMock()
+    mock_redis.ping = AsyncMock(return_value=None)
+    mock_redis.close = AsyncMock(return_value=None)
+
+    with patch("redis.asyncio.Redis", return_value=mock_redis):
+        result = await check_service_redis()
+        assert result.status == CheckStatus.OK
+
+
+@pytest.mark.anyio
+async def test_check_service_redis_warn() -> None:
+    with patch("redis.asyncio.Redis", side_effect=Exception("connection refused")):
+        result = await check_service_redis()
+        assert result.status == CheckStatus.WARN
+
+
+@pytest.mark.anyio
+async def test_check_service_llm_ok() -> None:
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json = MagicMock(return_value={"models": [{"name": "codellama"}]})
+
+    async def _mock_get(*args, **kwargs):
+        return mock_resp
+
+    mock_client = AsyncMock()
+    mock_client.get = _mock_get
+    mock_client.__aenter__.return_value = mock_client
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await check_service_llm()
+        assert result.status == CheckStatus.OK
+        assert "codellama" in result.message
+
+
+@pytest.mark.anyio
+async def test_check_service_llm_warn() -> None:
+    async def _mock_get(*args, **kwargs):
+        raise Exception("connection refused")
+
+    mock_client = AsyncMock()
+    mock_client.get = _mock_get
+    mock_client.__aenter__.return_value = mock_client
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await check_service_llm()
+        assert result.status == CheckStatus.WARN
+
+
+# ── Report Aggregation ───────────────────────────────────────────────────────
+
+
+def test_sentinel_report_counts() -> None:
+    report = SentinelReport(
+        checks=[
+            CheckResult("a", CheckStatus.OK, "ok"),
+            CheckResult("b", CheckStatus.OK, "ok"),
+            CheckResult("c", CheckStatus.WARN, "warn"),
+            CheckResult("d", CheckStatus.FAIL, "fail"),
+        ]
+    )
+    assert report.ok_count == 2
+    assert report.warn_count == 1
+    assert report.fail_count == 1
+    assert not report.healthy
+
+
+def test_sentinel_report_healthy() -> None:
+    report = SentinelReport(
+        checks=[
+            CheckResult("a", CheckStatus.OK, "ok"),
+            CheckResult("b", CheckStatus.OK, "ok"),
+        ]
+    )
+    assert report.healthy
+
+
+def test_sentinel_report_by_category() -> None:
+    report = SentinelReport(
+        checks=[
+            CheckResult("hardware.ram", CheckStatus.OK, "ok"),
+            CheckResult("hardware.cpu", CheckStatus.OK, "ok"),
+            CheckResult("build.cmake", CheckStatus.FAIL, "fail"),
+        ]
+    )
+    groups = report.by_category()
+    assert len(groups["hardware"]) == 2
+    assert len(groups["build"]) == 1
+
+
+# ── Provisioner ──────────────────────────────────────────────────────────────
+
+
+def test_get_missing_packages() -> None:
+    report = SentinelReport(
+        checks=[
+            CheckResult("build.cmake", CheckStatus.FAIL, "not found"),
+            CheckResult("build.clang", CheckStatus.FAIL, "not found"),
+            CheckResult("hardware.ram", CheckStatus.OK, "ok"),
+        ]
+    )
+    pkgs = get_missing_packages(report)
+    assert "cmake" in pkgs
+    assert "clang" in pkgs
+
+
+def test_get_missing_packages_empty() -> None:
+    report = SentinelReport(
+        checks=[CheckResult("hardware.ram", CheckStatus.OK, "ok")]
+    )
+    pkgs = get_missing_packages(report)
+    assert pkgs == []
+
+
+def test_generate_setup_script() -> None:
+    script = generate_setup_script(["cmake", "clang"])
+    assert "#!/usr/bin/env bash" in script
+    assert "apt-get update" in script
+    assert "cmake clang" in script
+
+
+def test_generate_setup_script_empty() -> None:
+    script = generate_setup_script([])
+    assert "already installed" in script
+
+
+# ── Full Orchestrator ────────────────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_run_all_checks() -> None:
+    with patch("crashwise.core.sentinel._get_total_ram_gb", return_value=16.0), \
+         patch("crashwise.core.sentinel._get_cpu_cores", return_value=8), \
+         patch("crashwise.core.sentinel._get_free_disk_gb", return_value=100.0), \
+         patch("crashwise.core.sentinel._run", return_value=(0, "ok", "")), \
+         patch("crashwise.core.sentinel._which", return_value="/usr/bin/docker"), \
+         patch("crashwise.core.sentinel.platform.python_version_tuple", return_value=("3", "11", "0")), \
+         patch("crashwise.core.sentinel.check_service_temporal", return_value=CheckResult("service.temporal", CheckStatus.OK, "ok")), \
+         patch("crashwise.core.sentinel.check_service_redis", return_value=CheckResult("service.redis", CheckStatus.OK, "ok")), \
+         patch("crashwise.core.sentinel.check_service_llm", return_value=CheckResult("service.llm", CheckStatus.OK, "ok")):
+        report = await run_all_checks()
+        assert report.healthy
+        assert len(report.checks) >= 12  # hardware(3) + runtime(3) + build(6) + services(3)
