@@ -44,7 +44,7 @@ services:
       - crashwise
 
   temporal-ui:
-    image: temporalio/ui:2.30
+    image: temporalio/ui:2.30.0
     container_name: crashwise-temporal-ui
     environment:
       TEMPORAL_ADDRESS: temporal-server:7233
