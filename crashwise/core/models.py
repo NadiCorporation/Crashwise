@@ -109,6 +109,33 @@ class FuzzingInput(_StrictModel):
     max_iterations: int = Field(default=5, ge=1, le=20)
     campaign_id: str | None = Field(default=None, max_length=36)
 
+    # Phase 21 — opt-in autonomous strategy switching and harness evolution.
+    # Both default False so existing tests / smoke runs are unaffected.
+    enable_mab: bool = Field(
+        default=False,
+        description="Phase 17 strategy switcher (MAB) — opt-in",
+    )
+    enable_evolution: bool = Field(
+        default=False,
+        description="Phase 18 harness evolution — implies enable_mab",
+    )
+    pivot_check_interval_iterations: int = Field(
+        default=1,
+        ge=1,
+        le=20,
+        description="Run pivot_strategy every N iterations",
+    )
+    max_evolution_count: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description=(
+            "Hard cap on harness-evolution attempts per campaign. "
+            "Prevents runaway LLM spend when the model keeps emitting "
+            "the same fallback template against a structural blocker."
+        ),
+    )
+
 
 class FuzzingOutput(_StrictModel):
     """Final output payload of :class:`MainFuzzingWorkflow`.

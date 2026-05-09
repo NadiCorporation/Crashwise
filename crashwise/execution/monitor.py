@@ -153,17 +153,81 @@ class ResourceMonitor:
 
 
 class DockerHealthChecker:
-    """Adapter that turns a ``DockerManager`` into a ``ResourceMonitor`` check."""
+    """Adapter that turns a ``DockerManager`` into a ``ResourceMonitor`` check.
 
-    def __init__(self, manager: Any, job_id: str, output_dir: Path) -> None:
+    B9 fix: when the job is running AFL++ — detected via the presence of an
+    ``fuzzer_stats`` file under ``output_dir`` *or* via an explicit
+    ``fuzzer`` hint passed by the caller — the checker reads AFL's
+    persistent stats file rather than trying to coerce ANSI-coloured TUI
+    output through the libFuzzer regex. Without this, AFL campaigns
+    always reported ``exec_per_sec=0`` and tripped the stall detector
+    after ~90 s.
+    """
+
+    def __init__(
+        self,
+        manager: Any,
+        job_id: str,
+        output_dir: Path,
+        *,
+        fuzzer: str | None = None,
+    ) -> None:
         self._manager = manager
         self._job_id = job_id
         self._output_dir = output_dir
+        # ``fuzzer`` is one of {"afl", "libfuzzer", None}. ``None`` means
+        # auto-detect at each tick by looking for AFL's stats file.
+        self._fuzzer_hint: str | None = (
+            fuzzer.lower() if isinstance(fuzzer, str) else None
+        )
+
+    def _afl_stats_path(self) -> Path:
+        # AFL++ writes ``fuzzer_stats`` directly under -o (the output dir).
+        # Some images also nest it under default/ (the default instance).
+        candidates = [
+            self._output_dir / "fuzzer_stats",
+            self._output_dir / "default" / "fuzzer_stats",
+        ]
+        for p in candidates:
+            if p.exists():
+                return p
+        return candidates[0]
+
+    def _is_afl(self) -> bool:
+        if self._fuzzer_hint == "afl":
+            return True
+        if self._fuzzer_hint == "libfuzzer":
+            return False
+        # Auto-detect: AFL writes a ``fuzzer_stats`` file as soon as it
+        # boots; libFuzzer never does.
+        stats_path = self._afl_stats_path()
+        return stats_path.exists()
 
     async def __call__(self) -> HealthSnapshot:
+        # Phase 21: pull a longer tail (50 lines) so libFuzzer's per-second
+        # stats line is reliably present, then parse it for ``exec_per_sec``.
+        from crashwise.execution.docker_manager import (
+            parse_afl_fuzzer_stats,
+            parse_libfuzzer_log_tail,
+        )
+
         alive = await self._manager.is_alive(self._job_id)
         stats = await self._manager.stats(self._job_id) if alive else {}
-        logs = await self._manager.logs(self._job_id, tail=1) if alive else ""
+        logs = await self._manager.logs(self._job_id, tail=50) if alive else ""
+
+        exec_per_sec = 0.0
+        if self._is_afl():
+            stats_path = self._afl_stats_path()
+            if stats_path.exists():
+                with contextlib.suppress(OSError):
+                    parsed = parse_afl_fuzzer_stats(
+                        stats_path.read_text(encoding="utf-8", errors="replace")
+                    )
+                    exec_per_sec = float(parsed.get("exec_per_sec", 0.0))
+        else:
+            parsed = parse_libfuzzer_log_tail(logs)
+            exec_per_sec = float(parsed.get("exec_per_sec", 0.0))
+
         return HealthSnapshot(
             timestamp=time.monotonic(),
             alive=alive,
@@ -171,7 +235,7 @@ class DockerHealthChecker:
             memory=stats.get("memory", "N/A"),
             pids=stats.get("pids", "N/A"),
             last_output_line=logs.strip().splitlines()[-1] if logs else "",
-            exec_per_sec=0.0,  # TODO: parse AFL/libFuzzer stats file.
+            exec_per_sec=exec_per_sec,
         )
 
 

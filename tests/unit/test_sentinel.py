@@ -277,8 +277,11 @@ def test_check_build_llvm_ok() -> None:
 
 
 def test_check_build_llvm_ok_with_suffix() -> None:
+    # Phase 21: probe order is -19, -18, -17, -16, -15. Test that -17 succeeds
+    # after -19/-18 fail (and the bare llvm-config probe also fails first).
     with patch("crashwise.core.sentinel._run", side_effect=[
         (127, "", "not found"),  # llvm-config fails
+        (127, "", "not found"),  # llvm-config-19 fails
         (127, "", "not found"),  # llvm-config-18 fails
         (0, "17.0.0", ""),       # llvm-config-17 succeeds
     ]):
@@ -455,7 +458,8 @@ def test_get_missing_packages() -> None:
             CheckResult("hardware.ram", CheckStatus.OK, "ok"),
         ]
     )
-    pkgs = get_missing_packages(report)
+    # Pin distro to keep test deterministic across hosts (Phase 21).
+    pkgs = get_missing_packages(report, distro="debian")
     assert "cmake" in pkgs
     assert "clang" in pkgs
 
@@ -464,12 +468,12 @@ def test_get_missing_packages_empty() -> None:
     report = SentinelReport(
         checks=[CheckResult("hardware.ram", CheckStatus.OK, "ok")]
     )
-    pkgs = get_missing_packages(report)
+    pkgs = get_missing_packages(report, distro="debian")
     assert pkgs == []
 
 
 def test_generate_setup_script() -> None:
-    script = generate_setup_script(["cmake", "clang"])
+    script = generate_setup_script(["cmake", "clang"], distro="debian")
     assert "#!/usr/bin/env bash" in script
     assert "apt-get update" in script
     assert "cmake clang" in script
@@ -478,6 +482,93 @@ def test_generate_setup_script() -> None:
 def test_generate_setup_script_empty() -> None:
     script = generate_setup_script([])
     assert "already installed" in script
+
+
+# ── Phase 21: Arch Linux Sentinel ────────────────────────────────────────────
+
+
+def test_detect_distro_arch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from crashwise.core import sentinel as sm
+
+    monkeypatch.setattr(sm, "_DISTRO_OVERRIDE", "arch", raising=False)
+    assert sm._detect_distro() == "arch"
+
+
+def test_detect_distro_debian(monkeypatch: pytest.MonkeyPatch) -> None:
+    from crashwise.core import sentinel as sm
+
+    monkeypatch.setattr(sm, "_DISTRO_OVERRIDE", "debian", raising=False)
+    assert sm._detect_distro() == "debian"
+
+
+def test_detect_distro_unknown_when_no_os_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from crashwise.core import sentinel as sm
+
+    monkeypatch.setattr(sm, "_DISTRO_OVERRIDE", None, raising=False)
+    # Force FileNotFoundError by chdir'ing somewhere os-release doesn't exist
+    # is not viable since absolute path is used; we instead patch open.
+    real_open = open
+
+    def fake_open(*args, **kwargs):  # type: ignore[no-untyped-def]
+        if args and args[0] == "/etc/os-release":
+            raise FileNotFoundError(args[0])
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+    assert sm._detect_distro() == "unknown"
+
+
+def test_get_missing_packages_arch() -> None:
+    report = SentinelReport(
+        checks=[
+            CheckResult("build.cmake", CheckStatus.FAIL, "not found"),
+            CheckResult("build.gcc", CheckStatus.FAIL, "not found"),
+            CheckResult("build.llvm", CheckStatus.FAIL, "not found"),
+        ]
+    )
+    pkgs = get_missing_packages(report, distro="arch")
+    assert "cmake" in pkgs
+    # Arch ships C++ as part of `gcc`; no separate g++ package.
+    assert "g++" not in pkgs
+    assert "gcc" in pkgs
+    assert "llvm" in pkgs
+    assert "lld" in pkgs
+
+
+def test_generate_setup_script_arch() -> None:
+    script = generate_setup_script(["cmake", "clang"], distro="arch")
+    assert "#!/usr/bin/env bash" in script
+    assert "pacman -S" in script
+    assert "cmake clang" in script
+    # Must NOT contain Debian commands.
+    assert "apt-get" not in script
+
+
+def test_generate_setup_script_fedora() -> None:
+    script = generate_setup_script(["cmake"], distro="fedora")
+    assert "dnf install" in script
+
+
+def test_check_build_llvm_arch_generic_binary() -> None:
+    """Arch ships a bare `llvm-config` (no version suffix)."""
+    with patch("crashwise.core.sentinel._run", return_value=(0, "19.1.0", "")):
+        result = check_build_llvm()
+        assert result.status == CheckStatus.OK
+        assert "19.1.0" in result.message
+
+
+def test_check_build_llvm_arch_remediation_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from crashwise.core import sentinel as sm
+
+    monkeypatch.setattr(sm, "_DISTRO_OVERRIDE", "arch", raising=False)
+    with patch("crashwise.core.sentinel._run", return_value=(127, "", "not found")):
+        result = check_build_llvm()
+        assert result.status == CheckStatus.FAIL
+        assert "pacman" in result.remediation
 
 
 # ── Full Orchestrator ────────────────────────────────────────────────────────

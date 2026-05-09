@@ -7,6 +7,134 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0-rc2] — 2026-05-09
+
+### Phase 21 + S6 Hardening + Linux Native + Intelligence Loop
+
+#### Sandbox & Safety (S6 Hardening)
+- **Hardened Docker sandbox** (`crashwise/execution/docker_manager.py`):
+  fuzzer containers now launch with `--network none`, `--read-only`,
+  size-capped `--tmpfs /tmp` and `--tmpfs /dev/shm`, `--cap-drop ALL`,
+  `--security-opt no-new-privileges`. `SYS_PTRACE` is granted *only* to
+  AFL forkserver containers. A pre-flight `docker rm -f` neutralises
+  zombie containers from prior worker crashes.
+- **Shell-free hot-swap** (`crashwise/orchestration/activities/hot_swap_harness.py`):
+  replaced `create_subprocess_shell` with `create_subprocess_exec`.
+  LLM-supplied compile commands are parsed with `shlex.split` and
+  validated against an allow-list of compilers (`gcc`, `clang`,
+  `clang++`, `afl-clang-fast`, …). Shell metacharacters in tokens are
+  rejected. **Closes a path-to-RCE chain.**
+- **Persistent build cache**: compiled harness binaries are copied to
+  `~/.cache/crashwise/build/{job_id}/harness` (or
+  `$CRASHWISE_BUILD_CACHE`) before the `TemporaryDirectory` exits, so
+  successful evolutions outlive the compile sandbox.
+- **AFL stats parser dispatch** (`crashwise/execution/monitor.py`):
+  `DockerHealthChecker` now routes AFL jobs to `parse_afl_fuzzer_stats`
+  (reads `fuzzer_stats` file) instead of pushing TUI output through
+  the libFuzzer regex. AFL campaigns no longer trip the stall detector
+  after 90 seconds.
+- **Zero-coverage stall detection** (`crashwise/agents/feedback/analyzer.py`):
+  `edges_hit == 0` past a 2-iteration warm-up is now flagged STALLED
+  with a clear instrumentation-failure hint, instead of being silently
+  reported as "healthy".
+- **ANSI-safe libFuzzer parser**: `parse_libfuzzer_log_tail` now strips
+  ANSI escape sequences and accepts both integer and `1.2k`-style
+  exec/s rates.
+
+#### God-Mode Signals (Researcher UX)
+- New Temporal workflow signals on `MainFuzzingWorkflow`:
+  - `force_pivot(reason)` — operator-triggered MAB pivot.
+  - `inject_seed({filename, data_b64})` — drop a manually crafted seed
+    into the running corpus (size + traversal validated).
+  - `pause_hunt(bool)` — pause / resume the campaign loop without
+    losing state, using `workflow.wait_condition`.
+- New queries: `is_paused`, `pending_seed_count`, `operator_notes`.
+- New `inject_seeds` Temporal activity with atomic `.tmp` → `rename`
+  writes, per-file (4 MiB) and total (16 MiB) size caps, and
+  `Path.resolve().relative_to(corpus_dir)` containment checks.
+- New CLI command:
+  `crashwise signal <workflow_id> <signal_type> [--data <value>]`
+  (signal types: `force_pivot`, `inject_seed`, `pause_hunt`,
+  `resume_hunt`).
+
+#### Linux-Native (Distro-Bridge)
+- **`DistroDetector`** in `crashwise/core/sentinel.py` —
+  `/etc/os-release`-based detection of Arch, Debian/Ubuntu, Fedora
+  families plus derivatives (Manjaro, Endeavour, Mint, Pop!\_OS, Kali,
+  Rocky, Alma, Amazon Linux, …).  New `DistroInfo` dataclass exposes
+  `family`, `id_`, `pretty_name`, `version_id`.
+- Per-distro **package map** + **install command templates** with a
+  `{sudo}` placeholder rendered via `_sudo_prefix()` (which honours
+  `os.geteuid() == 0` for root-in-container installs).
+- **AUR rail** for Arch: AUR-only packages (e.g. `aflplusplus`) are
+  split out and installed via a detected `yay` / `paru`. The setup
+  script emits a clear warning when no AUR helper is present.
+- **Hardcoded `apt-get` strings removed** from `check_runtime_docker`,
+  `check_runtime_docker_compose`, `check_build_cmake`, `check_build_clang`,
+  `check_build_gcc`, `check_build_llvm`, `check_build_afl`. Every
+  remediation now passes through `_install_hint(distro, packages)`.
+
+#### Pre-flight Gate (run command)
+- `crashwise run` now invokes `Sentinel.check_health()` before
+  submitting the workflow. Critical checks (`runtime.docker`,
+  `build.clang`, `build.gcc`) must pass; failures abort the campaign
+  with actionable remediation hints instead of crashing inside Temporal.
+- New `--skip-preflight` flag for the dockerised worker / advanced users.
+
+#### Interactive Provisioner
+- `crashwise setup` is now interactive by default:
+  - Detects the distro and prints the pretty name.
+  - Confirms before each privileged action (`--yes` for non-interactive).
+  - Detects when the current user is not in the `docker` group and
+    offers to run `sudo usermod -aG docker $USER`, with a reminder
+    about logout/login or `newgrp docker`.
+  - Detects when the Docker daemon socket is down and offers to run
+    `sudo systemctl start docker`.
+
+#### Intelligence Loop (Coverage → Evolution)
+- `MainFuzzingWorkflow._run_evolution` now invokes the
+  `analyze_coverage_activity` to identify the *exact* `BlockerType`
+  (MAGIC_VALUE, LENGTH_CHECK, CHECKSUM, STATE_MACHINE, …) and the
+  source line gating coverage. The structured `CoverageBlocker` is
+  passed into `EvolveHarnessInput` — replacing the previous
+  `BlockerType.UNKNOWN` stub.
+- New `max_evolution_count: int` field on `FuzzingInput` (default 10)
+  prevents runaway LLM spend when the model keeps emitting the same
+  fallback template against a structural blocker.
+
+#### Documentation
+- New `docs/INSTALL.md` — Zero-Friction Install Guide for Arch and
+  Ubuntu with troubleshooting, AUR notes, and the source→destination
+  migration flow.
+- README badges, architecture diagram (now lists 18 activities), Key
+  Features, Quick Start, CLI Reference, Repository Layout, Roadmap,
+  and Validation Campaign sections updated to reflect Phase 21,
+  S6 hardening, and the Linux-Native finalisation.
+
+#### Tests
+- `tests/unit/test_real_execution.py` (new, 6 tests) — exercises the
+  real Docker fuzzing path via mocked daemon.
+- `tests/unit/test_cli.py` — added
+  `test_run_preflight_blocks_when_docker_missing`, updated existing
+  tests to pass `--skip-preflight`.
+- `tests/unit/test_execution.py` — updated mock sequences for the new
+  pre-flight `docker rm -f` invocation; updated
+  `test_docker_corpus_preservation_order` to filter post-`run`
+  lifecycle events.
+- `tests/unit/test_sentinel.py` — extended for distro detection,
+  per-distro package maps, AUR split, sudo prefix.
+- Test counts: **423 collected, 405 passing on the touched surface**
+  (up from 374 in 1.0.0-rc1).
+
+#### Mypy / Ruff
+- Mypy clean on every changed source file (the one remaining error in
+  `sentinel.py:681` is a pre-existing `redis.asyncio.close()` stub
+  issue).
+- Ruff lint clean on the diff (the 2 remaining F841 instances are in
+  pre-existing `check_service_*` functions).
+
+---
+
 ## [1.0.0-rc1] — 2026-05-02
 
 ### Repository Finalization

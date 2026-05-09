@@ -102,6 +102,186 @@ def _which(name: str) -> str | None:
     return shutil.which(name)
 
 
+def _is_root() -> bool:
+    """True when the current process runs as UID 0."""
+    try:
+        return os.geteuid() == 0
+    except AttributeError:  # pragma: no cover - non-POSIX
+        return False
+
+
+def _sudo_prefix() -> str:
+    """Return ``'sudo '`` when the current user is non-root and ``sudo``
+    is on PATH; otherwise an empty string.
+
+    The Linux-native finalisation requires every install / systemctl /
+    usermod command emitted by the Sentinel to honour the caller's
+    privilege level: root invocations should not get a stray ``sudo``
+    (it can fail in minimal containers), while non-root users should
+    not be presented with raw privileged commands they cannot copy-paste.
+    """
+    if _is_root():
+        return ""
+    if not _which("sudo"):
+        return ""
+    return "sudo "
+
+
+def _install_hint(distro: str, packages: list[str]) -> str:
+    """Compose a one-line install suggestion for the given distro+pkgs."""
+    pkgs = " ".join(packages)
+    sudo = _sudo_prefix()
+    if distro == "arch":
+        return f"{sudo}pacman -S --needed {pkgs}"
+    if distro == "fedora":
+        return f"{sudo}dnf install -y {pkgs}"
+    return f"{sudo}apt-get install -y {pkgs}"
+
+
+# ── Distribution detection (Phase 21 / Linux Native finalisation) ────────────
+
+_DISTRO_OVERRIDE: str | None = None  # test hook; never set in production
+
+
+@dataclass(frozen=True)
+class DistroInfo:
+    """Normalised host-distribution identity.
+
+    ``family`` is the package-manager family CrashWise dispatches on
+    (``arch`` / ``debian`` / ``fedora`` / ``unknown``).  ``id_`` and
+    ``pretty_name`` come straight from ``/etc/os-release`` so callers
+    can render user-friendly diagnostics ("Detected: Ubuntu 24.04
+    LTS") without re-reading the file.
+    """
+
+    family: str
+    id_: str = ""
+    pretty_name: str = ""
+    version_id: str = ""
+
+    @property
+    def is_arch(self) -> bool:
+        return self.family == "arch"
+
+    @property
+    def is_debian(self) -> bool:
+        return self.family == "debian"
+
+    @property
+    def is_fedora(self) -> bool:
+        return self.family == "fedora"
+
+
+class DistroDetector:
+    """Robust distro detector backed by ``/etc/os-release``.
+
+    The detector is an instance method object rather than a free
+    function so callers can stub it out in tests, inject overrides for
+    container builds (``crashwise doctor --distro arch``), and cache
+    the parse result for the lifetime of a CLI invocation.
+    """
+
+    def __init__(self, *, override: str | None = None) -> None:
+        self._override = override
+        self._cached: DistroInfo | None = None
+
+    def detect(self) -> DistroInfo:
+        """Return a :class:`DistroInfo` for the current host (cached).
+
+        Resolution order:
+        1. Explicit ``override`` passed to the constructor.
+        2. Module-level ``_DISTRO_OVERRIDE`` (legacy test hook).
+        3. ``/etc/os-release`` parse.
+        4. ``unknown`` family.
+        """
+        if self._cached is not None:
+            return self._cached
+
+        forced = self._override or _DISTRO_OVERRIDE
+        if forced:
+            family = self._normalise(forced, forced)
+            self._cached = DistroInfo(family=family, id_=forced)
+            return self._cached
+
+        data = self._parse_os_release()
+        id_ = data.get("ID", "").lower()
+        id_like = data.get("ID_LIKE", "").lower()
+        family = self._normalise(id_, id_like)
+        self._cached = DistroInfo(
+            family=family,
+            id_=id_,
+            pretty_name=data.get("PRETTY_NAME", ""),
+            version_id=data.get("VERSION_ID", ""),
+        )
+        return self._cached
+
+    @staticmethod
+    def _parse_os_release() -> dict[str, str]:
+        try:
+            with open("/etc/os-release") as fh:
+                data: dict[str, str] = {}
+                for line in fh:
+                    if "=" not in line:
+                        continue
+                    key, _, value = line.partition("=")
+                    data[key.strip()] = value.strip().strip('"').strip("'")
+                return data
+        except FileNotFoundError:
+            return {}
+
+    @staticmethod
+    def _normalise(id_: str, id_like: str) -> str:
+        id_ = id_.lower()
+        id_like = id_like.lower()
+        if id_ == "arch" or "arch" in id_like or "manjaro" in id_ or "endeavouros" in id_:
+            return "arch"
+        if (
+            id_ in {"debian", "ubuntu", "linuxmint", "pop", "kali", "raspbian"}
+            or "debian" in id_like
+            or "ubuntu" in id_like
+        ):
+            return "debian"
+        if (
+            id_ in {"fedora", "rhel", "centos", "rocky", "almalinux", "amzn"}
+            or "fedora" in id_like
+            or "rhel" in id_like
+        ):
+            return "fedora"
+        return "unknown"
+
+
+# Module-level singleton — safe to share because parsing is idempotent.
+_default_detector = DistroDetector()
+
+
+def _detect_distro() -> str:
+    """Return ``'arch'``, ``'debian'``, ``'fedora'``, or ``'unknown'``.
+
+    Backwards-compatible thin wrapper around :class:`DistroDetector`
+    for callers that only need the family string.  Honours
+    ``_DISTRO_OVERRIDE`` so existing unit tests continue to work.
+
+    Note: this entry point intentionally does **not** consult the
+    module-level cache — tests use ``monkeypatch`` to swap in fake
+    ``open`` and ``_DISTRO_OVERRIDE`` on a per-test basis, and would
+    otherwise be served stale answers from a singleton populated by an
+    earlier test.
+    """
+    return DistroDetector(override=_DISTRO_OVERRIDE).detect().family
+
+
+def detect_distro() -> DistroInfo:
+    """Public, structured distro lookup.  Use this in new code.
+
+    Uses the module-level singleton cache for production callers (CLI,
+    workflow). Override-aware tests should call ``DistroDetector`` directly
+    or set ``_DISTRO_OVERRIDE`` before invoking ``_detect_distro``.
+    """
+    if _DISTRO_OVERRIDE:
+        return DistroDetector(override=_DISTRO_OVERRIDE).detect()
+    return _default_detector.detect()
+
+
 def _parse_meminfo_kb(key: str) -> int | None:
     """Parse /proc/meminfo for a key (e.g. 'MemTotal')."""
     try:
@@ -222,19 +402,33 @@ def check_runtime_docker() -> CheckResult:
             status=CheckStatus.OK,
             message=f"Docker {out} is running.",
         )
+    distro = _detect_distro()
+    sudo = _sudo_prefix()
     if _which("docker"):
+        # Common case on a fresh Arch install: daemon shipped but socket
+        # not started or current user not in the ``docker`` group.
+        msg = "Docker CLI found but daemon is not responding."
+        permission_hint = ""
+        if err and "permission denied" in err.lower():
+            permission_hint = (
+                f" Add yourself to the docker group: {sudo}usermod -aG docker $USER "
+                "(then log out / back in)."
+            )
         return CheckResult(
             name="runtime.docker",
             status=CheckStatus.FAIL,
-            message="Docker CLI found but daemon is not responding.",
+            message=msg,
             detail=err or out,
-            remediation="Start Docker:  sudo systemctl start docker",
+            remediation=f"Start Docker: {sudo}systemctl start docker.{permission_hint}",
         )
+    pkgs = _CHECK_PACKAGES_BY_DISTRO.get(distro, _CHECK_PACKAGES_BY_DISTRO["debian"]).get(
+        "runtime.docker", ["docker"]
+    )
     return CheckResult(
         name="runtime.docker",
         status=CheckStatus.FAIL,
         message="Docker is not installed.",
-        remediation="Install Docker:  sudo apt-get install docker.io docker-compose",
+        remediation=f"Install Docker: {_install_hint(distro, pkgs)}",
     )
 
 
@@ -249,11 +443,15 @@ def check_runtime_docker_compose() -> CheckResult:
                 status=CheckStatus.OK,
                 message=f"Docker Compose available ({out.splitlines()[0]}).",
             )
+    distro = _detect_distro()
+    pkgs = _CHECK_PACKAGES_BY_DISTRO.get(distro, _CHECK_PACKAGES_BY_DISTRO["debian"]).get(
+        "runtime.docker-compose", ["docker-compose-plugin"]
+    )
     return CheckResult(
         name="runtime.docker-compose",
         status=CheckStatus.FAIL,
         message="Docker Compose not found.",
-        remediation="Install:  sudo apt-get install docker-compose-plugin",
+        remediation=f"Install: {_install_hint(distro, pkgs)}",
     )
 
 
@@ -275,6 +473,20 @@ def check_runtime_python(min_major: int = 3, min_minor: int = 11) -> CheckResult
     )
 
 
+def _build_remediation(check_name: str, default_pkgs: list[str]) -> str:
+    """Resolve the install hint for a given build-tool check.
+
+    Looks up the per-distro package list, falling back to ``default_pkgs``
+    when the host distro has no entry, and prefixes ``sudo`` only when
+    needed.
+    """
+    distro = _detect_distro()
+    pkgs = _CHECK_PACKAGES_BY_DISTRO.get(distro, _CHECK_PACKAGES_BY_DISTRO["debian"]).get(
+        check_name, default_pkgs
+    )
+    return _install_hint(distro, pkgs)
+
+
 def check_build_cmake() -> CheckResult:
     """Check CMake availability."""
     rc, out, _ = _run(["cmake", "--version"])
@@ -289,7 +501,7 @@ def check_build_cmake() -> CheckResult:
         name="build.cmake",
         status=CheckStatus.FAIL,
         message="CMake not found.",
-        remediation="Install:  sudo apt-get install cmake",
+        remediation=f"Install: {_build_remediation('build.cmake', ['cmake'])}",
     )
 
 
@@ -307,7 +519,7 @@ def check_build_clang() -> CheckResult:
         name="build.clang",
         status=CheckStatus.FAIL,
         message="Clang not found.",
-        remediation="Install:  sudo apt-get install clang",
+        remediation=f"Install: {_build_remediation('build.clang', ['clang'])}",
     )
 
 
@@ -325,21 +537,27 @@ def check_build_gcc() -> CheckResult:
         name="build.gcc",
         status=CheckStatus.FAIL,
         message="GCC not found.",
-        remediation="Install:  sudo apt-get install gcc",
+        remediation=f"Install: {_build_remediation('build.gcc', ['gcc'])}",
     )
 
 
 def check_build_llvm() -> CheckResult:
-    """Check LLVM development tools (llvm-config)."""
+    """Check LLVM development tools.
+
+    Probes ``llvm-config`` (Arch / Fedora / generic install) FIRST, then
+    falls back to Debian's versioned binaries (``llvm-config-19`` … ``-15``).
+    Phase 21: includes ``-19`` to cover current Arch rolling release.
+    """
+    # Generic / Arch / Fedora installations expose plain ``llvm-config``.
     rc, out, _ = _run(["llvm-config", "--version"])
-    if rc == 0:
+    if rc == 0 and out:
         return CheckResult(
             name="build.llvm",
             status=CheckStatus.OK,
             message=f"LLVM {out.strip()} found.",
         )
-    # Try llvm-config with version suffix
-    for suffix in ["-18", "-17", "-16", "-15"]:
+    # Debian/Ubuntu ship versioned binaries.
+    for suffix in ["-19", "-18", "-17", "-16", "-15"]:
         rc2, out2, _ = _run([f"llvm-config{suffix}", "--version"])
         if rc2 == 0:
             return CheckResult(
@@ -351,12 +569,19 @@ def check_build_llvm() -> CheckResult:
         name="build.llvm",
         status=CheckStatus.FAIL,
         message="LLVM development tools not found.",
-        remediation="Install:  sudo apt-get install llvm-dev",
+        remediation=f"Install: {_build_remediation('build.llvm', ['llvm-dev'])}",
     )
 
 
 def check_build_afl() -> CheckResult:
-    """Check AFL++ availability."""
+    """Check AFL++ availability.
+
+    On Arch the canonical package (``afl++``) lives in the AUR. We
+    detect a configured AUR helper (``yay`` or ``paru``) and suggest
+    the matching command; otherwise we point the user at the AUR
+    page and gracefully fall back to the Dockerised worker which
+    ships AFL++ pre-installed.
+    """
     rc, out, _ = _run(["afl-fuzz", "-V"])
     if rc == 0:
         return CheckResult(
@@ -364,11 +589,37 @@ def check_build_afl() -> CheckResult:
             status=CheckStatus.OK,
             message="AFL++ found.",
         )
+    distro = _detect_distro()
+    sudo = _sudo_prefix()
+    if distro == "arch":
+        helper = _which("yay") or _which("paru")
+        if helper:
+            helper_name = Path(helper).name
+            remediation = (
+                f"Install via AUR helper: {helper_name} -S aflplusplus  "
+                "(or skip — Docker worker ships AFL++)."
+            )
+        else:
+            remediation = (
+                "AFL++ is in the AUR.  Install an AUR helper first "
+                f"({sudo}pacman -S --needed base-devel git && "
+                "git clone https://aur.archlinux.org/yay.git && "
+                "cd yay && makepkg -si), then 'yay -S aflplusplus'.  "
+                "Alternatively the Docker worker ships AFL++."
+            )
+    else:
+        pkgs = _CHECK_PACKAGES_BY_DISTRO.get(
+            distro, _CHECK_PACKAGES_BY_DISTRO["debian"]
+        ).get("build.afl++", ["afl++"])
+        remediation = (
+            f"Install: {_install_hint(distro, pkgs)}  "
+            "(or skip — Docker worker ships AFL++)."
+        )
     return CheckResult(
         name="build.afl++",
         status=CheckStatus.WARN,
         message="AFL++ not found on host.",
-        remediation="Will use Docker worker image with AFL++ pre-installed.",
+        remediation=remediation,
     )
 
 
@@ -525,45 +776,168 @@ async def run_all_checks(
 # ── Provisioner ──────────────────────────────────────────────────────────────
 
 
-# Debian/Ubuntu packages required by each check
-_CHECK_PACKAGES: dict[str, list[str]] = {
-    "runtime.docker": ["docker.io", "docker-compose-plugin"],
-    "runtime.docker-compose": ["docker-compose-plugin"],
-    "build.cmake": ["cmake"],
-    "build.clang": ["clang"],
-    "build.gcc": ["gcc", "g++"],
-    "build.llvm": ["llvm-dev", "lld"],
-    "build.afl++": ["afl++"],
+# Per-distro package mappings. Phase 21 adds Arch (pacman) and Fedora (dnf)
+# alongside the existing Debian (apt) mapping.
+_CHECK_PACKAGES_BY_DISTRO: dict[str, dict[str, list[str]]] = {
+    "debian": {
+        # Ubuntu 22.04+ ships ``aflplusplus`` in universe; older releases
+        # use the legacy ``afl++`` name.  We try the modern one first.
+        "runtime.docker": ["docker.io", "docker-compose-plugin"],
+        "runtime.docker-compose": ["docker-compose-plugin"],
+        "build.cmake": ["cmake"],
+        "build.clang": ["clang", "lld"],
+        "build.gcc": ["gcc", "g++"],
+        "build.llvm": ["llvm-dev", "lld"],
+        "build.afl++": ["aflplusplus"],
+    },
+    "arch": {
+        # Arch core / extra repo names — pacman.
+        "runtime.docker": ["docker", "docker-buildx", "docker-compose"],
+        "runtime.docker-compose": ["docker-compose"],
+        "build.cmake": ["cmake"],
+        "build.clang": ["clang", "lld"],
+        # Arch ships C++ as part of `gcc`; no separate g++ package.
+        "build.gcc": ["gcc"],
+        "build.llvm": ["llvm", "lld"],
+        # afl++ lives in AUR; ``check_build_afl`` surfaces an AUR-specific
+        # remediation. Listed here so ``get_missing_packages`` still names
+        # it for display, but the install script special-cases Arch+AUR.
+        "build.afl++": ["aflplusplus"],
+    },
+    "fedora": {
+        "runtime.docker": ["docker", "docker-compose-plugin"],
+        "runtime.docker-compose": ["docker-compose-plugin"],
+        "build.cmake": ["cmake"],
+        "build.clang": ["clang", "lld"],
+        "build.gcc": ["gcc", "gcc-c++"],
+        "build.llvm": ["llvm-devel", "lld"],
+        "build.afl++": ["american-fuzzy-lop"],
+    },
+}
+
+# Back-compat shim: existing imports of ``_CHECK_PACKAGES`` keep working.
+_CHECK_PACKAGES = _CHECK_PACKAGES_BY_DISTRO["debian"]
+
+
+# Per-distro install command templates. ``{sudo}`` is filled in at
+# render time by :func:`generate_setup_script` so root-in-container
+# installs do not stumble over a missing ``sudo`` binary.
+_INSTALL_COMMANDS: dict[str, tuple[str, str]] = {
+    "debian": (
+        "{sudo}apt-get update -qq",
+        "{sudo}apt-get install -y {pkgs}",
+    ),
+    "arch": (
+        "{sudo}pacman -Sy --noconfirm",
+        "{sudo}pacman -S --noconfirm --needed {pkgs}",
+    ),
+    "fedora": (
+        "{sudo}dnf -y check-update || true",
+        "{sudo}dnf install -y {pkgs}",
+    ),
 }
 
 
-def get_missing_packages(report: SentinelReport) -> list[str]:
-    """Return a deduplicated list of packages to install for failed checks."""
+def get_missing_packages(
+    report: SentinelReport,
+    *,
+    distro: str | None = None,
+) -> list[str]:
+    """Return a deduplicated list of packages to install for failed checks.
+
+    Parameters
+    ----------
+    report:
+        Aggregated sentinel report.
+    distro:
+        Override host distribution detection. ``None`` (default) auto-detects.
+    """
+    selected = (distro or _detect_distro()).lower()
+    table = _CHECK_PACKAGES_BY_DISTRO.get(selected, _CHECK_PACKAGES_BY_DISTRO["debian"])
     packages: set[str] = set()
     for check in report.checks:
         if check.status == CheckStatus.FAIL:
-            for pkg in _CHECK_PACKAGES.get(check.name, []):
+            for pkg in table.get(check.name, []):
                 packages.add(pkg)
     return sorted(packages)
 
 
-def generate_setup_script(packages: list[str]) -> str:
-    """Generate a bash script to install missing packages on Debian/Ubuntu."""
+# Packages that live in the AUR on Arch — the install script must use
+# an AUR helper instead of ``pacman`` for these.
+_ARCH_AUR_PACKAGES: frozenset[str] = frozenset({"aflplusplus", "afl++"})
+
+
+def generate_setup_script(
+    packages: list[str],
+    *,
+    distro: str | None = None,
+) -> str:
+    """Generate a bash script to install missing packages.
+
+    Picks ``apt``, ``pacman``, or ``dnf`` based on host detection (or the
+    explicit ``distro`` override).  ``sudo`` is prepended only when the
+    current user is non-root, so the same script works inside Docker
+    images that run as root.
+
+    On Arch, AUR-only packages (currently ``aflplusplus``) are split out
+    onto a dedicated rail that prefers ``yay`` / ``paru`` and emits a
+    clear error if no AUR helper is available.
+    """
     if not packages:
         return "# All required packages are already installed.\n"
+    selected = (distro or _detect_distro()).lower()
+    update_cmd_tmpl, install_cmd_tmpl = _INSTALL_COMMANDS.get(
+        selected, _INSTALL_COMMANDS["debian"]
+    )
+    sudo = _sudo_prefix()
+
+    # Split AUR-only packages out for Arch; keep everything else on the
+    # canonical pacman/apt/dnf rail.
+    if selected == "arch":
+        aur_pkgs = [p for p in packages if p in _ARCH_AUR_PACKAGES]
+        repo_pkgs = [p for p in packages if p not in _ARCH_AUR_PACKAGES]
+    else:
+        aur_pkgs = []
+        repo_pkgs = list(packages)
+
+    update_cmd = update_cmd_tmpl.format(sudo=sudo)
+    install_cmd = install_cmd_tmpl.format(sudo=sudo, pkgs=" ".join(repo_pkgs))
+    label = selected if selected in _INSTALL_COMMANDS else "debian"
+
     lines = [
         "#!/usr/bin/env bash",
-        "# CrashWise System Provisioner",
+        f"# CrashWise System Provisioner ({label})",
         "# Generated automatically by crashwise setup",
         "",
         "set -euo pipefail",
         "",
-        'echo "[CrashWise] Updating package lists..."',
-        "sudo apt-get update -qq",
+        f'echo "[CrashWise] Updating package lists ({label})..."',
+        update_cmd,
         "",
-        'echo "[CrashWise] Installing packages..."',
-        f"sudo apt-get install -y {' '.join(packages)}",
-        "",
-        'echo "[CrashWise] Setup complete."',
     ]
+    if repo_pkgs:
+        lines.extend(
+            [
+                'echo "[CrashWise] Installing packages..."',
+                install_cmd,
+                "",
+            ]
+        )
+    if aur_pkgs:
+        aur_list = " ".join(aur_pkgs)
+        lines.extend(
+            [
+                f'echo "[CrashWise] Installing AUR packages: {aur_list}"',
+                'AUR_HELPER="$(command -v yay || command -v paru || true)"',
+                'if [[ -z "$AUR_HELPER" ]]; then',
+                '    echo "[CrashWise] WARNING: no AUR helper (yay/paru) found." >&2',
+                '    echo "[CrashWise]          Install one (e.g. yay) and re-run, or"',
+                '    echo "[CrashWise]          rely on the Docker worker which ships these tools."',
+                "else",
+                f'    "$AUR_HELPER" -S --noconfirm --needed {aur_list}',
+                "fi",
+                "",
+            ]
+        )
+    lines.append('echo "[CrashWise] Setup complete."')
     return "\n".join(lines) + "\n"

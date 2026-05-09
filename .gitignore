@@ -117,6 +117,12 @@ temporal-data/
 *_internal.md
 
 # Local runtime artifacts ─────────────────────────────────────────────────────
-crashwise.db          # SQLite DB created during local testing
-crashwise.yaml        # Generated manifest (created by crashwise init)
-targets/              # Local validation targets (cloned during campaigns)
+# crashwise.db    — SQLite DB created during local testing
+# crashwise.yaml  — Generated manifest (created by `crashwise init`)
+# targets/        — Local validation targets (cloned during campaigns)
+crashwise.db
+crashwise.yaml
+targets/
+
+# Build cache for hot-swapped harnesses (Phase 21 / S6 hardening) ─────────────
+build_cache/

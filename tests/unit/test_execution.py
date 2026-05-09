@@ -15,7 +15,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from crashwise.core.models import ExecutionBackend, FuzzJob
-from crashwise.execution.docker_manager import DockerManager
+from crashwise.execution.docker_manager import (
+    DockerManager,
+    parse_afl_fuzzer_stats,
+    parse_libfuzzer_log_tail,
+)
 from crashwise.execution.monitor import (
     DockerHealthChecker,
     HealthSnapshot,
@@ -46,10 +50,12 @@ def sample_job(tmp_path: Path) -> FuzzJob:
 @pytest.mark.asyncio
 async def test_docker_manager_start_success(sample_job: FuzzJob) -> None:
     with patch("asyncio.create_subprocess_exec") as mock_exec:
-        # First call: docker images (returns empty → needs pull).
-        # Second call: docker pull.
-        # Third call: docker run (returns container ID).
+        # First call: docker rm -f (B13 pre-flight; no-op on first run).
+        # Second call: docker images (returns empty → needs pull).
+        # Third call: docker pull.
+        # Fourth call: docker run (returns container ID).
         mock_exec.side_effect = [
+            _fake_proc(stdout=b"", returncode=1),  # pre-flight rm -f (no such container)
             _fake_proc(stdout=b""),  # images check
             _fake_proc(stdout=b"", returncode=0),  # pull
             _fake_proc(stdout=b"abc123\n"),  # run
@@ -63,17 +69,26 @@ async def test_docker_manager_start_success(sample_job: FuzzJob) -> None:
 
 @pytest.mark.asyncio
 async def test_docker_manager_stop(sample_job: FuzzJob) -> None:
+    """Phase 21 §1.3: stop() retains the container so docker cp can run.
+
+    Removal happens in cleanup(); stop alone must keep tracking the id.
+    """
     with patch("asyncio.create_subprocess_exec") as mock_exec:
         mock_exec.side_effect = [
+            _fake_proc(stdout=b"", returncode=1),  # pre-flight rm -f
             _fake_proc(stdout=b""),
             _fake_proc(stdout=b"", returncode=0),
             _fake_proc(stdout=b"abc123\n"),
             _fake_proc(stdout=b"", returncode=0),  # stop
+            _fake_proc(stdout=b"", returncode=0),  # cleanup -> docker rm -f
         ]
 
         mgr = DockerManager()
         await mgr.start(sample_job)
         await mgr.stop("test-job-001")
+        # Container is stopped but NOT removed — corpus still recoverable.
+        assert "test-job-001" in mgr._containers
+        await mgr.cleanup("test-job-001")
         assert "test-job-001" not in mgr._containers
 
 
@@ -81,6 +96,7 @@ async def test_docker_manager_stop(sample_job: FuzzJob) -> None:
 async def test_docker_manager_is_alive_true(sample_job: FuzzJob) -> None:
     with patch("asyncio.create_subprocess_exec") as mock_exec:
         mock_exec.side_effect = [
+            _fake_proc(stdout=b"", returncode=1),  # pre-flight rm -f
             _fake_proc(stdout=b""),
             _fake_proc(stdout=b"", returncode=0),
             _fake_proc(stdout=b"abc123\n"),
@@ -97,6 +113,7 @@ async def test_docker_manager_is_alive_true(sample_job: FuzzJob) -> None:
 async def test_docker_manager_logs(sample_job: FuzzJob) -> None:
     with patch("asyncio.create_subprocess_exec") as mock_exec:
         mock_exec.side_effect = [
+            _fake_proc(stdout=b"", returncode=1),  # pre-flight rm -f
             _fake_proc(stdout=b""),
             _fake_proc(stdout=b"", returncode=0),
             _fake_proc(stdout=b"abc123\n"),
@@ -277,6 +294,148 @@ async def test_qemu_health_checker(tmp_path: Path) -> None:
     snap = await checker()
     assert snap.alive is True
     assert snap.last_output_line == "last line"
+
+
+# ── Phase 21: --rm race fix + parser tests ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_docker_run_does_not_use_rm_flag(sample_job: FuzzJob) -> None:
+    """Phase 21 §1.3: --rm must be absent so docker cp can run after stop."""
+    captured: list[list[str]] = []
+
+    def _record(*args, **kwargs):  # type: ignore[no-untyped-def]
+        captured.append(list(args))
+        proc = MagicMock(spec=asyncio.subprocess.Process)
+        proc.returncode = 0
+        # First call (images query) returns empty so we proceed to pull+run.
+        if args[:2] == ("docker", "images"):
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+        elif args[:2] == ("docker", "pull"):
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+        else:
+            proc.communicate = AsyncMock(return_value=(b"abc123\n", b""))
+        return proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_record):
+        mgr = DockerManager()
+        await mgr.start(sample_job)
+
+    # Find the docker run invocation among the calls.
+    run_cmds = [c for c in captured if len(c) > 1 and c[1] == "run"]
+    assert run_cmds, "docker run was not invoked"
+    assert "--rm" not in run_cmds[0], (
+        f"--rm flag must NOT be present (Phase 21 §1.3 fix). Got: {run_cmds[0]}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_docker_cleanup_invokes_rm_force(sample_job: FuzzJob) -> None:
+    captured_argv: list[tuple[str, ...]] = []
+
+    def _record(*args, **kwargs):  # type: ignore[no-untyped-def]
+        captured_argv.append(args)
+        proc = MagicMock(spec=asyncio.subprocess.Process)
+        proc.returncode = 0
+        if args[:2] == ("docker", "images"):
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+        elif args[:2] == ("docker", "pull"):
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+        else:
+            proc.communicate = AsyncMock(return_value=(b"abc123\n", b""))
+        return proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_record):
+        mgr = DockerManager()
+        await mgr.start(sample_job)
+        await mgr.cleanup("test-job-001")
+
+    rm_calls = [c for c in captured_argv if len(c) > 1 and c[1] == "rm"]
+    assert rm_calls, "docker rm was not invoked"
+    assert "-f" in rm_calls[0]
+    assert "test-job-001" not in mgr._containers
+
+
+@pytest.mark.asyncio
+async def test_docker_corpus_preservation_order(sample_job: FuzzJob, tmp_path: Path) -> None:
+    """The harvest sequence must be: stop → cp → cleanup. Never rm before cp."""
+    order: list[str] = []
+
+    def _record(*args, **kwargs):  # type: ignore[no-untyped-def]
+        op = args[1] if len(args) > 1 else "?"
+        order.append(op)
+        proc = MagicMock(spec=asyncio.subprocess.Process)
+        proc.returncode = 0
+        if op == "images":
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+        elif op == "pull":
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+        elif op == "run":
+            proc.communicate = AsyncMock(return_value=(b"abc123\n", b""))
+        elif op == "cp":
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+        else:
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+        return proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_record):
+        mgr = DockerManager()
+        await mgr.start(sample_job)
+        await mgr.stop("test-job-001")
+        await mgr.preserve_corpus("test-job-001", tmp_path / "preserved")
+        await mgr.cleanup("test-job-001")
+
+    # B13: ``start`` now invokes a pre-flight ``docker rm -f`` against the
+    # name to clear any stale container before launching. We must look at
+    # only the lifecycle events that happen *after* ``run``.
+    try:
+        run_idx = order.index("run")
+    except ValueError:
+        run_idx = 0
+    post_run = order[run_idx + 1:]
+    lifecycle = [op for op in post_run if op in {"stop", "cp", "rm"}]
+    # First a stop, at least one cp, then exactly one rm.
+    assert lifecycle[0] == "stop"
+    assert "cp" in lifecycle
+    assert lifecycle[-1] == "rm"
+    # Critical: cp must precede rm (the §1.3 race condition fix).
+    cp_idx = lifecycle.index("cp")
+    rm_idx = lifecycle.index("rm")
+    assert cp_idx < rm_idx, "docker cp must run before docker rm"
+
+
+def test_parse_libfuzzer_log_tail_basic() -> None:
+    log = (
+        "INFO: Seed: 1234\n"
+        "#1\tINITED cov: 5 ft: 8 corp: 1/1b lim: 4 exec/s: 0 rss: 30Mb\n"
+        "#10000\tDONE  cov: 42 ft: 88 corp: 12/345b lim: 4096 exec/s: 2500 rss: 50Mb\n"
+    )
+    parsed = parse_libfuzzer_log_tail(log)
+    assert parsed["coverage"] == 42.0
+    assert parsed["features"] == 88.0
+    assert parsed["exec_per_sec"] == 2500.0
+    assert parsed["executions"] == 10000.0
+
+
+def test_parse_libfuzzer_log_tail_no_match() -> None:
+    assert parse_libfuzzer_log_tail("nothing here\n") == {}
+    assert parse_libfuzzer_log_tail("") == {}
+
+
+def test_parse_afl_fuzzer_stats_basic() -> None:
+    text = (
+        "execs_done        : 123456\n"
+        "execs_per_sec     : 4321.5\n"
+        "edges_found       : 87\n"
+        "stability         : 99.5%\n"
+        "saved_crashes     : 2\n"
+    )
+    parsed = parse_afl_fuzzer_stats(text)
+    assert parsed["executions"] == 123456.0
+    assert parsed["exec_per_sec"] == 4321.5
+    assert parsed["coverage"] == 87.0
+    assert parsed["stability"] == 99.5
+    assert parsed["crashes"] == 2.0
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

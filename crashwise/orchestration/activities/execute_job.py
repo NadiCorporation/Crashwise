@@ -79,7 +79,12 @@ async def _run_docker(job: FuzzJob) -> dict[str, object]:
         _container_id = await manager.start(job)
 
         # Start health monitor.
-        checker = DockerHealthChecker(manager, job.job_id, job.output_dir)
+        # B9: pass an explicit fuzzer hint so AFL campaigns are parsed from
+        # ``fuzzer_stats`` instead of the libFuzzer-only stdout regex.
+        fuzzer_hint = "afl" if "afl" in job.harness_path.name.lower() else "libfuzzer"
+        checker = DockerHealthChecker(
+            manager, job.job_id, job.output_dir, fuzzer=fuzzer_hint
+        )
         monitor = ResourceMonitor(
             job_id=job.job_id,
             check_fn=checker,  # type: ignore[arg-type]

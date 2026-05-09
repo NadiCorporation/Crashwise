@@ -25,6 +25,17 @@ _STALL_EXEC_PER_SEC: float = 10.0
 _STALL_STABILITY: float = 50.0
 _PLATEAU_THRESHOLD: int = 3  # iterations with < 1 % edge growth
 
+# B10 — instrumentation-failure / cold-start grace period.
+#
+# Iterations 0 and 1 may legitimately report ``edges_hit == 0`` because
+# AFL is still calibrating or libFuzzer hasn't emitted its first stats
+# line. From iteration ``_INSTRUMENTATION_GRACE_ITERATIONS`` onward we
+# treat zero coverage as a *failure of instrumentation* — the most
+# common silent failure mode for libjxl-class targets — and mark the
+# campaign STALLED so the workflow escalates to evolution / mutation
+# instead of declaring a healthy run.
+_INSTRUMENTATION_GRACE_ITERATIONS: int = 2
+
 
 def parse_afl_stats(stats_path: Path) -> CoverageReport:
     """Parse an AFL++ ``fuzzer_stats`` file into a :class:`CoverageReport`."""
@@ -119,6 +130,23 @@ def analyze_campaign(state: FuzzingCampaignState) -> FuzzingCampaignState:
     # Detect stall conditions.
     stall_reasons: list[str] = []
 
+    # 0. B10 — Zero-coverage past the warm-up window. This is *not* a
+    # \"healthy\" condition; it almost always means the harness was built
+    # without ``-fsanitize-coverage`` instrumentation, or the binary is
+    # the trivial fallback emitted by ``_apply_fallback`` (nodes.py).
+    # Surfacing this as STALLED forces the workflow to escalate to
+    # mutation / evolution instead of running blind for hours.
+    if (
+        last.edges_hit == 0
+        and state.iteration >= _INSTRUMENTATION_GRACE_ITERATIONS
+    ):
+        stall_reasons.append(
+            "Zero coverage edges observed after warm-up — fuzzer is not "
+            "instrumented or harness is a no-op (check "
+            "-fsanitize-coverage flags and verify harness exercises the "
+            "target)."
+        )
+
     # 1. Execution rate collapsed.
     if last.exec_per_sec < _STALL_EXEC_PER_SEC and last.total_execs > 1000:
         stall_reasons.append(
@@ -205,6 +233,15 @@ def _generate_mutation_hint(
             "  → SUGGESTION: Stability loss indicates non-determinism. "
             "Avoid threads, timers, or RNG in the harness. "
             "Use a fixed seed if the target requires initialisation."
+        )
+    if any("Zero coverage" in r for r in reasons):
+        lines.append(
+            "  → SUGGESTION: Confirm the target is built with "
+            "``-fsanitize-coverage=trace-pc-guard,trace-cmp`` AND that the "
+            "harness actually calls into target code. If the harness was "
+            "produced by the LLM evolution agent, it may have been "
+            "replaced with the deterministic fallback (no-op). Force a "
+            "re-evolution with an explicit BlockerType set."
         )
 
     lines.append(
