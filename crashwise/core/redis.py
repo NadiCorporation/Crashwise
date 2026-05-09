@@ -246,6 +246,41 @@ async def get_campaign_state(campaign_id: str) -> dict[str, Any] | None:
     return json.loads(raw)  # type: ignore[no-any-return]
 
 
+# ── MAB state persistence (Phase 21) ─────────────────────────────────────────
+
+
+async def save_mab_state(
+    campaign_id: str,
+    mab_state_json: str,
+    *,
+    ttl: int = 86_400,
+) -> None:
+    """Persist serialised MabState JSON for a campaign.
+
+    Phase 21: keeps the bandit posterior across activity boundaries so a
+    pivot decision in iteration N+1 can read the stats accumulated in N.
+    """
+    if not await _check_enabled():
+        return
+    pool = _get_pool()
+    key = f"crashwise:mab:{campaign_id}"
+    await pool.setex(key, ttl, mab_state_json)
+
+
+async def load_mab_state(campaign_id: str) -> str | None:
+    """Return the persisted MabState JSON or ``None`` if absent."""
+    if not await _check_enabled():
+        return None
+    pool = _get_pool()
+    key = f"crashwise:mab:{campaign_id}"
+    raw = await pool.get(key)
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="replace")
+    return str(raw)
+
+
 __all__ = [
     "incr_exec_counter",
     "get_exec_counter",
@@ -257,4 +292,6 @@ __all__ = [
     "list_active_workers",
     "set_campaign_state",
     "get_campaign_state",
+    "save_mab_state",
+    "load_mab_state",
 ]

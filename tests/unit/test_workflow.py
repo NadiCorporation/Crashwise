@@ -102,3 +102,45 @@ async def test_main_workflow_query_reflects_completion() -> None:
             await handle.result()
             stage = await handle.query("current_stage")
             assert stage == WorkflowStage.COMPLETED.value
+
+
+# ── Phase 21: MAB + Evolution wiring ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_main_workflow_with_mab_enabled_completes_cleanly() -> None:
+    """enable_mab=True must run pivot_strategy without breaking the loop.
+
+    Because the simulator never grows coverage, plateau detection always
+    yields ``False`` (first_cov == 0 short-circuit) — so no pivots fire.
+    The test validates the wiring is exception-free, not that pivots fire.
+    """
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=pydantic_data_converter,
+    ) as env:
+        task_queue = f"crashwise-test-{uuid.uuid4()}"
+        async with Worker(
+            env.client,
+            task_queue=task_queue,
+            workflows=[MainFuzzingWorkflow],
+            activities=ALL_ACTIVITIES,
+        ):
+            payload = FuzzingInput(
+                target_repo="https://github.com/example/target",  # type: ignore[arg-type]
+                fuzzer_type=FuzzerType.LIBFUZZER,
+                timeout_seconds=10,
+                max_iterations=2,
+                enable_mab=True,
+            )
+            handle = await env.client.start_workflow(
+                MainFuzzingWorkflow.run,
+                payload,
+                id=f"test-mab-{uuid.uuid4()}",
+                task_queue=task_queue,
+            )
+            result = await handle.result()
+            stage = await handle.query("current_stage")
+            pivots = await handle.query("pivot_count")
+            assert stage == WorkflowStage.COMPLETED.value
+            assert isinstance(pivots, int)
+            assert result.crash_found is False

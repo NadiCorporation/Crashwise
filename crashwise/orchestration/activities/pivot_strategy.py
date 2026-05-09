@@ -2,13 +2,14 @@
 # Copyright (c) 2026 CrashWise Contributors
 """``pivot_strategy`` activity — MAB-driven strategy switch for fuzz campaigns.
 
-Triggered periodically by the workflow (e.g. every 5 minutes) to evaluate
+Triggered periodically by the workflow (e.g. every iteration) to evaluate
 coverage growth and decide whether to pivot to a different fuzzing strategy.
 
-When a pivot is recommended, the activity:
-  1. Stops the current fuzzing container.
-  2. Preserves the corpus (copies seeds to a shared volume).
-  3. Returns the new arm configuration so the workflow can restart with it.
+Phase 21 wiring:
+  1. Loads the latest MabState from Redis (if persisted).
+  2. Evaluates the bandit + plateau detector.
+  3. Persists the updated MabState back to Redis so the next call sees
+     accumulated trial counts even across worker restarts.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from temporalio import activity
 
 from crashwise.agents.execution.strategist import evaluate_and_pivot as _evaluate_and_pivot
 from crashwise.core.logging import get_logger
-from crashwise.core.models import PivotStrategyInput, PivotStrategyOutput
+from crashwise.core.models import MabState, PivotStrategyInput, PivotStrategyOutput
 
 log = get_logger(__name__)
 
@@ -26,16 +27,10 @@ log = get_logger(__name__)
 async def pivot_strategy(payload: PivotStrategyInput) -> PivotStrategyOutput:
     """Evaluate MAB state and decide whether to pivot fuzzing strategy.
 
-    Parameters
-    ----------
-    payload:
-        Current campaign MAB state, coverage metrics, and elapsed time.
-
-    Returns
-    -------
-    PivotStrategyOutput with ``should_pivot``, ``new_arm_id``, and updated
-    ``mab_state``. If ``should_pivot`` is True, the workflow should stop the
-    current fuzzer and restart with the new arm.
+    Phase 21: the activity now reads ``MabState`` from Redis (when present)
+    and writes the updated state back. Workflow callers no longer need to
+    plumb the full state through every iteration — they pass an empty
+    state on first call and Redis carries it forward.
     """
     info = activity.info()
     log.info(
@@ -47,7 +42,14 @@ async def pivot_strategy(payload: PivotStrategyInput) -> PivotStrategyOutput:
         current_arm=payload.mab_state.current_arm_id,
     )
 
+    # Phase 21: try to hydrate from Redis; if found, the persisted state
+    # supersedes the (potentially stale) one shipped in the payload.
+    payload = await _hydrate_from_redis(payload)
+
     result = await _evaluate_and_pivot(payload)
+
+    # Persist the updated state for the next iteration's pivot decision.
+    await _persist_to_redis(payload.campaign_id, result.mab_state)
 
     if result.should_pivot:
         log.info(
@@ -66,6 +68,39 @@ async def pivot_strategy(payload: PivotStrategyInput) -> PivotStrategyOutput:
         )
 
     return result
+
+
+async def _hydrate_from_redis(payload: PivotStrategyInput) -> PivotStrategyInput:
+    """If MabState exists in Redis, prefer it over the payload's copy."""
+    try:
+        from crashwise.core.redis import load_mab_state
+
+        raw = await load_mab_state(payload.campaign_id)
+    except Exception as exc:  # Redis unreachable / disabled — fall through.
+        log.debug("pivot_strategy.redis_load_skipped", error=str(exc))
+        return payload
+    if not raw:
+        return payload
+    try:
+        loaded = MabState.model_validate_json(raw)
+    except Exception as exc:
+        log.warning("pivot_strategy.redis_state_invalid", error=str(exc))
+        return payload
+    # Preserve the arms shipped in the payload if Redis state has none
+    # (defensive: stale Redis entries from older versions).
+    if not loaded.arms and payload.mab_state.arms:
+        loaded.arms = payload.mab_state.arms
+    return payload.model_copy(update={"mab_state": loaded})
+
+
+async def _persist_to_redis(campaign_id: str, state: MabState) -> None:
+    """Save the updated MabState back to Redis for the next iteration."""
+    try:
+        from crashwise.core.redis import save_mab_state
+
+        await save_mab_state(campaign_id, state.model_dump_json())
+    except Exception as exc:
+        log.debug("pivot_strategy.redis_save_skipped", error=str(exc))
 
 
 __all__ = ["pivot_strategy"]

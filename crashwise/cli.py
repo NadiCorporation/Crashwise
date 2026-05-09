@@ -10,11 +10,13 @@ Commands
 * ``crashwise info``      — Print runtime configuration.
 * ``crashwise init``      — One-time database initialisation.
 * ``crashwise doctor``    — System health diagnostic.
-* ``crashwise setup``     — Auto-install missing build tools (Debian/Ubuntu).
+* ``crashwise setup``     — Auto-install missing build tools (Debian/Ubuntu/Arch/Fedora).
 * ``crashwise run``       — Submit a fuzzing workflow.
 * ``crashwise worker``    — Start a Temporal worker.
 * ``crashwise api``       — Launch the FastAPI management server.
 * ``crashwise dashboard`` — Launch the Streamlit intelligence dashboard.
+* ``crashwise signal``    — Send a God-Mode signal (force_pivot, inject_seed,
+                            pause_hunt, resume_hunt) to a live campaign.
 """
 
 from __future__ import annotations
@@ -219,60 +221,256 @@ def doctor(
 def setup(
     dry_run: bool = typer.Option(False, "--dry-run", help="Print script without running"),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write script to file"),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Non-interactive: assume 'yes' to all prompts (CI / scripted use).",
+    ),
 ) -> None:
-    """Auto-install missing build tools on Debian/Ubuntu.
+    """Auto-install missing dependencies for the current Linux distribution.
 
-    Runs ``apt-get`` commands to install packages identified by ``doctor``.
-    Use ``--dry-run`` to preview the script without executing it.
+    Detects the host distro from ``/etc/os-release`` and dispatches to
+    ``apt`` (Debian/Ubuntu), ``pacman`` (Arch), or ``dnf`` (Fedora). The
+    command is interactive by default — you will be asked to confirm
+    every privileged action (package install, ``usermod -aG docker``,
+    ``systemctl start docker``, …). Use ``--yes`` for unattended runs.
     """
     from crashwise.core.sentinel import (
+        detect_distro,
         generate_setup_script,
         get_missing_packages,
         run_all_checks,
     )
 
     configure_logging()
+    info_distro = detect_distro()
+    distro_label = info_distro.pretty_name or info_distro.id_ or info_distro.family
     console.print("[bold cyan]CrashWise Provisioner[/]")
-    console.print("Analysing system requirements...\n")
+    console.print(
+        f"  Distro: [green]{distro_label}[/]  (family: {info_distro.family})"
+    )
+    console.print("  Analysing system requirements...\n")
 
     report = asyncio.run(run_all_checks())
     missing = get_missing_packages(report)
 
     if not missing:
         console.print("[bold green]All required packages are already installed.[/]")
-        return
+    else:
+        script = generate_setup_script(missing)
 
-    script = generate_setup_script(missing)
+        if output:
+            output.write_text(script, encoding="utf-8")
+            console.print(f"[bold green]Setup script written to:[/] {output}")
+            if dry_run:
+                return
 
-    if output:
-        output.write_text(script, encoding="utf-8")
-        console.print(f"[bold green]Setup script written to:[/] {output}")
         if dry_run:
+            console.print("[bold]Generated setup script:[/]")
+            console.print(script)
             return
 
-    if dry_run:
-        console.print("[bold]Generated setup script:[/]")
-        console.print(script)
-        return
+        console.print(
+            f"[bold]Will install {len(missing)} packages:[/] "
+            f"{', '.join(missing)}"
+        )
+        if not yes and not typer.confirm("Proceed with installation?", default=True):
+            console.print("[yellow]Skipped package install.[/]")
+        else:
+            console.print("[dim]This may take a few minutes...[/]\n")
+            try:
+                proc = subprocess.run(
+                    ["bash", "-c", script],
+                    capture_output=False,
+                    text=True,
+                )
+                if proc.returncode == 0:
+                    console.print("\n[bold green]Package install complete.[/]")
+                else:
+                    console.print(
+                        f"\n[bold red]Package install failed (exit {proc.returncode}).[/]"
+                    )
+                    raise typer.Exit(code=proc.returncode)
+            except FileNotFoundError:
+                console.print(
+                    "[bold red]bash not found. Cannot execute setup script.[/]"
+                )
+                raise typer.Exit(code=1)
 
-    # Execute the script
-    console.print(f"[bold]Installing {len(missing)} packages:[/] {', '.join(missing)}")
-    console.print("[dim]This may take a few minutes...[/]\n")
+    # ── Post-install: docker group + daemon socket ────────────────────
+    _interactive_post_install(yes=yes)
+
+
+def _interactive_post_install(*, yes: bool) -> None:
+    """Surface the two most common post-install footguns and offer to fix them.
+
+    1. The current user is not in the ``docker`` group → ``docker run``
+       returns "permission denied" and CrashWise campaigns fail at the
+       first activity.  We offer to run ``sudo usermod -aG docker $USER``
+       and remind the user to log out / back in.
+
+    2. The Docker daemon socket is not responding → offer to start it
+       via ``systemctl start docker``.
+    """
+    import grp
+    import os
+    import shutil
+
+    # ── Docker group membership ──────────────────────────────────────
+    user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+    if user:
+        try:
+            docker_grp = grp.getgrnam("docker")
+            in_group = user in docker_grp.gr_mem or os.getgid() == docker_grp.gr_gid
+        except KeyError:
+            in_group = True  # No docker group at all → install will create it.
+        if not in_group:
+            console.print()
+            console.print(
+                f"[bold yellow]![/] User [bold]{user}[/] is not in the "
+                "[bold]docker[/] group. Without group membership, CrashWise "
+                "cannot launch fuzzing containers."
+            )
+            do_it = yes or typer.confirm(
+                f"Run 'sudo usermod -aG docker {user}' now?",
+                default=True,
+            )
+            if do_it:
+                if shutil.which("sudo") or os.geteuid() == 0:
+                    cmd = (
+                        ["usermod", "-aG", "docker", user]
+                        if os.geteuid() == 0
+                        else ["sudo", "usermod", "-aG", "docker", user]
+                    )
+                    proc = subprocess.run(cmd, capture_output=False)
+                    if proc.returncode == 0:
+                        console.print(
+                            "[bold green]✓[/] User added to docker group. "
+                            "[bold yellow]Log out and back in[/] for the change "
+                            "to take effect (or run 'newgrp docker' for the "
+                            "current shell)."
+                        )
+                    else:
+                        console.print(
+                            f"[bold red]usermod failed (exit {proc.returncode}).[/]"
+                        )
+                else:
+                    console.print(
+                        "[red]sudo is not available; run "
+                        f"'usermod -aG docker {user}' as root manually.[/]"
+                    )
+            else:
+                console.print("[yellow]Skipped docker-group fix.[/]")
+
+    # ── Docker daemon socket ─────────────────────────────────────────
+    if shutil.which("docker"):
+        probe = subprocess.run(
+            ["docker", "version", "--format", "{{.Server.Version}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if probe.returncode != 0:
+            console.print()
+            console.print(
+                "[bold yellow]![/] Docker daemon is not responding "
+                "(socket may be down)."
+            )
+            do_it = yes or typer.confirm(
+                "Run 'sudo systemctl start docker' now?",
+                default=True,
+            )
+            if do_it:
+                cmd = (
+                    ["systemctl", "start", "docker"]
+                    if os.geteuid() == 0
+                    else ["sudo", "systemctl", "start", "docker"]
+                )
+                proc = subprocess.run(cmd, capture_output=False)
+                if proc.returncode == 0:
+                    console.print("[bold green]✓[/] Docker daemon started.")
+                else:
+                    console.print(
+                        f"[bold red]systemctl start docker failed (exit {proc.returncode}).[/]"
+                    )
+            else:
+                console.print("[yellow]Skipped daemon start.[/]")
+
+    console.print("\n[bold green]Setup finished.[/]  Run [bold]crashwise doctor[/] to verify.")
+
+
+# ── Pre-flight gate (T4) ──────────────────────────────────────────────────────
+
+
+_REQUIRED_CHECK_NAMES: tuple[str, ...] = (
+    "runtime.docker",
+    "build.clang",
+    "build.gcc",
+)
+
+
+def _run_preflight_or_exit() -> None:
+    """Refuse to launch a campaign when critical dependencies are missing.
+
+    Runs the Sentinel and inspects the subset of checks that absolutely
+    must pass before any fuzzing activity is submitted to Temporal:
+
+    * ``runtime.docker``  — without a working Docker daemon, every fuzz
+      iteration's containerised execution will fail.
+    * ``build.clang``     — the harness compiler.
+    * ``build.gcc``       — used by the fallback compile path and by
+      many target build systems.
+
+    All other Sentinel checks (LLVM dev libs, AFL++, Temporal/Redis/LLM
+    services, …) emit warnings via ``crashwise doctor`` but do not block
+    a campaign; they have well-defined fallbacks (Docker worker,
+    libFuzzer, mock LLM provider, etc.).
+    """
+    from crashwise.core.sentinel import (
+        CheckStatus,
+        detect_distro,
+        run_all_checks,
+    )
+
+    console.print("[bold cyan]Pre-flight check (Sentinel)[/]  ", end="")
+    distro_info = detect_distro()
+    distro_label = (
+        distro_info.pretty_name or distro_info.id_ or distro_info.family
+    )
+    console.print(f"[dim]({distro_label})[/]")
 
     try:
-        proc = subprocess.run(
-            ["bash", "-c", script],
-            capture_output=False,
-            text=True,
+        report = asyncio.run(run_all_checks())
+    except Exception as exc:  # broad-except — never trust the system check itself
+        console.print(
+            f"[bold red]Pre-flight check failed to run:[/] {exc}\n"
+            "[dim]Pass --skip-preflight to bypass at your own risk.[/]"
         )
-        if proc.returncode == 0:
-            console.print("\n[bold green]Setup complete![/]")
-        else:
-            console.print(f"\n[bold red]Setup failed with exit code {proc.returncode}.[/]")
-            raise typer.Exit(code=proc.returncode)
-    except FileNotFoundError:
-        console.print("[bold red]bash not found. Cannot execute setup script.[/]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
+
+    blockers = [
+        c
+        for c in report.checks
+        if c.name in _REQUIRED_CHECK_NAMES and c.status == CheckStatus.FAIL
+    ]
+    if not blockers:
+        console.print("[bold green]✓ Pre-flight passed.[/]\n")
+        return
+
+    console.print("[bold red]✗ Pre-flight failed — campaign refused.[/]\n")
+    for c in blockers:
+        console.print(f"  [red]✗[/] [bold]{c.name}[/]: {c.message}")
+        if c.detail:
+            console.print(f"      [dim]{c.detail}[/]")
+        if c.remediation:
+            console.print(f"      [dim]→ {c.remediation}[/]")
+    console.print(
+        "\n[dim]Run [bold]crashwise doctor[/] for the full report, "
+        "or [bold]crashwise setup[/] to install missing dependencies. "
+        "Override with --skip-preflight at your own risk.[/]"
+    )
+    raise typer.Exit(code=1)
 
 
 # ── Core commands ────────────────────────────────────────────────────────────
@@ -290,13 +488,34 @@ def run(
     namespace: str | None = typer.Option(None, "--namespace"),
     task_queue: str | None = typer.Option(None, "--task-queue"),
     manifest: Path | None = typer.Option(None, "--manifest", "-m", help="Path to crashwise.yaml"),
+    skip_preflight: bool = typer.Option(
+        False,
+        "--skip-preflight",
+        help=(
+            "Skip the Sentinel pre-flight check. NOT recommended — only "
+            "use when you know the host is configured (e.g. inside the "
+            "Dockerised worker)."
+        ),
+    ),
 ) -> None:
     """Submit a :class:`MainFuzzingWorkflow` and print the result.
 
     If ``target_repo`` is omitted, CrashWise searches for ``crashwise.yaml``
     in the current directory and uses it as the configuration source.
+
+    Pre-flight gate (T4)
+    --------------------
+    Before any workflow is submitted, the Sentinel runs a fast subset of
+    its checks (Docker daemon, Clang, GCC). If any of these critical
+    dependencies is missing, the campaign is refused with an actionable
+    remediation hint instead of crashing five minutes later inside a
+    Temporal activity. Use ``--skip-preflight`` to override.
     """
     configure_logging()
+
+    # ── Pre-flight gate ───────────────────────────────────────────────
+    if not skip_preflight:
+        _run_preflight_or_exit()
 
     # Zero-config: load from manifest if target_repo not provided.
     if target_repo is None:
@@ -424,6 +643,112 @@ def dashboard(
         "--browser.gatherUsageStats", "false",
     ]
     subprocess.run(cmd, env=env, check=False)
+
+
+@app.command()
+def signal(
+    workflow_id: str = typer.Argument(..., help="Temporal workflow ID of the live campaign"),
+    signal_type: str = typer.Argument(
+        ...,
+        help="One of: force_pivot | inject_seed | pause_hunt | resume_hunt",
+    ),
+    data: str = typer.Option(
+        "",
+        "--data",
+        "-d",
+        help=(
+            "Signal payload. force_pivot: free-text reason. "
+            "inject_seed: 'filename=PATH' (file is read and base64-encoded). "
+            "pause_hunt / resume_hunt: ignored."
+        ),
+    ),
+    host: str | None = typer.Option(None, "--host"),
+    namespace: str | None = typer.Option(None, "--namespace"),
+) -> None:
+    """Send a God-Mode signal to a running campaign workflow.
+
+    Examples
+    --------
+    \b
+    crashwise signal crashwise-abc123 force_pivot --data "JXL plateau"
+    crashwise signal crashwise-abc123 inject_seed --data "filename=/tmp/poc.jxl"
+    crashwise signal crashwise-abc123 pause_hunt
+    crashwise signal crashwise-abc123 resume_hunt
+    """
+    configure_logging()
+    from crashwise.orchestration.client import connect
+
+    valid = {"force_pivot", "inject_seed", "pause_hunt", "resume_hunt"}
+    if signal_type not in valid:
+        console.print(
+            f"[bold red]Unknown signal type:[/] {signal_type}. "
+            f"Valid: {', '.join(sorted(valid))}"
+        )
+        raise typer.Exit(code=2)
+
+    async def _send() -> None:
+        try:
+            client = await connect(host=host, namespace=namespace)
+        except TemporalConnectionError as exc:
+            console.print(f"[bold red]Temporal connection failed:[/] {exc}")
+            raise typer.Exit(code=1) from exc
+
+        handle = client.get_workflow_handle(workflow_id)
+
+        if signal_type == "force_pivot":
+            reason = data or "operator request"
+            await handle.signal("force_pivot", reason)
+            console.print(
+                f"[bold green]Signal sent:[/] force_pivot — reason={reason!r}"
+            )
+        elif signal_type == "inject_seed":
+            # Parse ``filename=PATH`` (the only supported form for now).
+            if not data.startswith("filename="):
+                console.print(
+                    "[bold red]inject_seed requires --data 'filename=PATH'[/]"
+                )
+                raise typer.Exit(code=2)
+            seed_path = Path(data.removeprefix("filename=")).expanduser().resolve()
+            if not seed_path.is_file():
+                console.print(f"[bold red]Seed file not found:[/] {seed_path}")
+                raise typer.Exit(code=2)
+            import base64
+
+            raw = seed_path.read_bytes()
+            payload = {
+                "filename": seed_path.name,
+                "data_b64": base64.b64encode(raw).decode("ascii"),
+            }
+            await handle.signal("inject_seed", payload)
+            console.print(
+                f"[bold green]Signal sent:[/] inject_seed — "
+                f"file={seed_path.name} ({len(raw)} bytes)"
+            )
+        elif signal_type == "pause_hunt":
+            await handle.signal("pause_hunt", True)
+            console.print("[bold green]Signal sent:[/] pause_hunt — campaign will pause")
+        else:  # resume_hunt
+            await handle.signal("pause_hunt", False)
+            console.print("[bold green]Signal sent:[/] resume_hunt — campaign will resume")
+
+        # Best-effort: read back operator notes via query so the user sees
+        # the workflow has acknowledged the signal.
+        try:
+            notes = await handle.query("operator_notes")
+            if notes:
+                console.print("[dim]Recent operator notes:[/]")
+                for n in notes[-5:]:
+                    console.print(f"  • {n}")
+        except Exception as exc:  # broad-except — diagnostic only
+            log.debug("signal.query_skipped", error=str(exc))
+
+    try:
+        asyncio.run(_send())
+    except typer.Exit:
+        raise
+    except Exception as exc:  # broad-except
+        console.print(f"[bold red]Signal delivery failed:[/] {exc}")
+        raise typer.Exit(code=1) from exc
 
 
 @app.command()

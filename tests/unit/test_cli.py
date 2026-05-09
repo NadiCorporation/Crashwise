@@ -68,6 +68,11 @@ def test_init_force_recreate() -> None:
 
 
 def test_run_submits_workflow() -> None:
+    """The ``run`` command submits a MainFuzzingWorkflow.
+
+    Pre-flight is skipped via ``--skip-preflight`` so this test does not
+    depend on Docker / clang / gcc being installed on the CI host.
+    """
     mock_result = MagicMock()
     mock_result.model_dump_json.return_value = '{"status": "ok"}'
 
@@ -79,6 +84,7 @@ def test_run_submits_workflow() -> None:
             "--timeout", "120",
             "--branch", "main",
             "--sanitizers", "address",
+            "--skip-preflight",
         ])
         assert result.exit_code == 0
         assert "Submitting MainFuzzingWorkflow" in result.output
@@ -90,9 +96,54 @@ def test_run_temporal_connection_error() -> None:
     from crashwise.orchestration.client import TemporalConnectionError
 
     with patch("crashwise.cli.execute_main_workflow", new_callable=AsyncMock, side_effect=TemporalConnectionError("down")):
-        result = runner.invoke(app, ["run", "https://github.com/example/target"])
+        result = runner.invoke(app, [
+            "run",
+            "https://github.com/example/target",
+            "--skip-preflight",
+        ])
         assert result.exit_code == 1
         assert "Temporal connection failed" in result.output
+
+
+def test_run_preflight_blocks_when_docker_missing() -> None:
+    """T4: the ``run`` command must refuse to submit when a critical
+    dependency (Docker / Clang / GCC) is missing, rather than crashing
+    inside Temporal five minutes later.
+    """
+    from crashwise.core.sentinel import (
+        CheckResult,
+        CheckStatus,
+        SentinelReport,
+    )
+
+    fake_report = SentinelReport(
+        host="testhost",
+        platform="Linux",
+        checks=[
+            CheckResult(
+                "runtime.docker",
+                CheckStatus.FAIL,
+                "Docker is not installed.",
+                remediation="Install: sudo pacman -S docker",
+            ),
+            CheckResult("build.clang", CheckStatus.OK, "Clang found."),
+            CheckResult("build.gcc", CheckStatus.OK, "GCC found."),
+        ],
+    )
+
+    with patch(
+        "crashwise.core.sentinel.run_all_checks",
+        new_callable=AsyncMock,
+        return_value=fake_report,
+    ), patch(
+        "crashwise.cli.execute_main_workflow", new_callable=AsyncMock
+    ) as mock_exec:
+        result = runner.invoke(app, ["run", "https://github.com/example/target"])
+        assert result.exit_code == 1
+        assert "Pre-flight failed" in result.output
+        assert "runtime.docker" in result.output
+        # Critical: the workflow must NOT have been submitted.
+        mock_exec.assert_not_called()
 
 
 # ── worker command ───────────────────────────────────────────────────────────

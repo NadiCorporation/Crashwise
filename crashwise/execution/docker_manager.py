@@ -13,6 +13,8 @@ Requires the Docker daemon to be running and the user to be in the
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,91 @@ log = get_logger(__name__)
 # Well-known fuzzer images.
 _AFL_IMAGE = "aflplusplus/aflplusplus:latest"
 _LIBFUZZER_IMAGE = "gcr.io/oss-fuzz-base/libfuzzer-runner:latest"
+
+
+# ── libFuzzer / AFL stdout parser (Phase 21) ────────────────────────────────
+
+# libFuzzer stats line:
+#   #12345  DONE  cov: 42 ft: 88 corp: 12/345b lim: 4096 exec/s: 2500 rss: 12Mb
+_LIBFUZZER_STATS_RE = re.compile(
+    r"#(?P<execs>\d+).*?cov:\s+(?P<cov>\d+).*?ft:\s+(?P<ft>\d+).*?exec/s:\s+(?P<rate>[\d.]+k?)"
+)
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI colour / cursor escape sequences from ``text``."""
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
+def _parse_rate(raw: str) -> float:
+    """Parse libFuzzer's ``exec/s`` field, which may be int, float, or
+    ``Nk`` for thousands.
+    """
+    raw = raw.strip()
+    if not raw:
+        return 0.0
+    if raw.endswith("k"):
+        try:
+            return float(raw[:-1]) * 1000.0
+        except ValueError:
+            return 0.0
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.0
+
+
+def parse_libfuzzer_log_tail(text: str) -> dict[str, float]:
+    """Parse the most recent libFuzzer stats line in ``text``.
+
+    Returns a dict with keys ``executions``, ``coverage``, ``features`` and
+    ``exec_per_sec``. Returns ``{}`` when no stats line is present.
+    """
+    if not text:
+        return {}
+    cleaned = _strip_ansi(text)
+    for line in reversed(cleaned.splitlines()):
+        m = _LIBFUZZER_STATS_RE.search(line)
+        if m:
+            return {
+                "executions": float(m["execs"]),
+                "coverage": float(m["cov"]),
+                "features": float(m["ft"]),
+                "exec_per_sec": _parse_rate(m["rate"]),
+            }
+    return {}
+
+
+def parse_afl_fuzzer_stats(stats_text: str) -> dict[str, float]:
+    """Parse AFL++ ``fuzzer_stats`` ``key : value`` text.
+
+    Returns a dict with the keys CrashWise consumes: ``executions``,
+    ``exec_per_sec``, ``coverage`` (edges_found), ``stability``, ``crashes``.
+    Missing fields are simply absent from the result (no exceptions).
+    """
+    out: dict[str, float] = {}
+    for line in _strip_ansi(stats_text).splitlines():
+        if ":" not in line:
+            continue
+        k, _, v = line.partition(":")
+        key = k.strip()
+        val = v.strip().split()[0] if v.strip() else ""
+        try:
+            num = float(val.rstrip("%").replace(",", ""))
+        except ValueError:
+            continue
+        if key == "execs_done":
+            out["executions"] = num
+        elif key == "execs_per_sec":
+            out["exec_per_sec"] = num
+        elif key == "edges_found":
+            out["coverage"] = num
+        elif key == "stability":
+            out["stability"] = num
+        elif key in {"saved_crashes", "unique_crashes"}:
+            out["crashes"] = max(out.get("crashes", 0.0), num)
+    return out
 
 
 def _resolve_image(harness_path: Path) -> str:
@@ -48,7 +135,23 @@ class DockerManager:
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
     async def start(self, job: FuzzJob) -> str:
-        """Start a fuzzing container and return the container ID."""
+        """Start a fuzzing container and return the container ID.
+
+        Hardened by the Vanguard audit (B3):
+
+        * ``--network none``   — fuzzer cannot reach the host or the public
+          internet.  Untrusted harnesses + attacker-controlled corpora must
+          never have egress.
+        * ``--read-only``      — container rootfs is immutable.  All writable
+          surfaces are explicit (``/tmp``, ``/dev/shm``, ``/corpus``, ``/out``).
+        * ``--tmpfs`` mounts   — give the fuzzer a fast, size-capped scratch
+          area without giving it the rootfs.
+        * ``SYS_PTRACE``       — granted ONLY to AFL forkserver containers;
+          libFuzzer doesn't need it.
+        * Pre-flight ``docker rm -f``  — kills any stale container with the
+          same name so an activity retry never collides with a zombie from
+          a previous worker crash (B13).
+        """
         if not await self._docker_available():
             raise RuntimeError("docker daemon not reachable")
 
@@ -59,14 +162,33 @@ class DockerManager:
         job.output_dir.mkdir(parents=True, exist_ok=True)
         job.corpus_dir.mkdir(parents=True, exist_ok=True)
 
+        # B13: defensively remove any stale container with the same name
+        # before starting (Temporal activity retries reuse job_id; a worker
+        # crash between start() and cleanup() leaves the prior container
+        # around and ``docker run`` would otherwise fail with "name in use").
+        container_name = f"crashwise-{job.job_id}"
+        await self._force_remove_by_name(container_name)
+
+        is_afl = "afl" in image.lower()
+
         # Build docker run command.
+        # Phase 21 §1.3 fix: ``--rm`` is REMOVED. The container must outlive
+        # ``docker stop`` so we can ``docker cp`` the corpus and crash
+        # artefacts before issuing ``docker rm`` via ``cleanup()``.
         cmd: list[str] = [
             "docker",
             "run",
             "-d",
-            "--rm",
             "--name",
-            f"crashwise-{job.job_id}",
+            container_name,
+            # B3 — sandbox hardening.
+            "--network",
+            "none",
+            "--read-only",
+            "--tmpfs",
+            "/tmp:rw,size=512m,mode=1777",
+            "--tmpfs",
+            "/dev/shm:rw,size=512m,mode=1777",
             "--cpus",
             str(job.cpu_limit),
             "--memory",
@@ -77,21 +199,30 @@ class DockerManager:
             "no-new-privileges:true",
             "--cap-drop",
             "ALL",
-            "--cap-add",
-            "SYS_PTRACE",  # Required for AFL forkserver.
-            "-v",
-            f"{job.harness_path.parent}:/work:ro",
-            "-v",
-            f"{job.corpus_dir}:/corpus:rw",
-            "-v",
-            f"{job.output_dir}:/out:rw",
         ]
+        # AFL forkserver needs SYS_PTRACE; libFuzzer does not.
+        if is_afl:
+            cmd.extend(["--cap-add", "SYS_PTRACE"])
+        cmd.extend(
+            [
+                "-v",
+                f"{job.harness_path.parent}:/work:ro",
+                "-v",
+                f"{job.corpus_dir}:/corpus:rw",
+                "-v",
+                f"{job.output_dir}:/out:rw",
+            ]
+        )
         for key, val in job.env_vars.items():
             cmd.extend(["-e", f"{key}={val}"])
 
         # Entrypoint: run the harness.
         harness_in_container = f"/work/{job.harness_path.name}"
-        if "afl" in image.lower():
+        if is_afl:
+            # AFL emits ANSI colour by default; disable so log parsers don't
+            # have to strip escape sequences. Insert before the image so it
+            # is interpreted as a docker run flag, not an afl-fuzz arg.
+            cmd.extend(["-e", "AFL_NO_UI=1", "-e", "AFL_SKIP_BIN_CHECK=1"])
             cmd.extend(
                 [
                     image,
@@ -139,8 +270,14 @@ class DockerManager:
         return container_id
 
     async def stop(self, job_id: str, *, timeout: float = 30.0) -> None:
-        """Gracefully stop a container."""
-        container_id = self._containers.pop(job_id, None)
+        """Gracefully stop a container WITHOUT removing it.
+
+        Phase 21 §1.3: stop must not pop ``self._containers`` because
+        callers (e.g. :meth:`preserve_corpus`) need to address the same
+        container after it has stopped but before it is removed. Use
+        :meth:`cleanup` to finally delete the container.
+        """
+        container_id = self._containers.get(job_id)
         if not container_id:
             log.warning("docker.stop.unknown_job", job_id=job_id)
             return
@@ -162,7 +299,7 @@ class DockerManager:
                 job_id=job_id,
                 error=stderr.decode("utf-8", errors="replace"),
             )
-            # Force kill.
+            # Force kill — but still keep the container around for cleanup().
             await asyncio.create_subprocess_exec(
                 "docker",
                 "kill",
@@ -170,6 +307,62 @@ class DockerManager:
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
+
+    async def wait(self, job_id: str, *, timeout: float | None = None) -> int:
+        """Block until the container exits; return its exit code.
+
+        Returns ``-1`` on timeout or when the job is unknown. Used by the
+        execution path to detect whether the fuzzer terminated naturally
+        (e.g. found a crash) vs being externally stopped.
+        """
+        container_id = self._containers.get(job_id)
+        if not container_id:
+            return -1
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "wait",
+            container_id,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            if timeout is not None:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            else:
+                stdout, _ = await proc.communicate()
+        except asyncio.TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            return -1
+        try:
+            return int(stdout.decode("utf-8", errors="replace").strip())
+        except ValueError:
+            return -1
+
+    async def cleanup(self, job_id: str) -> None:
+        """Remove the container; idempotent.
+
+        Phase 21 §1.3: this MUST be called AFTER any
+        :meth:`preserve_corpus` / ``docker cp`` operations. Calling cleanup
+        before harvesting the corpus loses every seed the fuzzer found.
+        """
+        container_id = self._containers.pop(job_id, None)
+        if not container_id:
+            return
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "rm",
+            "-f",
+            container_id,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.communicate()
+        log.info(
+            "docker.cleanup",
+            job_id=job_id,
+            container_id=container_id[:12],
+        )
 
     # ── Phase 17: MAB pivot support ──────────────────────────────────────────
 
@@ -319,6 +512,24 @@ class DockerManager:
     async def _docker_available(self) -> bool:
         return shutil.which("docker") is not None
 
+    async def _force_remove_by_name(self, container_name: str) -> None:
+        """Remove a container by name; swallow errors when none exists.
+
+        Used as a pre-flight before ``docker run`` so that a Temporal
+        activity retry (which reuses ``job_id`` and therefore the
+        container name) cannot collide with a zombie left by a prior
+        worker crash.
+        """
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "rm",
+            "-f",
+            container_name,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.communicate()
+
     async def _ensure_image(self, image: str) -> None:
         proc = await asyncio.create_subprocess_exec(
             "docker",
@@ -346,4 +557,8 @@ class DockerManager:
             )
 
 
-__all__ = ["DockerManager"]
+__all__ = [
+    "DockerManager",
+    "parse_libfuzzer_log_tail",
+    "parse_afl_fuzzer_stats",
+]
