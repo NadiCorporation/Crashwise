@@ -144,15 +144,17 @@ This will:
 
 1. Detect Ubuntu from `/etc/os-release`.
 2. Install **`docker.io`, `docker-compose-plugin`, `cmake`, `clang`,
-   `lld`, `gcc`, `g++`, `llvm-dev`, `aflplusplus`** via
+   `lld`, `gcc`, `g++`, `llvm-dev`, `afl++`** via
    `sudo apt-get install -y`.
 3. Offer to add you to the `docker` group with `sudo usermod -aG docker
    $USER`.
 4. Offer to start the Docker daemon with `sudo systemctl start docker`
    if it's down.
 
-> ℹ️ On Ubuntu, AFL++ is in `universe`. If `apt` complains about
-> `aflplusplus` being unavailable, run
+> ℹ️ On Ubuntu, the AFL++ binary package is named **`afl++`** (note the
+> two plus signs — the *source* package is `aflplusplus` but
+> `apt install` takes the binary name).  AFL++ lives in the `universe`
+> component; if `apt` reports "Unable to locate package", run
 > `sudo add-apt-repository universe && sudo apt-get update` and re-run
 > `crashwise setup`.
 
@@ -381,7 +383,17 @@ This is a **warning**, not a failure. The Docker worker images ship
 AFL++ pre-installed. If you want a host-native install:
 
 * **Arch:** `yay -S aflplusplus` (AUR).
-* **Ubuntu 22.04+:** `sudo apt-get install aflplusplus`.
+* **Ubuntu 22.04+:** `sudo apt-get install afl++` *(note: the binary
+  package is `afl++` with two plus signs, NOT `aflplusplus` — the
+  latter is the source package name and `apt install aflplusplus`
+  fails with "Unable to locate package")*.
+
+> ℹ️ If `crashwise doctor` keeps reporting "AFL++ not found" even
+> after a successful install, you may be hitting an older revision of
+> CrashWise that probed AFL++ with `afl-fuzz -V` (the fuzz-duration
+> flag, which exits 1).  `git pull && pipx reinstall crashwise` to
+> get the corrected detector that uses `which afl-fuzz` plus an
+> `-h` banner parse.
 
 ### "Pre-flight failed — campaign refused"
 

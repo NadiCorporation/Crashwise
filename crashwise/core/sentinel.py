@@ -764,18 +764,63 @@ def check_build_llvm() -> CheckResult:
 def check_build_afl() -> CheckResult:
     """Check AFL++ availability.
 
-    On Arch the canonical package (``afl++``) lives in the AUR. We
-    detect a configured AUR helper (``yay`` or ``paru``) and suggest
+    On Arch the canonical package (``aflplusplus``) lives in the AUR.
+    We detect a configured AUR helper (``yay`` or ``paru``) and suggest
     the matching command; otherwise we point the user at the AUR
     page and gracefully fall back to the Dockerised worker which
     ships AFL++ pre-installed.
+
+    Note on detection: AFL++ has no ``--version`` flag.  ``-V`` is the
+    fuzz-duration option (requires a seconds argument) and exits 1
+    when called without one — using it for detection (the original
+    behaviour) reported "not found" even when AFL++ was correctly
+    installed.  We use ``shutil.which`` for presence and a banner
+    parse via ``-h`` (which exits 1 but prints the version line) to
+    extract the actual version.
     """
-    rc, out, _ = _run(["afl-fuzz", "-V"])
-    if rc == 0:
+    afl_path = _which("afl-fuzz")
+    if afl_path:
+        # ``afl-fuzz -h`` prints e.g.
+        # "afl-fuzz++4.21c based on afl by Michal Zalewski ..."
+        # then exits with rc=1.  We parse the *banner* line (the one
+        # that mentions "based on afl by ..." or starts with
+        # "afl-fuzz++") to confirm the binary actually loaded.  If we
+        # only see dynamic-loader errors (e.g. "error while loading
+        # shared libraries") the install is broken — surface as WARN.
+        _, out, err = _run(["afl-fuzz", "-h"], timeout=3.0)
+        combined = "\n".join(filter(None, (out, err)))
+        banner_line = next(
+            (
+                line.strip()
+                for line in combined.splitlines()
+                if "based on afl by" in line.lower()
+                or line.lstrip().lower().startswith("afl-fuzz++")
+            ),
+            "",
+        )
+        if banner_line:
+            return CheckResult(
+                name="build.afl++",
+                status=CheckStatus.OK,
+                message=f"AFL++ found ({banner_line}).",
+            )
+        # Binary is on PATH but failed to print a banner — most likely a
+        # broken dynamic link (libpython mismatch is a common one).
+        first_err = next(
+            (line for line in combined.splitlines() if line.strip()),
+            "(no output)",
+        )
         return CheckResult(
             name="build.afl++",
-            status=CheckStatus.OK,
-            message="AFL++ found.",
+            status=CheckStatus.WARN,
+            message=f"AFL++ binary present at {afl_path} but failed to load.",
+            detail=first_err,
+            remediation=(
+                "The afl-fuzz binary is on PATH but cannot run — usually "
+                "a missing shared library.  Reinstall the distro package, "
+                "or skip the host install and use the Docker worker which "
+                "ships a known-good AFL++."
+            ),
         )
     distro = _detect_distro()
     sudo = _sudo_prefix()
@@ -968,15 +1013,18 @@ async def run_all_checks(
 # alongside the existing Debian (apt) mapping.
 _CHECK_PACKAGES_BY_DISTRO: dict[str, dict[str, list[str]]] = {
     "debian": {
-        # Ubuntu 22.04+ ships ``aflplusplus`` in universe; older releases
-        # use the legacy ``afl++`` name.  We try the modern one first.
+        # On Ubuntu/Debian the BINARY package is named ``afl++``
+        # (verified against packages.ubuntu.com/noble/afl++ — the
+        # *source* package is ``aflplusplus`` but ``apt install`` takes
+        # the binary name).  Using ``aflplusplus`` here makes apt fail
+        # with "Unable to locate package" on every supported release.
         "runtime.docker": ["docker.io", "docker-compose-plugin"],
         "runtime.docker-compose": ["docker-compose-plugin"],
         "build.cmake": ["cmake"],
         "build.clang": ["clang", "lld"],
         "build.gcc": ["gcc", "g++"],
         "build.llvm": ["llvm-dev", "lld"],
-        "build.afl++": ["aflplusplus"],
+        "build.afl++": ["afl++"],
     },
     "arch": {
         # Arch core / extra repo names — pacman.
@@ -987,9 +1035,10 @@ _CHECK_PACKAGES_BY_DISTRO: dict[str, dict[str, list[str]]] = {
         # Arch ships C++ as part of `gcc`; no separate g++ package.
         "build.gcc": ["gcc"],
         "build.llvm": ["llvm", "lld"],
-        # afl++ lives in AUR; ``check_build_afl`` surfaces an AUR-specific
-        # remediation. Listed here so ``get_missing_packages`` still names
-        # it for display, but the install script special-cases Arch+AUR.
+        # On Arch, AFL++ lives in the AUR as ``aflplusplus``.
+        # ``check_build_afl`` surfaces an AUR-specific remediation.
+        # Listed here so ``get_missing_packages`` still names it for
+        # display, but the install script special-cases Arch+AUR.
         "build.afl++": ["aflplusplus"],
     },
     "fedora": {

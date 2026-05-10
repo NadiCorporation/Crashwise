@@ -366,15 +366,45 @@ def test_check_build_llvm_fail() -> None:
 
 
 def test_check_build_afl_ok() -> None:
-    with patch("crashwise.core.sentinel._run", return_value=(0, "", "")):
+    """A working AFL++ install prints its banner to stdout/stderr via -h
+    and exits non-zero (since -h is treated like an unknown option that
+    triggers the usage screen). The detector ignores the exit code and
+    parses the banner line."""
+    banner = (
+        "afl-fuzz++4.21c based on afl by Michal Zalewski and a large "
+        "online community\n\nafl-fuzz [ options ] -- ...\n"
+    )
+    with patch("crashwise.core.sentinel._which", return_value="/usr/bin/afl-fuzz"), \
+         patch("crashwise.core.sentinel._run", return_value=(1, banner, "")):
         result = check_build_afl()
         assert result.status == CheckStatus.OK
+        assert "4.21c" in result.message
 
 
-def test_check_build_afl_warn() -> None:
-    with patch("crashwise.core.sentinel._run", return_value=(127, "", "not found")):
+def test_check_build_afl_not_installed() -> None:
+    """afl-fuzz is not on PATH → WARN with install hint (Docker worker
+    is the documented fallback so we don't FAIL)."""
+    with patch("crashwise.core.sentinel._which", return_value=None), \
+         patch("crashwise.core.sentinel._run", return_value=(127, "", "not found")):
         result = check_build_afl()
         assert result.status == CheckStatus.WARN
+        assert "Docker worker" in result.remediation
+
+
+def test_check_build_afl_broken_binary() -> None:
+    """afl-fuzz is on PATH but cannot run (e.g. broken dynamic link).
+    The detector must NOT report this as OK — surface as WARN with a
+    'reinstall or use Docker' hint."""
+    dyn_err = (
+        "afl-fuzz: error while loading shared libraries: "
+        "libpython3.13.so.1.0: cannot open shared object file: "
+        "No such file or directory\n"
+    )
+    with patch("crashwise.core.sentinel._which", return_value="/usr/bin/afl-fuzz"), \
+         patch("crashwise.core.sentinel._run", return_value=(127, "", dyn_err)):
+        result = check_build_afl()
+        assert result.status == CheckStatus.WARN
+        assert "failed to load" in result.message.lower()
         assert "Docker worker" in result.remediation
 
 
