@@ -196,6 +196,46 @@ def test_check_runtime_docker_not_installed() -> None:
         assert "not installed" in result.message.lower()
 
 
+def test_check_runtime_docker_permission_denied_stale_shell() -> None:
+    """The exact scenario Yahya hit on Ubuntu 24.04: usermod -aG ran, the
+    user IS in /etc/group, but the current shell still has the
+    pre-usermod credential set, so the socket is unreachable.
+
+    The Sentinel must surface this as a *stale-session* problem with a
+    remediation that says 'log out / newgrp docker' — NOT
+    'systemctl start docker', which is the wrong fix.
+    """
+    perm_err = (
+        "permission denied while trying to connect to the Docker daemon "
+        "socket at unix:///var/run/docker.sock"
+    )
+    with patch("crashwise.core.sentinel._run", return_value=(1, "", perm_err)), \
+         patch("crashwise.core.sentinel._which", return_value="/usr/bin/docker"), \
+         patch("crashwise.core.sentinel._user_in_docker_group", return_value=True), \
+         patch("crashwise.core.sentinel._user_can_reach_docker_socket", return_value=False):
+        result = check_runtime_docker()
+    assert result.status == CheckStatus.FAIL
+    assert "shell session" in result.message.lower() or "session" in result.message.lower()
+    # The remediation must talk about log out / newgrp, NOT systemctl start.
+    assert "newgrp" in result.remediation or "log out" in result.remediation.lower()
+    assert "systemctl start" not in result.remediation
+
+
+def test_check_runtime_docker_permission_denied_not_in_group() -> None:
+    """User actually isn't in the docker group on disk → usermod is the fix."""
+    perm_err = (
+        "permission denied while trying to connect to the Docker daemon socket"
+    )
+    with patch("crashwise.core.sentinel._run", return_value=(1, "", perm_err)), \
+         patch("crashwise.core.sentinel._which", return_value="/usr/bin/docker"), \
+         patch("crashwise.core.sentinel._user_in_docker_group", return_value=False), \
+         patch("crashwise.core.sentinel._user_can_reach_docker_socket", return_value=False):
+        result = check_runtime_docker()
+    assert result.status == CheckStatus.FAIL
+    assert "docker group" in result.message.lower()
+    assert "usermod" in result.remediation
+
+
 def test_check_runtime_docker_compose_ok_plugin() -> None:
     with patch("crashwise.core.sentinel._run", side_effect=[
         (0, "Docker Compose version v2.20.0", ""),  # first cmd succeeds

@@ -317,6 +317,12 @@ def _interactive_post_install(*, yes: bool) -> None:
     import os
     import shutil
 
+    # Track whether we mutated the docker group during this run so we can
+    # emit a final "log out / log back in" banner — without it, the very
+    # next ``crashwise doctor`` call shows a confusing "permission denied"
+    # because the kernel still uses the pre-usermod credentials.
+    usermod_just_applied: bool = False
+
     # ── Docker group membership ──────────────────────────────────────
     user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
     if user:
@@ -345,6 +351,7 @@ def _interactive_post_install(*, yes: bool) -> None:
                     )
                     proc = subprocess.run(cmd, capture_output=False)
                     if proc.returncode == 0:
+                        usermod_just_applied = True
                         console.print(
                             "[bold green]✓[/] User added to docker group. "
                             "[bold yellow]Log out and back in[/] for the change "
@@ -365,13 +372,23 @@ def _interactive_post_install(*, yes: bool) -> None:
 
     # ── Docker daemon socket ─────────────────────────────────────────
     if shutil.which("docker"):
-        probe = subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if probe.returncode != 0:
+        try:
+            probe = subprocess.run(
+                ["docker", "version", "--format", "{{.Server.Version}}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            probe_rc = probe.returncode
+            probe_err = (probe.stderr or "") + (probe.stdout or "")
+        except (subprocess.SubprocessError, OSError) as exc:
+            probe_rc = 1
+            probe_err = str(exc)
+        # If the daemon is up but the failure is "permission denied", the
+        # systemctl prompt below is the wrong fix — that's a stale-shell
+        # group-membership problem and the only cure is logout/newgrp.
+        is_perm = "permission denied" in probe_err.lower()
+        if probe_rc != 0 and not is_perm:
             console.print()
             console.print(
                 "[bold yellow]![/] Docker daemon is not responding "
@@ -396,8 +413,31 @@ def _interactive_post_install(*, yes: bool) -> None:
                     )
             else:
                 console.print("[yellow]Skipped daemon start.[/]")
+        elif probe_rc != 0 and is_perm:
+            console.print()
+            console.print(
+                "[bold yellow]![/] Docker daemon is running, but this shell "
+                "cannot reach the socket (permission denied).  This is a "
+                "stale-session problem — the docker group is on disk but "
+                "the current shell hasn't picked it up yet."
+            )
+            console.print(
+                "  → [bold]Log out and log back in[/], or run "
+                "[bold]'newgrp docker'[/] in this shell."
+            )
 
-    console.print("\n[bold green]Setup finished.[/]  Run [bold]crashwise doctor[/] to verify.")
+    console.print("\n[bold green]Setup finished.[/]")
+    if usermod_just_applied:
+        console.print(
+            "[bold yellow]Important:[/] you were just added to the [bold]docker[/] "
+            "group.  Linux only re-evaluates group membership at LOGIN — your "
+            "current shell still has the old credential set."
+        )
+        console.print(
+            "  → Run [bold]exit[/] and SSH/log in again, or run "
+            "[bold]newgrp docker[/] right now for a one-shell quick fix."
+        )
+    console.print("Then run [bold]crashwise doctor[/] to verify.")
 
 
 # ── Pre-flight gate (T4) ──────────────────────────────────────────────────────

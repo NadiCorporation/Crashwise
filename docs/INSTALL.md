@@ -297,16 +297,82 @@ sudo docker compose up -d --build
 If the legacy `docker-compose` is still on your `$PATH`, prefer the v2
 form (`docker compose`) explicitly to avoid muscle-memory traps.
 
-### "Cannot connect to the Docker daemon"
+### "Permission denied while trying to connect to the Docker daemon"
+
+This message has **three distinct causes**, each with a *different* fix.
+`crashwise doctor` now diagnoses which one you have.
+
+#### A. You were just added to the `docker` group — but in this shell
+
+```
+✗ runtime.docker: Docker daemon is running but your current SHELL
+  SESSION doesn't have docker-group permissions yet.
+```
+
+This is by far the most common case. `crashwise setup` (or
+`sudo usermod -aG docker $USER`) wrote the new group to `/etc/group`,
+but **Linux only re-evaluates a process's effective groups at login**.
+Your current shell still has the old credential set. Fix:
 
 ```bash
-# Did you log out / back in after `crashwise setup` added you to the
-# docker group?
-groups | grep -q docker || newgrp docker
+# Best: log out completely, then log back in.
+exit
 
-# Daemon down?
+# Or, for a one-shell quick fix (spawns a new shell with the docker group
+# active — every command from then on works):
+newgrp docker
+```
+
+Then re-run `crashwise doctor` — it should now show
+`✓ runtime.docker: Docker 27.x is running.`
+
+> ℹ️ This catches even seasoned operators: `getent group docker` will
+> happily show your username after `usermod`, but the *running shell*
+> still inherits the pre-usermod credentials.  The kernel does not
+> "live-patch" running processes when group membership changes.
+
+#### B. You're genuinely not in the `docker` group
+
+```
+✗ runtime.docker: Docker daemon is running but user 'alice' is not in
+  the docker group.
+```
+
+```bash
+sudo usermod -aG docker $USER
+# Then follow case (A): log out / log back in.
+```
+
+`crashwise setup` does this for you and asks for confirmation before
+each privileged action.
+
+#### C. The Docker daemon itself is down
+
+```
+✗ runtime.docker: Docker CLI found but daemon is not responding.
+```
+
+```bash
 sudo systemctl start docker
-sudo systemctl enable docker        # start on boot
+sudo systemctl enable docker        # start automatically on boot
+```
+
+### `sudo crashwise: command not found`
+
+`crashwise` is installed inside your project venv (`.venv/bin/crashwise`).
+`sudo` resets `$PATH` to `secure_path` (see `/etc/sudoers`), which does
+*not* include the venv.  Use one of these instead:
+
+```bash
+# Use the venv's absolute path:
+sudo ./.venv/bin/crashwise doctor
+
+# Or activate the venv as root:
+sudo bash -c 'source .venv/bin/activate && crashwise doctor'
+
+# Or — far more common — run WITHOUT sudo (the Sentinel does not require
+# root for any of its checks, except when emitting an install hint):
+crashwise doctor
 ```
 
 ### "afl++ not found on host"
