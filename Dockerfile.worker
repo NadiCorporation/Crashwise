@@ -147,9 +147,16 @@ COPY --from=py-builder /app/.venv /app/.venv
 COPY --from=py-builder /app/crashwise /app/crashwise
 
 # Verify key tools are present.
-RUN afl-fuzz -V \
-    && clang --version \
-    && cmake --version \
+#
+# AFL++ has no dedicated --version flag. ``-V`` is fuzz duration (takes a
+# seconds argument). ``-h`` (help) prints the version banner and exits 0,
+# which simultaneously verifies the binary loads (i.e. libpython3.11 is
+# resolvable) and reports the build's feature flags.  We pipe to ``head``
+# to keep the build log compact.
+RUN afl-fuzz -h 2>&1 | head -1 \
+    && afl-cc --version 2>&1 | head -1 \
+    && clang --version | head -1 \
+    && cmake --version | head -1 \
     && python3 --version \
     && docker --version
 
