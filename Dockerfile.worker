@@ -102,6 +102,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Version control
     git \
     # Python runtime
+    #
+    # ``libpython3.11`` (the embeddable shared library) is intentionally
+    # added alongside ``python3``: AFL++ is built with Python custom-
+    # mutator support in ``afl-builder`` (python3-dev was present), which
+    # makes ``afl-fuzz`` dynamically link against ``libpython3.11.so.1.0``.
+    # The plain ``python3`` package on bookworm-slim only pulls in
+    # ``libpython3.11-stdlib`` / ``libpython3.11-minimal`` — *not* the
+    # embeddable shared library — so afl-fuzz fails at startup with
+    # "cannot open shared object file" without this line.
+    libpython3.11 \
     python3 \
     python3-pip \
     python3-venv \
