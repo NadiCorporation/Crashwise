@@ -204,10 +204,39 @@ def test_check_runtime_docker_compose_ok_plugin() -> None:
         assert result.status == CheckStatus.OK
 
 
-def test_check_runtime_docker_compose_ok_standalone() -> None:
+def test_check_runtime_docker_compose_legacy_v1_is_fail() -> None:
+    """Legacy ``docker-compose`` v1.x is incompatible with modern Docker
+    engines (KeyError: 'ContainerConfig' — docker/compose#9229).  The
+    Sentinel must surface this as a FAIL, not a soft warning, because
+    it WILL break ``docker compose up -d`` the moment the user rebuilds
+    an image.
+    """
     with patch("crashwise.core.sentinel._run", side_effect=[
-        (1, "", ""),  # docker compose fails
-        (0, "docker-compose version 1.29.2", ""),  # docker-compose succeeds
+        (1, "", ""),  # docker compose v2 plugin missing
+        (0, "docker-compose version 1.29.2", ""),  # only legacy v1 present
+    ]):
+        result = check_runtime_docker_compose()
+        assert result.status == CheckStatus.FAIL
+        assert "v1" in result.message.lower() or "legacy" in result.message.lower()
+        assert "ContainerConfig" in result.message or "containerconfig" in result.message.lower()
+
+
+def test_check_runtime_docker_compose_ok_v2_plugin() -> None:
+    """``docker compose version`` (v2 plugin) is the happy path."""
+    with patch("crashwise.core.sentinel._run", side_effect=[
+        (0, "Docker Compose version v2.27.0", ""),  # v2 plugin OK
+    ]):
+        result = check_runtime_docker_compose()
+        assert result.status == CheckStatus.OK
+        assert "v2" in result.message
+
+
+def test_check_runtime_docker_compose_unfamiliar_version_is_ok() -> None:
+    """When a non-v1 standalone is present (e.g. a self-built v2.x), be
+    permissive and report OK rather than FAIL."""
+    with patch("crashwise.core.sentinel._run", side_effect=[
+        (1, "", ""),  # plugin missing
+        (0, "Docker Compose version 2.20.3", ""),  # standalone v2-style
     ]):
         result = check_runtime_docker_compose()
         assert result.status == CheckStatus.OK

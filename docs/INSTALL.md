@@ -191,8 +191,28 @@ Ubuntu" or "yay -S that on Arch" mental tax.
 
 ## 4. Running your first campaign
 
+> **⚠️ Use `docker compose` (v2 plugin), NOT the legacy `docker-compose`.**
+>
+> The legacy Python `docker-compose` (v1.x) is incompatible with modern
+> Docker Engines and crashes with `KeyError: 'ContainerConfig'` when
+> recreating containers (see [Troubleshooting](#legacy-docker-compose-v1-keyerror-containerconfig)
+> below).  Always use the modern subcommand: **`docker compose ...`**
+> (note the space, no hyphen).
+>
+> If your distro shipped only the legacy version (Ubuntu 20.04 default,
+> some Arch installs from older `pacman` cycles), uninstall it and
+> install the official Docker plugin:
+>
+> * **Arch:** `sudo pacman -S docker-buildx docker-compose` then
+>   *also* install the v2 plugin: `sudo pacman -S docker-compose`
+>   already provides v2 in current repos. To verify:
+>   `docker compose version` (should report `v2.x.x`).
+> * **Ubuntu:**
+>   `sudo apt-get remove docker-compose && sudo apt-get install docker-compose-plugin`
+>   then verify with `docker compose version`.
+
 ```bash
-# 1. Start the local Temporal cluster + Redis + workers via docker-compose:
+# 1. Start the local Temporal cluster + Redis + workers (use the v2 plugin):
 docker compose up -d
 
 # 2. Initialise the local SQLite DB:
@@ -234,6 +254,48 @@ Temporal Web UI at `http://localhost:8233`.
 ---
 
 ## 5. Troubleshooting
+
+### Legacy `docker-compose` v1 — `KeyError: 'ContainerConfig'`
+
+```
+ERROR: for crashwise-temporal  'ContainerConfig'
+ERROR: for temporal-server     'ContainerConfig'
+…
+KeyError: 'ContainerConfig'
+```
+
+This is **not a CrashWise bug**. The legacy Python `docker-compose`
+v1.29.2 (the last release of the v1 line, ~2021) reads a field called
+`ContainerConfig` from `docker image inspect` responses. Modern Docker
+Engines (24.x+) no longer return that key, so the legacy client crashes
+the moment it tries to recreate a container that already exists.
+
+Tracking issue: <https://github.com/docker/compose/issues/9229>.
+
+**Fix — switch to the modern Compose v2 plugin:**
+
+```bash
+# Verify which compose you have:
+docker compose version          # v2 plugin (correct)  → "Docker Compose version v2.x.x"
+docker-compose version          # v1 legacy (broken)    → "docker-compose version 1.29.x"
+
+# Arch Linux: the package name is the same, but make sure pacman has
+# pulled in the current version:
+sudo pacman -Syu docker docker-compose docker-buildx
+docker compose version          # should now report v2
+
+# Ubuntu: remove the legacy pip / apt package and install the plugin:
+sudo apt-get remove --purge docker-compose
+pip uninstall docker-compose 2>/dev/null
+sudo apt-get install docker-compose-plugin
+docker compose version          # should now report v2
+
+# Then re-run the up command — note the SPACE, not a hyphen:
+sudo docker compose up -d --build
+```
+
+If the legacy `docker-compose` is still on your `$PATH`, prefer the v2
+form (`docker compose`) explicitly to avoid muscle-memory traps.
 
 ### "Cannot connect to the Docker daemon"
 

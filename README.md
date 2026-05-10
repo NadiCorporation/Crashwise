@@ -177,6 +177,13 @@ crashwise setup --dry-run  # print the install script without executing it
 
 ### One-Command Stack
 
+> **⚠️ Use `docker compose` (v2 plugin), NOT `docker-compose`.**
+> The legacy Python `docker-compose` v1 is incompatible with modern
+> Docker Engines and will crash with `KeyError: 'ContainerConfig'`.
+> See [docs/INSTALL.md](./docs/INSTALL.md#legacy-docker-compose-v1--keyerror-containerconfig)
+> for the migration steps. Verify with `docker compose version` —
+> should report `v2.x.x`.
+
 ```bash
 # 1. Configure (edit secrets as needed)
 cp .env.example .env
