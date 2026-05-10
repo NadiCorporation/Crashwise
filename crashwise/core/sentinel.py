@@ -433,20 +433,81 @@ def check_runtime_docker() -> CheckResult:
 
 
 def check_runtime_docker_compose() -> CheckResult:
-    """Check Docker Compose availability."""
-    # Try plugin first (docker compose), then standalone
-    for cmd in [["docker", "compose", "version"], ["docker-compose", "--version"]]:
-        rc, out, _ = _run(cmd)
-        if rc == 0:
+    """Check Docker Compose availability.
+
+    Strongly prefers the modern v2 plugin (``docker compose``) over the
+    legacy Python v1 standalone (``docker-compose``).  v1 is incompatible
+    with current Docker Engines (KeyError: 'ContainerConfig' when
+    recreating containers — see docker/compose#9229) and will tear down
+    the entire stack on the first ``up -d`` after an image rebuild.
+
+    Resolution order:
+      1. v2 plugin works → OK.
+      2. v2 plugin missing but v1 standalone works → FAIL with clear
+         migration instructions.  We deliberately do NOT report this as
+         a soft warning because it WILL break the user's first
+         ``docker compose up -d``.
+      3. Neither works → FAIL with install instructions.
+    """
+    # 1. Modern v2 plugin.
+    rc, out, _ = _run(["docker", "compose", "version"])
+    if rc == 0:
+        return CheckResult(
+            name="runtime.docker-compose",
+            status=CheckStatus.OK,
+            message=f"Docker Compose v2 plugin available ({out.splitlines()[0]}).",
+        )
+
+    distro = _detect_distro()
+    sudo = _sudo_prefix()
+
+    # 2. Legacy v1 — actively dangerous.
+    rc_v1, out_v1, _ = _run(["docker-compose", "--version"])
+    if rc_v1 == 0:
+        version_line = out_v1.splitlines()[0] if out_v1 else "unknown"
+        # Legacy v1 reports "docker-compose version 1.x.x".
+        is_v1 = "version 1." in version_line.lower()
+        if is_v1:
+            if distro == "arch":
+                migrate_cmd = (
+                    f"{sudo}pacman -Syu docker docker-compose docker-buildx"
+                )
+            elif distro == "fedora":
+                migrate_cmd = (
+                    f"{sudo}dnf install -y docker-compose-plugin && "
+                    f"{sudo}dnf remove -y python3-docker-compose"
+                )
+            else:  # debian / ubuntu
+                migrate_cmd = (
+                    f"{sudo}apt-get remove -y docker-compose && "
+                    f"{sudo}apt-get install -y docker-compose-plugin"
+                )
             return CheckResult(
                 name="runtime.docker-compose",
-                status=CheckStatus.OK,
-                message=f"Docker Compose available ({out.splitlines()[0]}).",
+                status=CheckStatus.FAIL,
+                message=(
+                    f"Only legacy Compose v1 found ({version_line}). "
+                    "v1 is incompatible with current Docker Engines and "
+                    "crashes with 'KeyError: ContainerConfig' (see "
+                    "docker/compose#9229)."
+                ),
+                remediation=(
+                    f"Install the v2 plugin: {migrate_cmd}  "
+                    "Then verify with `docker compose version` (note the SPACE)."
+                ),
             )
-    distro = _detect_distro()
-    pkgs = _CHECK_PACKAGES_BY_DISTRO.get(distro, _CHECK_PACKAGES_BY_DISTRO["debian"]).get(
-        "runtime.docker-compose", ["docker-compose-plugin"]
-    )
+        # docker-compose binary exists but version line is unfamiliar —
+        # treat as OK on the assumption it's a v2-compatible standalone.
+        return CheckResult(
+            name="runtime.docker-compose",
+            status=CheckStatus.OK,
+            message=f"Docker Compose available ({version_line}).",
+        )
+
+    # 3. Nothing works.
+    pkgs = _CHECK_PACKAGES_BY_DISTRO.get(
+        distro, _CHECK_PACKAGES_BY_DISTRO["debian"]
+    ).get("runtime.docker-compose", ["docker-compose-plugin"])
     return CheckResult(
         name="runtime.docker-compose",
         status=CheckStatus.FAIL,
