@@ -34,12 +34,24 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Healthcheck pattern follows the official temporalio/docker-compose
+    # repository.  ``tctl --ad 127.0.0.1:7233 cluster health`` is the
+    # canonical check for the auto-setup image and exits 0 only after
+    # both the gRPC frontend AND the PostgreSQL schema migration
+    # ("temporal-sql-tool setup-schema") have completed.
+    #
+    # First-boot timing: schema migration + namespace seeding can take
+    # 60-120 seconds on a cold disk, so we use ``retries: 60`` with a
+    # 1 s interval (= 60 s tolerance after start_period) and a generous
+    # 90 s start_period.  Earlier values (30 s start + 50 s retries)
+    # were on the edge and caused intermittent UNHEALTHY on slower
+    # machines.
     healthcheck:
-      test: ["CMD", "tctl", "cluster", "health"]
-      interval: 10s
+      test: ["CMD", "tctl", "--ad", "127.0.0.1:7233", "cluster", "health"]
+      interval: 1s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 60
+      start_period: 90s
     networks:
       - crashwise
 
@@ -154,12 +166,15 @@ services:
         condition: service_healthy
       temporal-server:
         condition: service_healthy
+    # api startup involves SQLAlchemy DB pool init + Temporal client
+    # connect; on a cold start the wall-clock can exceed the previous
+    # 10 s start_period.  60 s is generous and matches the worker.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 10s
+      retries: 5
+      start_period: 60s
     networks:
       - crashwise
     restart: unless-stopped
