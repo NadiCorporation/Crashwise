@@ -24,8 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency definitions first for layer caching.
-COPY pyproject.toml uv.lock ./
-
+COPY pyproject.toml uv.lock LICENSE README.md ./
 # Install production dependencies into a virtual environment.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
