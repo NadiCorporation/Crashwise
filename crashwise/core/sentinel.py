@@ -393,8 +393,70 @@ def check_hardware_disk(min_free_gb: float = 50.0) -> CheckResult:
     )
 
 
+def _user_can_reach_docker_socket() -> bool:
+    """Return True when the *current* process can talk to the Docker socket.
+
+    Uses access(2) on ``/var/run/docker.sock`` with read+write bits.  This
+    is independent of group-membership lookup: if the user was added to
+    the ``docker`` group in this same shell, their *effective* groups
+    are still stale and the socket will be unreachable until logout/login
+    or ``newgrp docker``.  access(2) reflects exactly that — what the
+    running process can actually do, right now.
+    """
+    sock = Path("/var/run/docker.sock")
+    if not sock.exists():
+        return False
+    try:
+        return os.access(sock, os.R_OK | os.W_OK)
+    except OSError:
+        return False
+
+
+def _user_in_docker_group() -> bool:
+    """Return True when the current user appears in ``/etc/group``'s docker line.
+
+    This is a *configuration* check — it reads /etc/group directly and
+    therefore picks up additions made in the current session that the
+    kernel's effective-group set hasn't yet inherited.  We use this in
+    combination with :func:`_user_can_reach_docker_socket` to distinguish
+    "needs to log out" from "not in group at all".
+    """
+    try:
+        import grp
+
+        user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+        if not user:
+            return False
+        if os.geteuid() == 0:
+            return True  # root always wins
+        docker_grp = grp.getgrnam("docker")
+        return user in docker_grp.gr_mem
+    except (KeyError, ImportError, OSError):
+        return False
+
+
 def check_runtime_docker() -> CheckResult:
-    """Check Docker daemon availability."""
+    """Check Docker daemon availability with precise failure diagnosis.
+
+    Three distinct failure modes that ``crashwise doctor`` must
+    distinguish (each has a *different* remediation):
+
+    1. **Docker not installed.**  CLI binary missing from ``$PATH``.
+       → install the distro package.
+    2. **Daemon down.**  CLI present, ``/var/run/docker.sock`` missing or
+       process can't even reach the socket file.
+       → ``systemctl start docker``.
+    3. **Permission denied (group-not-applied).**  CLI present, socket
+       present, but the EUID-bound socket connect returns EACCES.  This
+       fires in two sub-cases that *look identical* in the error string
+       but require *different* fixes:
+       a. User is genuinely not in the ``docker`` group → run
+          ``usermod -aG docker $USER`` then re-login.
+       b. User WAS just added to the group (e.g. by ``crashwise setup``)
+          but the current shell still holds the old credential set →
+          log out / log back in, or ``newgrp docker`` for the current
+          shell.  This is the case Yahya hit on Ubuntu 24.04.
+    """
     rc, out, err = _run(["docker", "version", "--format", "{{.Server.Version}}"])
     if rc == 0 and out:
         return CheckResult(
@@ -402,33 +464,98 @@ def check_runtime_docker() -> CheckResult:
             status=CheckStatus.OK,
             message=f"Docker {out} is running.",
         )
+
     distro = _detect_distro()
     sudo = _sudo_prefix()
-    if _which("docker"):
-        # Common case on a fresh Arch install: daemon shipped but socket
-        # not started or current user not in the ``docker`` group.
-        msg = "Docker CLI found but daemon is not responding."
-        permission_hint = ""
-        if err and "permission denied" in err.lower():
-            permission_hint = (
-                f" Add yourself to the docker group: {sudo}usermod -aG docker $USER "
-                "(then log out / back in)."
-            )
+
+    # ── 1. CLI missing entirely. ─────────────────────────────────────
+    if not _which("docker"):
+        pkgs = _CHECK_PACKAGES_BY_DISTRO.get(
+            distro, _CHECK_PACKAGES_BY_DISTRO["debian"]
+        ).get("runtime.docker", ["docker"])
         return CheckResult(
             name="runtime.docker",
             status=CheckStatus.FAIL,
-            message=msg,
-            detail=err or out,
-            remediation=f"Start Docker: {sudo}systemctl start docker.{permission_hint}",
+            message="Docker is not installed.",
+            remediation=f"Install Docker: {_install_hint(distro, pkgs)}",
         )
-    pkgs = _CHECK_PACKAGES_BY_DISTRO.get(distro, _CHECK_PACKAGES_BY_DISTRO["debian"]).get(
-        "runtime.docker", ["docker"]
+
+    # ── 2. Permission denied → group / session diagnosis. ────────────
+    err_lower = (err or "").lower()
+    is_permission_denied = (
+        "permission denied" in err_lower
+        or "permission denied" in (out or "").lower()
     )
+    if is_permission_denied:
+        in_group_config = _user_in_docker_group()
+        socket_reachable = _user_can_reach_docker_socket()
+        user = os.environ.get("USER") or os.environ.get("LOGNAME") or "$USER"
+
+        if in_group_config and not socket_reachable:
+            # The Ubuntu 24.04 case: usermod -aG already ran, the
+            # /etc/group line shows the user, but the running shell
+            # still has the pre-usermod credential set.
+            return CheckResult(
+                name="runtime.docker",
+                status=CheckStatus.FAIL,
+                message=(
+                    f"Docker daemon is running but your current SHELL SESSION "
+                    "doesn't have docker-group permissions yet."
+                ),
+                detail=(
+                    f"User {user!r} IS in the docker group on disk "
+                    "(/etc/group), but the kernel's effective groups for "
+                    "this process were inherited before the group was "
+                    "applied. Linux only re-evaluates group membership at "
+                    "login."
+                ),
+                remediation=(
+                    "Log out and log back in (or close this terminal and "
+                    "open a new one). For a single-shell quick fix: run "
+                    "'newgrp docker' — this spawns a new shell where the "
+                    "docker group is active."
+                ),
+            )
+
+        if not in_group_config:
+            return CheckResult(
+                name="runtime.docker",
+                status=CheckStatus.FAIL,
+                message=(
+                    f"Docker daemon is running but user {user!r} is not in "
+                    "the docker group."
+                ),
+                detail=err or out,
+                remediation=(
+                    f"{sudo}usermod -aG docker {user}  &&  "
+                    "log out / log back in (the group only takes effect on a "
+                    "fresh login session)."
+                ),
+            )
+
+        # In-group AND socket reachable but ``docker version`` still
+        # failed — unusual; surface raw stderr so the user can debug.
+        return CheckResult(
+            name="runtime.docker",
+            status=CheckStatus.FAIL,
+            message="Docker permission error (unexpected — file an issue).",
+            detail=err or out,
+            remediation=(
+                f"Try: {sudo}systemctl restart docker, then retry. "
+                "If this persists, paste the detail line into an issue."
+            ),
+        )
+
+    # ── 3. Daemon down. ──────────────────────────────────────────────
     return CheckResult(
         name="runtime.docker",
         status=CheckStatus.FAIL,
-        message="Docker is not installed.",
-        remediation=f"Install Docker: {_install_hint(distro, pkgs)}",
+        message="Docker CLI found but daemon is not responding.",
+        detail=err or out,
+        remediation=(
+            f"Start Docker: {sudo}systemctl start docker  "
+            f"(enable on boot: {sudo}systemctl enable docker)."
+        ),
     )
 
 
