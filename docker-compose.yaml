@@ -29,6 +29,16 @@ services:
       POSTGRES_USER: temporal
       POSTGRES_PWD: temporal
       POSTGRES_SEEDS: postgres
+      # By default ``temporalio/auto-setup`` binds the gRPC frontend
+      # to the container's *specific* IP (e.g. 172.18.0.5).  On Linux,
+      # bind(2) to a specific IP only accepts connections to that IP —
+      # so any healthcheck that connects to 127.0.0.1:7233 fails at the
+      # kernel level with "connection refused", regardless of how long
+      # we wait or how many retries we configure.  Forcing
+      # ``BIND_ON_IP=0.0.0.0`` makes the server listen on all interfaces
+      # (incl. loopback), which is required for the in-container
+      # ``tctl ... cluster health`` probe below.
+      BIND_ON_IP: "0.0.0.0"
     ports:
       - "7233:7233"
     depends_on:
