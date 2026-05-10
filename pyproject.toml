@@ -70,7 +70,14 @@ dependencies = [
     "anyio>=4.4.0",
 
     # Persistence layer
+    #
+    # asyncpg drives the PostgreSQL DSN used in production
+    # (``postgresql+asyncpg://...`` — see docker-compose.yaml).  Without
+    # it, SQLAlchemy's lifespan ``init_db()`` raises ModuleNotFoundError
+    # the moment the FastAPI app starts and the api container fails its
+    # healthcheck.  aiosqlite is kept for local-dev SQLite mode.
     "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
     "aiosqlite>=0.20.0",
 
     # Web API
