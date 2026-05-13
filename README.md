@@ -10,10 +10,13 @@
 <p align="center">
   <a href="#key-features">Key Features</a> •
   <a href="#architecture">Architecture</a> •
+  <a href="#installation">Installation</a> •
   <a href="#quick-start">Quick Start</a> •
+  <a href="#llm-configuration">LLM Configuration</a> •
+  <a href="#docker-compose-reference">Docker Compose</a> •
   <a href="#cli-reference">CLI</a> •
-  <a href="./docs/INSTALL.md">Install Guide</a> •
   <a href="#testing">Testing</a> •
+  <a href="#contributing">Contributing</a> •
   <a href="#license">License</a>
 </p>
 
@@ -29,7 +32,7 @@
 
 ---
 
-> **Built by Yahya Toubali, Security Researcher** — developing CrashWise under
+> **Built by [Yahya Toubali](https://github.com/yahyatoubali), Security Researcher** — developing CrashWise under
 > the **Nadicorp** label. Designed for offensive security teams, vulnerability
 > researchers, and bug bounty hunters who need to discover, triage, and
 > weaponise zero-day memory-safety bugs at scale.
@@ -45,23 +48,17 @@
 | **Distro-Native Provisioning** | Sentinel detects Arch / Ubuntu / Fedora from `/etc/os-release` and dispatches `pacman` / `apt` / `dnf` accordingly — no Debian-only assumptions. AUR packages (e.g. `aflplusplus`) are split onto a dedicated rail with `yay` / `paru` detection. |
 | **Mandatory Pre-flight Gate** | `crashwise run` refuses to launch until Docker, Clang, and GCC are confirmed working — opaque mid-campaign failures replaced with actionable remediation hints. |
 | **AI-Driven Harness Synthesis** | LangGraph agent reads target source code and autonomously generates AFL++/libFuzzer-compatible C/C++ harnesses with fallback templates. |
-| **Coverage-Guided Harness Evolution** | When fuzzing plateaus, the workflow runs `analyze_coverage` to identify the *exact* blocker (magic value, length check, checksum, state machine) at the *exact* source line, then hands the structured blocker to the LLM evolution agent — no more `BlockerType.UNKNOWN` stubs. Bounded by `max_evolution_count` to prevent runaway LLM spend. |
+| **Coverage-Guided Harness Evolution** | When fuzzing plateaus, the workflow identifies the *exact* blocker (magic value, length check, checksum) at the *exact* source line, then hands the structured blocker to the LLM evolution agent. Bounded by `max_evolution_count` to prevent runaway LLM spend. |
 | **Multi-Armed Bandit Strategy Switching** | Thompson Sampling + UCB1 dynamically pivots between AFL++ and libFuzzer strategies based on real-time coverage feedback. |
-| **God-Mode Signals** | Live workflow control: `crashwise signal <id> force_pivot`, `inject_seed`, `pause_hunt`, `resume_hunt`. Researchers can force a strategy pivot, drop a manually-crafted seed into the running corpus, or pause the campaign for review without restarting. |
-| **Hardened Sandbox (S6)** | Fuzzer containers launch with `--network none`, `--read-only` rootfs, size-capped tmpfs, `--cap-drop ALL`, `no-new-privileges`, and a pre-flight `docker rm -f` to kill stale containers. Untrusted harnesses + attacker-controlled corpora are isolated from the host. |
-| **Shell-Free Hot-Swap** | LLM-supplied compile commands are parsed with `shlex` and executed via `subprocess_exec` against an allow-list of compilers. No `shell=True`, no metacharacter expansion, no RCE surface. Compiled binaries are persisted to `~/.cache/crashwise/build/` so successful evolutions survive temp-dir cleanup. |
-| **Target Profiling & Adaptive Heuristics** | Automatically profiles target domain (crypto, media, network, parser), complexity, attack surface, and dangerous functions to tune fuzzer flags. |
+| **God-Mode Signals** | Live workflow control: `crashwise signal <id> force_pivot`, `inject_seed`, `pause_hunt`, `resume_hunt`. Researchers can force a strategy pivot, drop a manually-crafted seed into the running corpus, or pause the campaign for review. |
+| **Hardened Sandbox (S6)** | Fuzzer containers launch with `--network none`, `--read-only` rootfs, size-capped tmpfs, `--cap-drop ALL`, `no-new-privileges`, and a pre-flight `docker rm -f` to kill stale containers. |
+| **Shell-Free Hot-Swap** | LLM-supplied compile commands are parsed with `shlex` and executed via `subprocess_exec` against an allow-list of compilers. No `shell=True`, no metacharacter expansion, no RCE surface. |
 | **Intelligent Triage** | LLM-powered crash classification (ASAN/GDB) with deterministic regex fallback. Deduplicates by stack-hash. |
 | **KernelBridge** | Native Linux kernel fuzzing via syzkaller integration — parses OOPS, KASAN, and KFENCE reports. |
-| **Hybrid AI Root Cause Analysis** | Ollama (local) or Venice (cloud) inference providers for deep RCA, patch suggestion, and exploitability scoring. |
 | **Automated PoC / Exploit Generation** | Exploit Architect agent transforms crash data into standalone C PoCs with reachability analysis and primitive detection. |
 | **Patch Verification** | End-to-end pipeline: clone → apply patch → build → regression test → verify crash is fixed. |
 | **Auto-Disclosure Engine** | CVSS v3.1 scoring, platform-specific report generation (HackerOne, Bugcrowd, kernel ML), and webhook/email/PGP notifications. |
 | **Intelligence Dashboard** | Streamlit-based real-time dashboard for campaign monitoring, crash heatmaps, CWE filtering, patch viewing, and bounty export. |
-| **Distributed Storage** | Cloudflare R2 (S3-compatible) for crash artefacts and Redis for counters, dedup cache, and worker heartbeats. |
-| **System Sentinel** | `crashwise doctor` diagnoses your host (hardware, Docker, build tools, services). `crashwise setup` is interactive, distro-aware, and offers to fix `docker` group membership and start the daemon. |
-| **Master Worker Image** | Self-contained `Dockerfile.worker` bundles AFL++, libFuzzer, Clang, LLVM — the host only needs Docker. |
-| **Production Packaging** | Multi-stage Dockerfile, full-stack docker-compose, and GitHub Actions CI/CD with ruff, mypy, pytest, and Docker build. |
 
 ---
 
@@ -80,29 +77,29 @@
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └─────────────────┘   │
 ├─────────┼────────────────┼────────────────┼─────────────────────────────────┤
 │         ▼                ▼                ▼                                  │
-│  ┌─────────────────────────────────────────────────────────────────────┐      │
-│  │                     Temporal Activities (18 total)                   │      │
-│  │  setup_target      execute_fuzzing     triage_results               │      │
-│  │  seed_corpus       analyze_progress    analyze_crash                │      │
-│  │  pivot_strategy    analyze_coverage    evolve_harness               │      │
-│  │  hot_swap_harness  mutate_harness      inject_seeds                 │      │
-│  │  verify_patch      verify_poc          notify_stakeholders          │      │
-│  │  kernel_monitor    profile_target      execute_job                  │      │
-│  └─────────────────────────────────────────────────────────────────────┘      │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                     Temporal Activities (18 total)                   │    │
+│  │  setup_target      execute_fuzzing     triage_results               │    │
+│  │  seed_corpus       analyze_progress    analyze_crash                │    │
+│  │  pivot_strategy    analyze_coverage    evolve_harness               │    │
+│  │  hot_swap_harness  mutate_harness      inject_seeds                 │    │
+│  │  verify_patch      verify_poc          notify_stakeholders          │    │
+│  │  kernel_monitor    profile_target      execute_job                  │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         Agent Layer (LangGraph + LLM)                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │ HarnessSynth │  │   Triage     │  │   Patcher    │  │ ExploitArch  │  │
-│  │   Agent      │  │   Agent      │  │   Agent      │  │    Agent     │  │
-│  ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤  │
-│  │ Coverage     │  │   MAB        │  │   Profiler   │  │ Reachability │  │
-│  │ Analyzer     │  │ Strategist   │  │   Agent      │  │   Engine     │  │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
+│  │ HarnessSynth │  │   Triage     │  │   Patcher    │  │ ExploitArch  │   │
+│  │   Agent      │  │   Agent      │  │   Agent      │  │    Agent     │   │
+│  ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤   │
+│  │ Coverage     │  │   MAB        │  │   Profiler   │  │ Reachability │   │
+│  │ Analyzer     │  │ Strategist   │  │   Agent      │  │   Engine     │   │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         Execution Layer                                      │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────────────┐   │
 │  │  Docker    │  │   QEMU     │  │   Local    │  │  Kernel (syzkaller)│   │
-│  │  (AFL++)   │  │  (KVM)     │  │  (libFuzzer│  │                    │   │
+│  │  (AFL++)   │  │  (KVM)     │  │ (libFuzzer)│  │                    │   │
 │  └────────────┘  └────────────┘  └────────────┘  └────────────────────┘   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         Persistence & Storage                                │
@@ -113,446 +110,558 @@
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Tech Stack**
+### Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
+| Language | Python 3.11+ (strict mypy) |
 | Orchestration | Temporal (Python SDK) |
-| AI Engine | LangGraph + LangChain + Venice / Ollama |
-| Validation | Pydantic v2 |
+| AI / LLM | LangGraph + LangChain (Anthropic, OpenAI, Ollama, Venice) |
 | Web API | FastAPI + Uvicorn |
 | Dashboard | Streamlit |
 | CLI | Typer + Rich |
-| Logging | structlog |
-| Package Mgmt | uv |
-| Lint/Format | ruff |
-| Type Check | mypy (strict) |
-| Testing | pytest + pytest-asyncio + pytest-cov |
-| Fuzzers | AFL++, libFuzzer, honggfuzz |
-| Execution | Docker, QEMU/KVM |
-| Database | PostgreSQL (prod), SQLite (dev) |
+| Database | PostgreSQL (prod) / SQLite (dev) via SQLAlchemy async |
 | Cache | Redis |
 | Object Storage | Cloudflare R2 / S3-compatible |
+| Fuzzers | AFL++, libFuzzer, honggfuzz |
+| Execution | Docker (hardened), QEMU/KVM |
+| Build | hatchling + uv |
 
 ---
 
-## Quick Start
+## Installation
 
 ### Prerequisites
 
-- Linux x86_64 (kernel ≥ 5.10)
-- Python 3.11+
-- Docker & Docker Compose
-- Git
-- ≥ 8 GB RAM, ≥ 50 GB free disk
+| Requirement | Minimum | Notes |
+|------------|---------|-------|
+| **Python** | 3.11+ | 3.12 recommended |
+| **Docker** | 20.10+ | With Docker Compose v2 plugin |
+| **OS** | Linux | Arch, Ubuntu 22.04+, Fedora 38+ |
+| **RAM** | 8 GB | 16 GB recommended for parallel fuzzing |
+| **Disk** | 50 GB free | Fuzzing generates large corpora |
 
-Everything else (Clang, GCC, LLVM, CMake, AFL++) is provisioned automatically by
-`crashwise setup`. See [`docs/INSTALL.md`](./docs/INSTALL.md) for the full
-**Zero-Friction Install Guide** covering both Arch Linux and Ubuntu.
+### Method 1: pipx (Recommended for Users)
 
-### Zero-Friction Install (any distro)
+```bash
+# Install pipx if you don't have it
+python3 -m pip install --user pipx
+pipx ensurepath
+
+# Install CrashWise
+pipx install crashwise
+
+# Verify
+crashwise --version
+crashwise doctor
+```
+
+### Method 2: uv (Recommended for Development)
+
+```bash
+# Install uv (fast Python package manager)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Clone the repository
+git clone https://github.com/yahyatoubali/Crashwise.git
+cd Crashwise
+
+# Install in development mode
+uv sync
+
+# Verify
+uv run crashwise --version
+uv run crashwise doctor
+```
+
+### Method 3: pip (Standard)
 
 ```bash
 git clone https://github.com/yahyatoubali/Crashwise.git
 cd Crashwise
 
-python -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 
-crashwise setup     # interactive: detects distro, installs deps, fixes docker group
-crashwise doctor    # verify the host is ready
+crashwise --version
+crashwise doctor
 ```
 
-After `pip install -e .` the `crashwise` binary is on your `$PATH` and works
-from any directory.
+### Post-Install: System Dependencies
 
-### System Health Check
+CrashWise needs build tools (Clang, GCC, CMake) and Docker for fuzzing.
+The built-in setup wizard handles everything:
 
 ```bash
-crashwise doctor    # full Sentinel report (hardware, Docker, build tools, services)
-crashwise setup     # interactive provisioner (Arch/Ubuntu/Fedora; non-root → sudo)
-crashwise setup -y  # non-interactive (CI / scripted use)
-crashwise setup --dry-run  # print the install script without executing it
+# Interactive setup — detects your distro and installs missing tools
+crashwise setup
+
+# Check system health
+crashwise doctor
 ```
 
-### One-Command Stack
+**Or install manually:**
 
-> **⚠️ Use `docker compose` (v2 plugin), NOT `docker-compose`.**
-> The legacy Python `docker-compose` v1 is incompatible with modern
-> Docker Engines and will crash with `KeyError: 'ContainerConfig'`.
-> See [docs/INSTALL.md](./docs/INSTALL.md#legacy-docker-compose-v1--keyerror-containerconfig)
-> for the migration steps. Verify with `docker compose version` —
-> should report `v2.x.x`.
+<details>
+<summary>Ubuntu / Debian</summary>
 
 ```bash
-# 1. Configure (edit secrets as needed)
+sudo apt-get update
+sudo apt-get install -y \
+  docker.io docker-compose-plugin \
+  clang lld llvm-dev \
+  gcc g++ cmake \
+  afl++
+
+# Add yourself to the docker group (log out & back in after)
+sudo usermod -aG docker $USER
+```
+</details>
+
+<details>
+<summary>Arch Linux</summary>
+
+```bash
+sudo pacman -S --needed \
+  docker docker-buildx docker-compose \
+  clang lld llvm \
+  gcc cmake
+
+# AFL++ is in the AUR
+yay -S aflplusplus
+
+# Enable Docker
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+```
+</details>
+
+<details>
+<summary>Fedora</summary>
+
+```bash
+sudo dnf install -y \
+  docker docker-compose-plugin \
+  clang lld llvm-devel \
+  gcc gcc-c++ cmake \
+  american-fuzzy-lop
+
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+```
+</details>
+
+> **Note:** If you only use the Docker worker (`Dockerfile.worker`), the host
+> does NOT need Clang/GCC/AFL++ installed — everything is bundled in the
+> container image. You still need Docker itself.
+
+---
+
+## Quick Start
+
+### 1. Configure Environment
+
+```bash
 cp .env.example .env
+# Edit .env — at minimum, set one LLM API key (see LLM Configuration below)
+```
 
-# 2. Launch the full stack (Temporal, Postgres, Redis, MinIO, API, Dashboard, worker)
+### 2. Start Infrastructure
+
+```bash
+# Start all services (Temporal, PostgreSQL, Redis, MinIO)
 docker compose up -d
 
-# 3. Verify services
-curl http://localhost:8000/health          # FastAPI API
-curl http://localhost:8501/_stcore/health  # Streamlit Dashboard
-xdg-open http://localhost:8233             # Temporal Web UI
+# Verify services are healthy
+docker compose ps
+
+# Wait for Temporal to finish schema migration (~60-90s on first boot)
+docker compose logs -f temporal-server
 ```
 
-### Zero-Config Target Onboarding
+### 3. Initialize a Target
 
 ```bash
-# 1. Navigate to any C/C++/Rust/Go project
-cd /path/to/my-project
+# Navigate to a C/C++ project you want to fuzz
+cd /path/to/target-project
 
-# 2. Auto-detect and initialise
+# Auto-detect build system and generate crashwise.yaml
 crashwise init
-# → Detects build system, language, harness
-# → Generates crashwise.yaml manifest
-# → Initialises database
+```
 
-# 3. Start fuzzing (reads crashwise.yaml automatically)
+### 4. Run a Fuzzing Campaign
+
+```bash
+# Submit the campaign (runs pre-flight checks first)
 crashwise run
-# → Pre-flight gate verifies Docker / Clang / GCC are working
-# → Refuses to launch with actionable hint if anything is missing
+
+# Or specify options explicitly
+crashwise run \
+  --repo https://github.com/example/target.git \
+  --fuzzer afl++ \
+  --timeout 3600
 ```
 
-### Local Development
+### 5. Monitor
 
 ```bash
-# 1. Install dependencies (uv preferred; pip works too)
-uv sync                    # or: pip install -e ".[dev]"
+# View campaign status
+crashwise dashboard
 
-# 2. Run the test suite
-uv run pytest tests/unit/  # 405 passing tests
-
-# 3. Start a Temporal worker
-uv run crashwise worker
-
-# 4. Submit a fuzzing job (in another terminal)
-uv run crashwise run https://github.com/libjxl/libjxl \
-  --fuzzer libfuzzer \
-  --timeout 1800 \
-  --sanitizers address,undefined
-
-# 5. Launch the API server
-uv run crashwise api --reload
-
-# 6. Launch the dashboard
-uv run crashwise dashboard
+# Or use the REST API
+curl http://localhost:8000/campaigns
 ```
 
-### Live Campaign Control (God-Mode Signals)
+---
 
-While a campaign is running, intervene without restarting:
+## LLM Configuration
+
+CrashWise uses AI for two distinct purposes, each with its own configuration:
+
+### 1. Agentic Workflows (Harness Synthesis, Code Evolution, Exploit Gen)
+
+These use **LangChain** and require a high-quality code model. Configure in `.env`:
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `CRASHWISE_LLM_MODEL` | Model name (determines provider) | `claude-sonnet-4-5` |
+| `CRASHWISE_LLM_TEMPERATURE` | Sampling temperature | `0.0` |
+| `ANTHROPIC_API_KEY` | Required if model starts with `claude-*` | `sk-ant-...` |
+| `OPENAI_API_KEY` | Required for all other models (`gpt-*`, etc.) | `sk-...` |
+
+**Routing logic:**
+- Model name starts with `claude` → uses **Anthropic** (`ANTHROPIC_API_KEY`)
+- Everything else → uses **OpenAI** (`OPENAI_API_KEY`)
+
+#### Using OpenAI-Compatible Providers
+
+Any provider with an OpenAI-compatible API works (Together AI, Groq, Fireworks,
+local vLLM, Ollama with OpenAI shim, etc.):
 
 ```bash
-# Get the workflow ID from the `crashwise run` output (or Temporal UI).
-crashwise signal <workflow_id> force_pivot --data "JXL plateau detected"
-crashwise signal <workflow_id> inject_seed --data filename=/tmp/poc.jxl
-crashwise signal <workflow_id> pause_hunt
-crashwise signal <workflow_id> resume_hunt
+# Example: Together AI
+CRASHWISE_LLM_MODEL=meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
+OPENAI_API_KEY=your-together-api-key
+OPENAI_API_BASE=https://api.together.xyz/v1
+
+# Example: Local vLLM
+CRASHWISE_LLM_MODEL=meta-llama/Meta-Llama-3.1-8B-Instruct
+OPENAI_API_KEY=not-needed
+OPENAI_API_BASE=http://localhost:8000/v1
+
+# Example: Groq
+CRASHWISE_LLM_MODEL=llama-3.3-70b-versatile
+OPENAI_API_KEY=gsk_...
+OPENAI_API_BASE=https://api.groq.com/openai/v1
 ```
+
+### 2. Crash Triage & Root Cause Analysis
+
+This uses a **lightweight inference layer** (direct HTTP, not LangChain) for
+crash analysis and patch suggestions. It's optional — without it, triage still
+works via heuristic ASAN/GDB parsing.
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `AI_PROVIDER` | Backend: `ollama`, `venice`, or empty | `ollama` |
+| `AI_MODEL` | Model name for the chosen provider | `llama3.1:8b` |
+| `AI_API_KEY` | API key (Venice only) | `your-key` |
+| `OLLAMA_URL` | Ollama server URL | `http://localhost:11434` |
+
+#### Option A: Ollama (Local, Free, Private)
+
+Best for privacy-sensitive environments. Runs entirely on your machine:
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull a model (8B is fast; 70B is more accurate)
+ollama pull llama3.1:8b
+
+# Configure .env
+AI_PROVIDER=ollama
+AI_MODEL=llama3.1:8b
+OLLAMA_URL=http://localhost:11434
+```
+
+#### Option B: Venice AI (Cloud, OpenAI-Compatible)
+
+Fast cloud inference with privacy guarantees:
+
+```bash
+# Sign up at https://venice.ai and get an API key
+AI_PROVIDER=venice
+AI_API_KEY=your-venice-api-key
+AI_MODEL=llama-3.3-70b
+```
+
+#### Option C: No AI Provider (Heuristic-Only)
+
+Perfectly functional — crashes are still classified via regex-based ASAN/GDB
+parsing and stack-hash deduplication. You just won't get deep root-cause
+analysis or AI-generated patch suggestions:
+
+```bash
+AI_PROVIDER=
+```
+
+### Recommended Configurations
+
+<details>
+<summary><strong>Full Cloud Setup (Best Quality)</strong></summary>
+
+```bash
+# Agentic workflows — Anthropic Claude
+CRASHWISE_LLM_MODEL=claude-sonnet-4-5
+ANTHROPIC_API_KEY=sk-ant-api03-...
+
+# Triage — Venice (fast + private)
+AI_PROVIDER=venice
+AI_API_KEY=your-venice-key
+AI_MODEL=llama-3.3-70b
+```
+</details>
+
+<details>
+<summary><strong>Fully Local Setup (Free, Private)</strong></summary>
+
+```bash
+# Agentic workflows — local via Ollama OpenAI shim
+CRASHWISE_LLM_MODEL=llama3.1:70b
+OPENAI_API_KEY=ollama
+OPENAI_API_BASE=http://localhost:11434/v1
+
+# Triage — Ollama direct
+AI_PROVIDER=ollama
+AI_MODEL=llama3.1:8b
+OLLAMA_URL=http://localhost:11434
+```
+</details>
+
+<details>
+<summary><strong>Budget Setup (Cheap Cloud)</strong></summary>
+
+```bash
+# Agentic workflows — OpenAI mini
+CRASHWISE_LLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-...
+
+# Triage — heuristic only (free)
+AI_PROVIDER=
+```
+</details>
+
+---
+
+## Docker Compose Reference
+
+The full-stack deployment uses Docker Compose with the following services:
+
+| Service | Image | Port | Purpose |
+|---------|-------|------|---------|
+| `temporal-server` | `temporalio/auto-setup:1.25` | 7233 | Workflow engine (gRPC) |
+| `temporal-ui` | `temporalio/ui:2.30.0` | 8233 | Temporal Web UI |
+| `postgres` | `postgres:16-alpine` | 5432 | Database (Temporal + CrashWise) |
+| `redis` | `redis:7-alpine` | 6379 | Counters, dedup, MAB state |
+| `minio` | `minio/minio:latest` | 9000, 9001 | Local S3 (R2 emulation) |
+| `api` | CrashWise (Dockerfile) | 8000 | FastAPI REST API |
+| `dashboard` | CrashWise (Dockerfile) | 8501 | Streamlit UI |
+| `worker` | CrashWise (Dockerfile.worker) | — | Temporal worker (fuzzer node) |
+
+### Common Commands
+
+```bash
+# Start everything
+docker compose up -d
+
+# Start only infrastructure (no CrashWise app containers)
+docker compose up -d temporal-server postgres redis minio
+
+# Check service health
+docker compose ps
+
+# View logs for a specific service
+docker compose logs -f temporal-server
+docker compose logs -f worker
+
+# Scale workers horizontally
+docker compose up -d --scale worker=4
+
+# Stop everything
+docker compose down
+
+# Stop and remove all data (fresh start)
+docker compose down -v
+```
+
+### First-Boot Timing
+
+On first startup, Temporal runs database schema migrations which can take
+**60–90 seconds**. Other services (`api`, `worker`) wait for Temporal's
+healthcheck to pass before starting. Monitor with:
+
+```bash
+docker compose logs -f temporal-server
+# Wait for: "Temporal cluster is healthy"
+```
+
+### Troubleshooting Docker Compose
+
+<details>
+<summary><code>docker compose up temporal</code> → "no such service: temporal"</summary>
+
+The service is named **`temporal-server`** (not `temporal`):
+
+```bash
+docker compose up -d temporal-server
+```
+</details>
+
+<details>
+<summary>Temporal shows UNHEALTHY</summary>
+
+This is usually a timing issue on first boot. The schema migration takes 60-90s:
+
+```bash
+# Check progress
+docker compose logs temporal-server | tail -20
+
+# If stuck, restart
+docker compose restart temporal-server
+```
+</details>
+
+<details>
+<summary>"permission denied" on Docker socket</summary>
+
+Your user isn't in the `docker` group, or you need to re-login:
+
+```bash
+# Add to group
+sudo usermod -aG docker $USER
+
+# Apply immediately (current shell only)
+newgrp docker
+
+# Or log out and back in for full effect
+```
+</details>
 
 ---
 
 ## CLI Reference
 
 ```
-$ crashwise --help
-
- Usage: crashwise [OPTIONS] COMMAND [ARGS]...
-
- CrashWise — autonomous AI-powered fuzzing & crash triage.
-
-╭─ Commands ───────────────────────────────────────────────────────────────╮
-│ version      Print the installed CrashWise version.                      │
-│ info         Print runtime + configuration metadata.                      │
-│ init         Initialise a project (detect → manifest → DB).               │
-│ doctor       System health diagnostic (Sentinel).                         │
-│ setup        Interactive distro-aware provisioner (Arch/Ubuntu/Fedora).   │
-│ run          Submit a fuzzing workflow (with mandatory pre-flight gate).  │
-│ worker       Start a Temporal worker.                                     │
-│ api          Launch the FastAPI management server.                        │
-│ dashboard    Launch the Streamlit intelligence dashboard.                 │
-│ signal       Send God-Mode signals to a live campaign workflow.           │
-│ exploit      Generate a standalone PoC for a confirmed crash.             │
-╰──────────────────────────────────────────────────────────────────────────╯
+crashwise --help
 ```
 
-### Example Commands
+| Command | Description |
+|---------|-------------|
+| `crashwise version` | Print installed version |
+| `crashwise info` | Print runtime configuration |
+| `crashwise doctor` | System health diagnostic (checks Docker, build tools, services) |
+| `crashwise setup` | Interactive distro-aware dependency installer |
+| `crashwise init` | Zero-config project onboarding (generates `crashwise.yaml`) |
+| `crashwise run` | Submit a fuzzing workflow (with pre-flight gate) |
+| `crashwise worker` | Start a Temporal worker |
+| `crashwise api` | Launch the FastAPI management server |
+| `crashwise dashboard` | Launch the Streamlit intelligence dashboard |
+| `crashwise signal <id> <signal>` | Send a God-Mode signal to a live campaign |
+
+### God-Mode Signals
 
 ```bash
-# System diagnostics (Sentinel)
-crashwise doctor
+# Force the MAB strategist to switch fuzzer strategy
+crashwise signal <campaign-id> force_pivot
 
-# Distro-aware provisioning (Arch / Ubuntu / Fedora)
-crashwise setup --dry-run   # preview first
-crashwise setup             # interactive (asks before each privileged command)
-crashwise setup --yes       # non-interactive (CI / scripted)
-crashwise setup --output setup.sh   # write the script to a file for review
+# Inject a manually-crafted seed into the running corpus
+crashwise signal <campaign-id> inject_seed --path /path/to/seed
 
-# Zero-config onboarding
-cd my-project && crashwise init && crashwise run
+# Pause a campaign for review
+crashwise signal <campaign-id> pause_hunt
 
-# Explicit target submission (pre-flight gate is on by default)
-crashwise run https://github.com/openssl/openssl \
-  --fuzzer libfuzzer --timeout 600 --branch master
-
-# Skip the pre-flight gate (only inside the dockerised worker)
-crashwise run https://github.com/openssl/openssl --skip-preflight
-
-# God-Mode signals — intervene in a live campaign
-crashwise signal crashwise-abc123 force_pivot --data "stuck on magic value"
-crashwise signal crashwise-abc123 inject_seed --data filename=/tmp/poc.jxl
-crashwise signal crashwise-abc123 pause_hunt
-crashwise signal crashwise-abc123 resume_hunt
-
-# Start a worker with custom Temporal endpoint
-crashwise worker --host temporal.example.com:7233
-
-# Generate and verify a PoC for crash ID abc-123
-crashwise exploit abc-123 --verify --output /tmp/poc.c
-
-# Launch API with multiple workers
-crashwise api --port 8000 --workers 4
-
-# Launch dashboard pointing to remote API
-crashwise dashboard --api-url https://api.crashwise.io
+# Resume a paused campaign
+crashwise signal <campaign-id> resume_hunt
 ```
 
 ---
 
 ## Testing
 
-CrashWise maintains **405 passing tests** across the audited surface (423
-collected; the deselected suite excludes 2 pre-existing CLI mocks and 4
-network-dependent AI-provider tests).
-
 ```bash
-# Run the full suite
+# Run the full test suite (405 tests)
 uv run pytest tests/ -v
 
-# With coverage
+# With coverage report
 uv run pytest tests/ --cov=crashwise --cov-report=html
 
-# Lint and type check
+# Unit tests only (fast, no infrastructure needed)
+uv run pytest tests/unit/ -v
+
+# Lint
 uv run ruff check crashwise/ tests/
-uv run ruff format --check crashwise/ tests/
-uv run mypy crashwise/ --config-file pyproject.toml
-```
 
-| Test Suite | Count | Focus |
-|-----------|-------|-------|
-| `test_smoke.py` | 4 | Basic imports, config loading |
-| `test_models.py` | 4 | Pydantic model round-trips |
-| `test_workflow.py` | 3 | Temporal workflow sandbox (incl. MAB-enabled) |
-| `test_compiler.py` | 2 | Harness compiler |
-| `test_harness_synth_graph.py` | 5 | LangGraph harness generation |
-| `test_harness_evolution.py` | 35 | Coverage blockers, harness rewriting |
-| `test_analyzer.py` | 5 | Source / coverage analyser |
-| `test_triage.py` | 12 | Crash classification, dedup, GDB parsing |
-| `test_ai_triage.py` | 16 | LLM-driven triage path |
-| `test_exploit_gen.py` | 35 | Exploit Architect, primitives, reachability |
-| `test_kernelbridge.py` | 14 | Kernel bridge, OOPS / KASAN / KFENCE parsing |
-| `test_execution.py` | 19 | Docker manager, fuzz job execution, S6 sandbox flags |
-| `test_real_execution.py` | 6 | Real Docker fuzzing path with mocked daemon |
-| `test_feedback.py` | 13 | Coverage analysis, zero-coverage detection (B10) |
-| `test_research.py` | 15 | CVE harvester, PoC transformer |
-| `test_database.py` | 8 | SQLAlchemy ORM, async CRUD |
-| `test_api.py` | 8 | FastAPI endpoints |
-| `test_api_v2.py` | 8 | FastAPI v2 endpoints |
-| `test_storage.py` | 11 | R2 storage, sync directory |
-| `test_redis.py` | 18 | Redis client, MAB persistence, heartbeat |
-| `test_verification.py` | 11 | Patch apply, build, regression |
-| `test_reporting.py` | 18 | CVSS, report generation, notifications |
-| `test_cli.py` | 16 | CLI commands, pre-flight gate, signal command |
-| `test_mab_strategist.py` | 23 | Thompson Sampling, UCB1, plateau detection |
-| `test_profiler.py` | 26 | Target profiling, attack surface |
-| `test_manifest.py` | 27 | Manifest round-trip, discovery, validation |
-| `test_sentinel.py` | 61 | Distro detection, per-distro packages, AUR split, sudo prefix |
-| **Total** | **423** | **405 passing on touched surface** |
-
----
-
-## Repository Layout
-
-```
-Crashwise/
-├── crashwise/                    # Main Python package
-│   ├── core/                     # Config, logging, models, database, sentinel
-│   │   ├── ai_provider.py        # Ollama / Venice / Null inference providers
-│   │   ├── config.py             # Pydantic-settings configuration
-│   │   ├── database.py           # SQLAlchemy async ORM (Campaign, Crash, Seed)
-│   │   ├── discovery.py          # Autodiscovery engine (CMake, Cargo, Go...)
-│   │   ├── logging.py            # structlog setup
-│   │   ├── manifest.py           # crashwise.yaml Pydantic model
-│   │   ├── models.py             # Pydantic I/O models for all boundaries
-│   │   ├── notifications.py      # Webhook + SMTP + PGP notification router
-│   │   ├── redis.py              # Redis client (counters, dedup, MAB persistence)
-│   │   ├── sentinel.py           # DistroDetector + per-distro provisioner
-│   │   └── storage.py            # R2/S3 object storage
-│   ├── agents/                   # LangGraph AI agents
-│   │   ├── harness_synth/        # Harness synthesis (C/C++ → fuzzer binary)
-│   │   │   ├── analyzer.py       # Source-code analyser (entry points, signature)
-│   │   │   ├── compiler.py       # Compile orchestration
-│   │   │   ├── evolution.py      # Harness Evolution Node (blocker-bypass rewrites)
-│   │   │   ├── graph.py          # LangGraph workflow
-│   │   │   ├── llm.py            # LLM provider integration
-│   │   │   ├── nodes.py          # analyze_code → generate → validate
-│   │   │   ├── prompts.py        # System / user / retry prompt templates
-│   │   │   ├── state.py          # HarnessState (Pydantic)
-│   │   │   └── synth.py          # Top-level synthesise_harness coroutine
-│   │   ├── triage/               # Crash triage (analyzer, dedup, exploit_gen)
-│   │   ├── feedback/             # Coverage feedback (zero-cov detection, mutation hints)
-│   │   ├── research/             # Profiler, harvester, coverage_analyzer, transformer
-│   │   ├── execution/            # MAB strategist (Thompson / UCB1)
-│   │   └── reporting/            # CVSS calculator + report generator
-│   ├── api/                      # FastAPI REST API
-│   ├── dashboard/                # Streamlit intelligence dashboard
-│   ├── orchestration/            # Temporal workflows & activities
-│   │   ├── client.py             # Temporal client with retry logic
-│   │   ├── worker.py             # Worker bootstrap
-│   │   ├── data_converter.py     # Pydantic ↔ Temporal payload converter
-│   │   ├── workflows/            # MainFuzzingWorkflow + signal handlers
-│   │   └── activities/           # 18 Temporal activities incl. inject_seeds, evolve_harness, analyze_coverage
-│   ├── execution/                # Fuzzer execution backends
-│   │   ├── docker_manager.py     # Hardened Docker orchestration (network none, read-only, …)
-│   │   ├── monitor.py            # Per-fuzzer health checker (AFL stats vs libFuzzer log)
-│   │   ├── dispatcher.py         # Profile-aware fuzzer selection
-│   │   └── qemu_manager.py       # QEMU/KVM VM orchestration
-│   ├── kernelbridge/             # syzkaller / OOPS / KASAN / KFENCE parser
-│   ├── research/                 # Reachability engine
-│   └── cli.py                    # Universal CLI entry point (incl. `signal`, pre-flight)
-├── tests/                        # Comprehensive test suite
-│   └── unit/                     # 27 test files, 423 collected, 405 passing
-├── docs/                         # User-facing documentation
-│   ├── architecture.md           # In-depth architecture write-up
-│   └── INSTALL.md                # Zero-Friction Install Guide (Arch + Ubuntu)
-├── .github/workflows/            # CI/CD pipelines
-├── docker-compose.yaml           # Full-stack production orchestration
-├── Dockerfile                    # Multi-stage production image (API/Dashboard)
-├── Dockerfile.worker             # Master Worker fuzz-node (AFL++, Clang, LLVM)
-├── pyproject.toml                # uv-managed, PEP 621, console-script entry point
-├── CHANGELOG.md                  # Phase-by-phase development history
-├── CONTRIBUTING.md               # Project contribution standards
-└── LICENSE                       # MIT
+# Type check
+uv run mypy crashwise/
 ```
 
 ---
 
-## Development Roadmap
+## Project Structure
 
-| Phase | Status | Highlights |
-|-------|--------|-----------|
-| Phase 0 | ✅ Complete | Skeleton, config, logging, models |
-| Phase 1 | ✅ Complete | Temporal orchestration (workflows, activities, worker) |
-| Phase 2 | ✅ Complete | AI-driven harness synthesis (LangGraph agent) |
-| Phase 3 | ✅ Complete | Intelligent triage (ASAN/GDB/LLM classification) |
-| Phase 4 | ✅ Complete | KernelBridge (syzkaller integration) |
-| Phase 5 | ✅ Complete | Execution engine (Docker, QEMU, resource monitoring) |
-| Phase 6 | ✅ Complete | Feedback loop (coverage → prompt → re-synth) |
-| Phase 7 | ✅ Complete | Seeding brain (CVE harvester, PoC transformer) |
-| Phase 8 | ✅ Complete | Persistence (PostgreSQL, SQLite, FastAPI REST) |
-| Phase 9 | ✅ Complete | Distributed storage (R2, Redis, MinIO) |
-| Phase 10 | ✅ Complete | Hybrid AI agent (Ollama, Venice, Null providers) |
-| Phase 11 | ✅ Complete | Intelligence dashboard (Streamlit, export) |
-| Phase 12 | ✅ Complete | Patch verification (VerifyPatchWorkflow, regression) |
-| Phase 13 | ✅ Complete | Auto-disclosure (CVSS, reports, notifications) |
-| Phase 14 | ✅ Complete | Production packaging (Docker, CI/CD, release) |
-| Phase 15 | ✅ Complete | PoC generation (Exploit Architect, reachability) |
-| Phase 16 | ✅ Complete | Target profiling (domain, complexity, attack surface) |
-| Phase 17 | ✅ Complete | MAB strategy switching (Thompson, UCB1, plateau) |
-| Phase 18 | ✅ Complete | Harness re-synthesis (7 blocker types, hot-swap) |
-| Phase 19 | ✅ Complete | Unified manifest & zero-config onboarding |
-| Phase 20 | ✅ Complete | System Sentinel & Master Worker image |
-| Phase 21 | ✅ Complete | Real-World Bridge — live Docker fuzzing with stdout parsing |
-| **S6 Hardening** | ✅ Complete | Sandbox lockdown (`--network none`, `--read-only`, `tmpfs`), shell-free hot-swap, persistent build cache, AFL stats parser, zero-coverage stall detection |
-| **God-Mode Signals** | ✅ Complete | `force_pivot` / `inject_seed` / `pause_hunt` / `resume_hunt` workflow signals + `crashwise signal` CLI command |
-| **Linux Native** | ✅ Complete | DistroDetector for Arch/Ubuntu/Fedora, sudo-aware install hints, AUR split, interactive `setup`, mandatory pre-flight gate on `run` |
-| **Intelligence Loop** | ✅ Complete | `_run_evolution` now calls `analyze_coverage` to identify the exact `BlockerType` + source line, passes structured blocker into LLM evolution agent (no more `BlockerType.UNKNOWN` stubs); bounded by `max_evolution_count` |
-| **v1.0.0-rc2** | 🚀 **Current** | **21 phases, 405 tests passing, libjxl-ready** |
-| v1.1.0 | 📋 Planned | Live `coverage_data` wired into evolution, dashboard cockpit (live execs/sec, MAB arm, code hotspots) |
-| v1.2.0 | 📋 Planned | DB schema for harness lineage (Crash → run_id → MAB arm → harness version) |
-| v2.0.0 | 📋 Planned | Multi-target scheduling, WebAssembly target support, cloud-native scaling |
-
----
-
-## Validation Campaign
-
-CrashWise has been validated against real-world targets and hardened
-through a Zero-Trust Audit:
-
-| Target | Component | Result |
-|--------|-----------|--------|
-| **libtgvoip** (Telegram) | json11 JSON parser | ✅ 754K execs/60s, 788 coverage blocks, 0 crashes |
-| **libjxl** (JPEG XL) | Container box parser, ANS entropy decoder | 🚀 Ready for live campaign (S6-hardened) |
-
-### Fixes discovered during validation
-
-1. `--depth 1` clone misses CMake submodules → use `--recursive`
-2. `json11.cpp` missing `#include <cstdint>` on Clang 22 → added
-3. Temporal auto-setup fails with missing dynamic config → removed env var
-4. MinIO pinned image removed from Docker Hub → use `latest`
-5. `init_db()` takes `drop` not `drop_all` → fixed CLI mapping
-
-### S6 / Zero-Trust Audit hardening
-
-* **Sandbox lockdown** (`crashwise/execution/docker_manager.py`) — fuzzer
-  containers run with `--network none`, `--read-only`, size-capped
-  `--tmpfs`, `--cap-drop ALL`, `no-new-privileges`, conditional
-  `SYS_PTRACE` (AFL only), and a pre-flight `docker rm -f` against the
-  container name to neutralise zombies from a prior worker crash.
-* **Shell-free hot-swap** (`crashwise/orchestration/activities/hot_swap_harness.py`) —
-  `create_subprocess_shell` replaced with `create_subprocess_exec` over a
-  `shlex.split` argv against an allow-list of compilers (`gcc` / `clang` /
-  `clang++` / `afl-clang-fast` / …). LLM-supplied compile commands cannot
-  spawn subshells.
-* **Persistent build cache** — compiled harness binaries are copied to
-  `~/.cache/crashwise/build/{job_id}/harness` (or `$CRASHWISE_BUILD_CACHE`)
-  *before* the `TemporaryDirectory` exits, so successful evolutions
-  outlive their compile sandbox.
-* **AFL stats parser dispatch** (`crashwise/execution/monitor.py`) — the
-  health checker now reads `fuzzer_stats` for AFL jobs instead of
-  pushing TUI output through the libFuzzer regex.
-* **Zero-coverage stall detection** (`crashwise/agents/feedback/analyzer.py`) —
-  `edges_hit == 0` past a 2-iteration warm-up is now flagged STALLED with
-  an instrumentation-failure hint, not silently reported as healthy.
-* **Pre-flight gate** (`crashwise/cli.py`) — `crashwise run` refuses to
-  submit a workflow when Docker / Clang / GCC are missing; passes a
-  full-distro install hint to the user.
+```
+crashwise/
+├── cli.py                    # Typer CLI entry point
+├── api/main.py               # FastAPI REST API
+├── dashboard/                # Streamlit intelligence dashboard
+├── core/                     # Shared foundation layer
+│   ├── config.py             #   Pydantic-settings (env-based config)
+│   ├── models.py             #   Shared Pydantic data models
+│   ├── database.py           #   SQLAlchemy async ORM
+│   ├── discovery.py          #   Auto-detection of build systems
+│   ├── sentinel.py           #   System diagnostics & provisioning
+│   ├── redis.py              #   Redis client
+│   ├── storage.py            #   R2/S3 object storage
+│   ├── ai_provider.py        #   Ollama/Venice inference providers
+│   └── notifications.py      #   Webhook/SMTP/PGP alerts
+├── orchestration/            # Temporal workflows + activities
+│   ├── workflows/            #   MainFuzzingWorkflow, VerifyPatch, etc.
+│   └── activities/           #   18 activity implementations
+├── agents/                   # LangGraph AI agents
+│   ├── harness_synth/        #   Harness generation & evolution
+│   ├── triage/               #   Crash classification & exploit gen
+│   ├── feedback/             #   Coverage feedback loop
+│   ├── research/             #   Target profiling, CVE harvesting
+│   ├── execution/            #   MAB strategist (Thompson Sampling)
+│   └── reporting/            #   CVSS scoring & report generation
+├── execution/                # Fuzzer execution layer
+│   ├── docker_manager.py     #   Hardened Docker orchestration
+│   ├── qemu_manager.py       #   QEMU/KVM VMs
+│   └── monitor.py            #   Fuzzer stats parsing
+└── kernelbridge/             # Linux kernel fuzzing (syzkaller)
+```
 
 ---
 
 ## Contributing
 
-We welcome contributions from the security research community. Please read
-[CONTRIBUTING.md](./CONTRIBUTING.md) for our standards on code quality,
-commit messages, and pull request etiquette.
-
-**Project Standards (by Yahya Toubali):**
-- Every file must include `SPDX-License-Identifier: MIT`
-- Strict mypy typing (`--strict`) on all new code
-- ruff lint + format before commit
-- Tests must pass (`pytest`) and coverage should not drop
-- Pydantic models on every public API boundary
-- Temporal workflow determinism: no non-deterministic imports in workflow modules
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for coding standards, testing
+requirements, commit message format, and the pull request process.
 
 ---
 
-## Acknowledgements
+## Security
 
-CrashWise builds on the shoulders of giants:
-
-- [AFL++](https://github.com/AFLplusplus/AFLplusplus) — The gold-standard fuzzer
-- [libFuzzer](https://llvm.org/docs/LibFuzzer.html) — In-process fuzzing engine
-- [syzkaller](https://github.com/google/syzkaller) — Linux kernel fuzzing
-- [Temporal](https://temporal.io) — Durable execution platform
-- [LangGraph](https://langchain-ai.github.io/langgraph/) — LLM agent orchestration
-- [Ollama](https://ollama.com) / [Venice.ai](https://venice.ai) — Local & private inference
+If you discover a security vulnerability in CrashWise, please **do not** open a
+public issue. Email **crashwise@yahyatoubali.me** with details and we will
+coordinate a responsible disclosure timeline.
 
 ---
 
 ## License
 
-[MIT](./LICENSE) © 2026 CrashWise Contributors
+CrashWise is licensed under the [MIT License](./LICENSE).
 
-Built with ❤️ by **Yahya Toubali**, Security Researcher — developing under the **Nadicorp** label.
+Copyright (c) 2026 CrashWise Contributors.

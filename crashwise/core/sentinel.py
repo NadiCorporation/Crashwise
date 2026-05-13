@@ -898,7 +898,7 @@ async def check_service_temporal(
         name="service.temporal",
         status=CheckStatus.WARN,
         message=f"Temporal server not reachable at {host}:{port}.",
-        remediation="Start Temporal:  docker compose up temporal",
+        remediation="Start Temporal:  docker compose up -d temporal-server",
     )
 
 
@@ -923,7 +923,7 @@ async def check_service_redis(
             name="service.redis",
             status=CheckStatus.WARN,
             message=f"Redis not reachable at {host}:{port}: {exc}",
-            remediation="Start Redis:  docker compose up redis",
+            remediation="Start Redis:  docker compose up -d redis",
         )
 
 
