@@ -199,6 +199,13 @@ class DockerManager:
             "no-new-privileges:true",
             "--cap-drop",
             "ALL",
+            # Disk protection: limit individual file sizes to 10 GB.
+            # Prevents a runaway corpus or crash dump from filling the host.
+            "--ulimit",
+            "fsize=10737418240:10737418240",
+            # OOM handling: disable OOM kill so we can detect OOM state
+            # and log it cleanly rather than having the container vanish.
+            "--oom-kill-disable=false",
         ]
         # AFL forkserver needs SYS_PTRACE; libFuzzer does not.
         if is_afl:
@@ -311,9 +318,14 @@ class DockerManager:
     async def wait(self, job_id: str, *, timeout: float | None = None) -> int:
         """Block until the container exits; return its exit code.
 
-        Returns ``-1`` on timeout or when the job is unknown. Used by the
-        execution path to detect whether the fuzzer terminated naturally
-        (e.g. found a crash) vs being externally stopped.
+        Exit code interpretation:
+          * 0: normal exit (fuzzer completed or found nothing)
+          * 1: fuzzer error (crash found, invalid args, etc.)
+          * 137: OOM kill (SIGKILL from kernel OOM killer) or docker stop -t exceeded
+          * 139: SIGSEGV (crash in the fuzzer itself)
+          * -1: timeout or unknown job
+
+        Returns ``-1`` on timeout or when the job is unknown.
         """
         container_id = self._containers.get(job_id)
         if not container_id:
@@ -335,9 +347,28 @@ class DockerManager:
                 proc.kill()
             return -1
         try:
-            return int(stdout.decode("utf-8", errors="replace").strip())
+            exit_code = int(stdout.decode("utf-8", errors="replace").strip())
         except ValueError:
             return -1
+
+        # Detect OOM kill (exit 137 = 128 + SIGKILL).
+        if exit_code == 137:
+            log.warning(
+                "docker.oom_or_killed",
+                job_id=job_id,
+                exit_code=exit_code,
+                detail="Container was killed (likely OOM). Consider increasing "
+                       "--memory or reducing parallel corpus size.",
+            )
+        elif exit_code == 139:
+            log.warning(
+                "docker.segfault",
+                job_id=job_id,
+                exit_code=exit_code,
+                detail="Container crashed with SIGSEGV (fuzzer or harness bug).",
+            )
+
+        return exit_code
 
     async def cleanup(self, job_id: str) -> None:
         """Remove the container; idempotent.
@@ -510,7 +541,26 @@ class DockerManager:
 
     # ── Internals ────────────────────────────────────────────────────────────
     async def _docker_available(self) -> bool:
-        return shutil.which("docker") is not None
+        """Verify Docker daemon is installed AND responsive.
+
+        Checks both binary presence and daemon responsiveness via
+        'docker info'. A hanging daemon is detected by a 10-second timeout.
+        """
+        if not shutil.which("docker"):
+            return False
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "info",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=10.0)
+            return proc.returncode == 0
+        except asyncio.TimeoutError:
+            log.error("docker.daemon_timeout", detail="docker info timed out after 10s")
+            return False
+        except Exception:
+            return False
 
     async def _force_remove_by_name(self, container_name: str) -> None:
         """Remove a container by name; swallow errors when none exists.
@@ -531,6 +581,12 @@ class DockerManager:
         await proc.communicate()
 
     async def _ensure_image(self, image: str) -> None:
+        """Ensure a Docker image is available locally; pull if missing.
+
+        Timeout: image pulls are capped at 5 minutes. Network issues or
+        massive images beyond this timeout trigger a clear error rather
+        than blocking the worker indefinitely.
+        """
         proc = await asyncio.create_subprocess_exec(
             "docker",
             "images",
@@ -550,7 +606,18 @@ class DockerManager:
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await pull_proc.communicate()
+        try:
+            _, stderr = await asyncio.wait_for(
+                pull_proc.communicate(), timeout=300.0  # 5-minute pull timeout.
+            )
+        except asyncio.TimeoutError:
+            # Kill the stuck pull process.
+            with contextlib.suppress(ProcessLookupError):
+                pull_proc.kill()
+            raise RuntimeError(
+                f"docker pull timed out after 300s for {image}. "
+                "Check network connectivity or pre-pull the image."
+            )
         if pull_proc.returncode != 0:
             raise RuntimeError(
                 f"docker pull failed for {image}: {stderr.decode('utf-8', errors='replace')}"
