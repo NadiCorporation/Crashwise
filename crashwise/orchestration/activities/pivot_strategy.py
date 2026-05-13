@@ -71,13 +71,13 @@ async def pivot_strategy(payload: PivotStrategyInput) -> PivotStrategyOutput:
 
 
 async def _hydrate_from_redis(payload: PivotStrategyInput) -> PivotStrategyInput:
-    """If MabState exists in Redis, prefer it over the payload's copy."""
+    """If MabState exists in Redis (or DB fallback), prefer it over the payload's copy."""
     try:
         from crashwise.core.redis import load_mab_state
 
         raw = await load_mab_state(payload.campaign_id)
-    except Exception as exc:  # Redis unreachable / disabled — fall through.
-        log.debug("pivot_strategy.redis_load_skipped", error=str(exc))
+    except Exception as exc:  # Redis + DB both unreachable — fall through.
+        log.warning("pivot_strategy.state_load_failed", error=str(exc)[:100])
         return payload
     if not raw:
         return payload
@@ -94,13 +94,17 @@ async def _hydrate_from_redis(payload: PivotStrategyInput) -> PivotStrategyInput
 
 
 async def _persist_to_redis(campaign_id: str, state: MabState) -> None:
-    """Save the updated MabState back to Redis for the next iteration."""
+    """Save the updated MabState back to Redis (with DB fallback)."""
     try:
         from crashwise.core.redis import save_mab_state
 
         await save_mab_state(campaign_id, state.model_dump_json())
     except Exception as exc:
-        log.debug("pivot_strategy.redis_save_skipped", error=str(exc))
+        log.warning(
+            "pivot_strategy.state_persist_failed",
+            campaign_id=campaign_id,
+            error=str(exc)[:100],
+        )
 
 
 __all__ = ["pivot_strategy"]
