@@ -209,9 +209,15 @@ def _parse_coverage_text(text: str) -> tuple[set[int], set[int]]:
       • AFL++ plot_data: CSV with edges_found column
       • AFL++ queue files: +cov markers indicate new coverage paths
       • libFuzzer: exec_count,cov_edges,cov_features CSV
+      • llvm-cov export (lcov-style DA: lines from JSON conversion)
+      • sancov symbolized output (lcov-style DA: lines)
     """
     hit: set[int] = set()
     missed: set[int] = set()
+
+    # Check if this is llvm-cov or sancov line-level data (highest quality).
+    if "# llvm-cov export" in text or "# sancov symbolized" in text:
+        return _parse_lcov_format(text)
 
     # Check if this is AFL++ stats-based coverage data.
     if "# AFL++ fuzzer_stats coverage data" in text or "# AFL++ plot_data" in text:
@@ -380,6 +386,33 @@ def _parse_libfuzzer_coverage_summary(text: str) -> tuple[set[int], set[int]]:
         estimated_total = int(max_cov * 1.3) if max_cov > 0 else 0
         for i in range(max_cov + 1, estimated_total + 1):
             missed.add(i)
+
+    return hit, missed
+
+
+def _parse_lcov_format(text: str) -> tuple[set[int], set[int]]:
+    """Parse lcov-style DA:<line>,<count> coverage data.
+
+    This is the format produced by our llvm-cov export and sancov
+    symbolization pipelines. Provides real line-level hit/miss data.
+    """
+    hit: set[int] = set()
+    missed: set[int] = set()
+
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("DA:"):
+            parts = line[3:].split(",")
+            if len(parts) >= 2:
+                try:
+                    ln = int(parts[0])
+                    count = int(parts[1])
+                    if count > 0:
+                        hit.add(ln)
+                    else:
+                        missed.add(ln)
+                except ValueError:
+                    pass
 
     return hit, missed
 

@@ -20,8 +20,10 @@ minimal inputs based on heuristic domain detection.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
+import shlex
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -219,13 +221,17 @@ async def harvest_seeds(
     *,
     max_results: int = 10,
     workdir: Path | None = None,
+    poc_urls: list[str] | None = None,
+    local_seed_dirs: list[Path] | None = None,
 ) -> list[SeedMetadata]:
     """Discover and generate seeds for *target_name* autonomously.
 
     Works for ANY target by combining:
     1. Repository test-vector scanning (if workdir provided)
-    2. Format-aware seed generation based on domain detection
-    3. Generic boundary-value seeds that trigger common parser bugs
+    2. Async scraping of configured PoC URLs (throttled)
+    3. Local research directory scanning
+    4. Format-aware seed generation based on domain detection
+    5. Generic boundary-value seeds that trigger common parser bugs
 
     Parameters
     ----------
@@ -235,6 +241,10 @@ async def harvest_seeds(
         Hard cap on returned seeds.
     workdir:
         Optional path to the cloned target repository for scanning.
+    poc_urls:
+        Optional list of URLs to scrape for PoC/seed files.
+    local_seed_dirs:
+        Optional list of local directories containing research seeds.
 
     Returns
     -------
@@ -251,13 +261,25 @@ async def harvest_seeds(
         results.extend(repo_seeds)
         log.info("harvester.repo_scan", found=len(repo_seeds))
 
-    # ── Strategy 2: Generate format-aware seeds ──────────────────────────
+    # ── Strategy 2: Scrape configured PoC URLs (throttled) ───────────────
+    if poc_urls:
+        scraped = await _scrape_poc_urls(poc_urls, normalized, max_results - len(results))
+        results.extend(scraped)
+        log.info("harvester.url_scrape", found=len(scraped))
+
+    # ── Strategy 3: Scan local research directories ──────────────────────
+    if local_seed_dirs:
+        local = _scan_local_seed_dirs(local_seed_dirs, normalized, max_results - len(results))
+        results.extend(local)
+        log.info("harvester.local_dirs", found=len(local))
+
+    # ── Strategy 4: Generate format-aware seeds ──────────────────────────
     domain = _detect_domain(normalized)
     format_seeds = _generate_format_seeds(normalized, domain)
     results.extend(format_seeds)
     log.info("harvester.format_seeds", domain=domain, generated=len(format_seeds))
 
-    # ── Strategy 3: Generic boundary-value seeds ─────────────────────────
+    # ── Strategy 5: Generic boundary-value seeds ─────────────────────────
     generic_seeds = _generate_generic_seeds(normalized)
     results.extend(generic_seeds)
 
@@ -341,6 +363,139 @@ def _is_binary_file(path: Path, sample_size: int = 512) -> bool:
         return b"\x00" in chunk
     except OSError:
         return False
+
+
+# ── Async URL scraper (Phase 2) ──────────────────────────────────────────────
+
+# Throttle: max concurrent downloads and per-request delay.
+_MAX_CONCURRENT_DOWNLOADS: int = 3
+_DOWNLOAD_DELAY_SECONDS: float = 1.0
+_DOWNLOAD_TIMEOUT_SECONDS: float = 30.0
+_MAX_DOWNLOAD_SIZE: int = 2_097_152  # 2 MB per file
+
+
+async def _scrape_poc_urls(
+    urls: list[str],
+    target_name: str,
+    max_seeds: int,
+) -> list[SeedMetadata]:
+    """Download PoC/seed files from configured URLs with throttling.
+
+    Uses subprocess + curl (no shell=True) for HTTP downloads.
+    Respects rate limits and size caps.
+    """
+    if max_seeds <= 0:
+        return []
+
+    import tempfile
+
+    seeds: list[SeedMetadata] = []
+    semaphore = asyncio.Semaphore(_MAX_CONCURRENT_DOWNLOADS)
+    dest_dir = Path(tempfile.mkdtemp(prefix="crashwise_seeds_"))
+
+    async def _download_one(url: str, idx: int) -> SeedMetadata | None:
+        async with semaphore:
+            await asyncio.sleep(_DOWNLOAD_DELAY_SECONDS * idx)
+            dest_file = dest_dir / f"poc_{idx}_{_safe_filename(url)}"
+            try:
+                # Use curl via subprocess_exec — no shell=True.
+                proc = await asyncio.create_subprocess_exec(
+                    "curl", "-sSfL",
+                    "--max-filesize", str(_MAX_DOWNLOAD_SIZE),
+                    "--max-time", str(int(_DOWNLOAD_TIMEOUT_SECONDS)),
+                    "-o", str(dest_file),
+                    url,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=_DOWNLOAD_TIMEOUT_SECONDS + 5
+                )
+                if proc.returncode != 0 or not dest_file.exists():
+                    return None
+                size = dest_file.stat().st_size
+                if size < _MIN_SEED_SIZE or size > _MAX_DOWNLOAD_SIZE:
+                    dest_file.unlink(missing_ok=True)
+                    return None
+                return SeedMetadata(
+                    seed_id=f"scraped-{idx}-{dest_file.stem[:32]}",
+                    source=SeedSource.CVE,
+                    target_name=target_name,
+                    description=f"Scraped PoC from: {url[:100]}",
+                    language="binary",
+                    tags=["scraped", "poc", "remote"],
+                    created_at=datetime.now(tz=UTC),
+                    downloaded_path=dest_file,
+                    seed_path=dest_file,
+                )
+            except (asyncio.TimeoutError, OSError) as exc:
+                log.debug("harvester.scrape_failed", url=url[:100], error=str(exc)[:80])
+                return None
+
+    tasks = [_download_one(url, i) for i, url in enumerate(urls[:max_seeds * 2])]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for r in results:
+        if isinstance(r, SeedMetadata):
+            seeds.append(r)
+            if len(seeds) >= max_seeds:
+                break
+
+    return seeds
+
+
+def _safe_filename(url: str) -> str:
+    """Extract a safe filename from a URL."""
+    # Take the last path component, strip query params, sanitize.
+    from urllib.parse import urlparse
+    path = urlparse(url).path
+    name = Path(path).name if path else "seed"
+    # Remove non-alphanumeric chars except dots and hyphens.
+    safe = re.sub(r"[^\w.\-]", "_", name)
+    return safe[:64] or "seed"
+
+
+# ── Local research directory scanner ─────────────────────────────────────────
+
+def _scan_local_seed_dirs(
+    dirs: list[Path],
+    target_name: str,
+    max_seeds: int,
+) -> list[SeedMetadata]:
+    """Scan local research directories for seed/PoC files."""
+    if max_seeds <= 0:
+        return []
+
+    seeds: list[SeedMetadata] = []
+    for d in dirs:
+        if not d.exists() or not d.is_dir():
+            continue
+        for f in sorted(d.rglob("*")):
+            if not f.is_file():
+                continue
+            try:
+                size = f.stat().st_size
+            except OSError:
+                continue
+            if size < _MIN_SEED_SIZE or size > _MAX_SEED_SIZE:
+                continue
+            seeds.append(
+                SeedMetadata(
+                    seed_id=f"local-{f.stem[:48]}",
+                    source=SeedSource.MANUAL,
+                    target_name=target_name,
+                    description=f"Local research seed: {f.name}",
+                    language="binary",
+                    tags=["local", "research", str(d.name)],
+                    created_at=datetime.now(tz=UTC),
+                    downloaded_path=f,
+                    seed_path=f,
+                )
+            )
+            if len(seeds) >= max_seeds:
+                return seeds
+
+    return seeds
 
 
 # ── Domain detection ─────────────────────────────────────────────────────────

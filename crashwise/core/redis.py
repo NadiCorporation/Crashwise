@@ -282,33 +282,54 @@ async def list_active_workers(
 async def set_campaign_state(
     campaign_id: str,
     state: dict[str, Any],
-    *,
-    ttl: int = 3600,
 ) -> None:
-    """Store ephemeral campaign state in Redis (JSON serialised)."""
+    """Persist campaign state to Redis (no TTL) and database (source of truth).
+
+    The database is the primary store; Redis is a fast-read cache.
+    Long-running or paused campaigns retain state indefinitely.
+    """
+    import json
+
+    state_json = json.dumps(state)
+
+    # Always write to DB first (source of truth).
+    await _save_campaign_state_to_db(campaign_id, state_json)
+
     if not await _check_enabled():
         return
 
-    import json
-
     pool = _get_pool()
     key = f"crashwise:state:{campaign_id}"
-    await pool.setex(key, ttl, json.dumps(state))
+    try:
+        await pool.set(key, state_json)
+    except Exception as exc:
+        log.warning(
+            "redis.campaign_state_save_failed",
+            campaign_id=campaign_id,
+            error=str(exc)[:100],
+        )
 
 
 async def get_campaign_state(campaign_id: str) -> dict[str, Any] | None:
-    """Retrieve ephemeral campaign state from Redis."""
-    if not await _check_enabled():
-        return None
-
+    """Retrieve campaign state. Tries Redis first, falls back to database."""
     import json
 
-    pool = _get_pool()
-    key = f"crashwise:state:{campaign_id}"
-    raw = await pool.get(key)
-    if raw is None:
-        return None
-    return json.loads(raw)  # type: ignore[no-any-return]
+    if await _check_enabled():
+        pool = _get_pool()
+        key = f"crashwise:state:{campaign_id}"
+        try:
+            raw = await pool.get(key)
+            if raw is not None:
+                return json.loads(raw)  # type: ignore[no-any-return]
+        except Exception as exc:
+            log.warning(
+                "redis.campaign_state_load_failed",
+                campaign_id=campaign_id,
+                error=str(exc)[:100],
+            )
+
+    # Fallback: database is the source of truth.
+    return await _load_campaign_state_from_db(campaign_id)
 
 
 # ── MAB state persistence (Phase 21) ─────────────────────────────────────────
@@ -392,6 +413,54 @@ async def clear_mab_state(campaign_id: str) -> None:
 
 
 # ── MAB database fallback ────────────────────────────────────────────────────
+
+
+async def _save_campaign_state_to_db(campaign_id: str, state_json: str) -> None:
+    """Persist campaign state to the database (primary source of truth)."""
+    try:
+        from crashwise.core.database import get_session
+        from sqlalchemy import text
+
+        async with get_session() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO campaign_kv (campaign_id, key, value) "
+                    "VALUES (:cid, :key, :val) "
+                    "ON CONFLICT (campaign_id, key) DO UPDATE SET value = :val"
+                ),
+                {"cid": campaign_id, "key": "campaign_state", "val": state_json},
+            )
+            await session.commit()
+    except Exception as exc:
+        log.warning(
+            "redis.campaign_state_db_save_failed",
+            campaign_id=campaign_id,
+            error=str(exc)[:100],
+        )
+
+
+async def _load_campaign_state_from_db(campaign_id: str) -> dict[str, Any] | None:
+    """Load campaign state from the database (primary source of truth)."""
+    try:
+        import json
+
+        from crashwise.core.database import get_session
+        from sqlalchemy import text
+
+        async with get_session() as session:
+            result = await session.execute(
+                text(
+                    "SELECT value FROM campaign_kv "
+                    "WHERE campaign_id = :cid AND key = :key"
+                ),
+                {"cid": campaign_id, "key": "campaign_state"},
+            )
+            row = result.fetchone()
+            if row:
+                return json.loads(row[0])  # type: ignore[no-any-return]
+    except Exception as exc:
+        log.debug("redis.campaign_state_db_load_skipped", error=str(exc)[:100])
+    return None
 
 
 async def _save_mab_state_to_db(campaign_id: str, mab_state_json: str) -> None:
