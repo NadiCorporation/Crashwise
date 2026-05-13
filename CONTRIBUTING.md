@@ -35,23 +35,30 @@ Security Researcher, for the CrashWise project — developed under the
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (package manager)
-- Docker & Docker Compose
+- Docker & Docker Compose v2
 - Git
 
 ### Setup
 
 ```bash
 # 1. Fork and clone
-git clone https://github.com/YOUR_USERNAME/crashwise.git
-cd crashwise
+git clone https://github.com/YOUR_USERNAME/Crashwise.git
+cd Crashwise
 
 # 2. Install dependencies
 uv sync
 
-# 3. Run tests to verify setup
-uv run pytest
+# 3. Configure environment
+cp .env.example .env
+# Edit .env — see README.md "LLM Configuration" for details
 
-# 4. Configure pre-commit hooks (optional but recommended)
+# 4. Start infrastructure (optional — only needed for integration tests)
+docker compose up -d temporal-server postgres redis
+
+# 5. Run tests to verify setup
+uv run pytest tests/unit/ -v
+
+# 6. Configure pre-commit hooks (optional but recommended)
 uv run pre-commit install
 ```
 
@@ -140,8 +147,8 @@ Every source file MUST include the SPDX license identifier:
 ### Running Tests
 
 ```bash
-# Full suite
-uv run pytest tests/ -v
+# Full suite (unit tests — no infrastructure required)
+uv run pytest tests/unit/ -v
 
 # With coverage
 uv run pytest tests/ --cov=crashwise --cov-report=html
@@ -149,7 +156,8 @@ uv run pytest tests/ --cov=crashwise --cov-report=html
 # Specific test file
 uv run pytest tests/unit/test_exploit_gen.py -v
 
-# Integration tests (require docker-compose stack)
+# Integration tests (require docker-compose stack running)
+docker compose up -d temporal-server postgres redis
 uv run pytest tests/integration/ -v -m integration
 ```
 
