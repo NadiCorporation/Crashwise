@@ -6,6 +6,12 @@ analysis agent (Phase 18).
 Used by :class:`MainFuzzingWorkflow` after a global plateau is detected,
 to identify the most likely coverage blocker before invoking the
 harness-evolution agent.
+
+Supports ingestion of real line-level coverage from:
+  - llvm-cov export JSON (via -fprofile-instr-generate)
+  - sancov symbolized output
+  - lcov/gcov DA: format
+  - AFL++ fuzzer_stats (synthetic fallback)
 """
 
 from __future__ import annotations
@@ -29,23 +35,53 @@ class AnalyzeCoverageInput(BaseModel):
 
     source_path: Path
     coverage_data: str = Field(default="", max_length=1_048_576)
+    coverage_data_path: Path | None = Field(
+        default=None,
+        description="Path to coverage summary file produced by execute_fuzzing.",
+    )
 
 
 @activity.defn(name="analyze_coverage_activity")
 async def analyze_coverage_activity(
     payload: AnalyzeCoverageInput,
 ) -> CoverageAnalysis:
-    """Analyse coverage and return ranked blockers."""
+    """Analyse coverage and return ranked blockers.
+
+    Prefers real line-level coverage data from coverage_data_path when
+    available. Falls back to inline coverage_data string, then to static
+    analysis.
+    """
     info = activity.info()
     log.info(
         "analyze_coverage_activity.start",
         workflow_id=info.workflow_id,
         attempt=info.attempt,
         source_path=str(payload.source_path),
+        has_coverage_path=payload.coverage_data_path is not None,
     )
+
+    # Load coverage data from file if path provided and file exists.
+    coverage_text = payload.coverage_data
+    if payload.coverage_data_path and payload.coverage_data_path.exists():
+        try:
+            coverage_text = payload.coverage_data_path.read_text(
+                encoding="utf-8", errors="replace"
+            )
+            log.info(
+                "analyze_coverage_activity.loaded_file",
+                path=str(payload.coverage_data_path),
+                size=len(coverage_text),
+            )
+        except OSError as exc:
+            log.warning(
+                "analyze_coverage_activity.file_read_failed",
+                path=str(payload.coverage_data_path),
+                error=str(exc),
+            )
+
     return await analyze_coverage(
         source_path=payload.source_path,
-        coverage_data=payload.coverage_data,
+        coverage_data=coverage_text,
     )
 
 

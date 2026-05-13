@@ -26,8 +26,12 @@ fuzzing harness.
 
 from __future__ import annotations
 
+import asyncio
 import re
+import shutil
+import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from crashwise.core.logging import get_logger
 
@@ -319,6 +323,90 @@ def validate_harness(source_code: str) -> ValidationResult:
     return result
 
 
+async def syntax_check_harness(source_code: str) -> ValidationResult:
+    """Run clang -fsyntax-only -Werror on the harness source.
+
+    Catches syntactically invalid code, #define tricks, and type errors
+    that regex-based validation cannot detect. Requires clang on PATH.
+
+    This is a mandatory pre-compilation gate: code that fails syntax
+    checking MUST NOT reach the hot-swap compiler.
+    """
+    result = ValidationResult()
+
+    if not shutil.which("clang"):
+        result.issues.append(ValidationIssue(
+            severity="warn",
+            category="toolchain",
+            message="clang not found on PATH; syntax check skipped.",
+        ))
+        return result
+
+    lang = "c++" if any(kw in source_code for kw in ("class ", "namespace ", "template", "std::")) else "c"
+    suffix = ".cpp" if lang == "c++" else ".c"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as tmp:
+        tmp.write(source_code)
+        tmp_path = Path(tmp.name)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "clang", "-fsyntax-only", "-Werror", "-x", lang, str(tmp_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+
+        if proc.returncode != 0:
+            error_text = stderr.decode("utf-8", errors="replace").strip()
+            first_error = error_text.splitlines()[0] if error_text else "syntax check failed"
+            result.issues.append(ValidationIssue(
+                severity="block",
+                category="syntax",
+                message=f"clang -fsyntax-only failed: {first_error[:200]}",
+                matched_text=error_text[:500],
+            ))
+            result.passed = False
+            log.warning("harness_validator.syntax_check_failed", error=first_error[:200])
+    except asyncio.TimeoutError:
+        result.issues.append(ValidationIssue(
+            severity="block",
+            category="syntax",
+            message="clang -fsyntax-only timed out (>15s) — possible #include bomb or macro loop.",
+        ))
+        result.passed = False
+    except OSError as exc:
+        result.issues.append(ValidationIssue(
+            severity="warn",
+            category="toolchain",
+            message=f"Could not run clang: {exc}",
+        ))
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    return result
+
+
+async def validate_harness_full(source_code: str) -> ValidationResult:
+    """Run all validation: static regex checks + clang syntax check.
+
+    This is the recommended entry point for the hot-swap pipeline.
+    Both checks must pass for the harness to proceed to compilation.
+    """
+    result = validate_harness(source_code)
+    if not result.passed:
+        return result
+
+    syntax_result = await syntax_check_harness(source_code)
+    if not syntax_result.passed:
+        result.passed = False
+        result.issues.extend(syntax_result.issues)
+    elif syntax_result.warnings:
+        result.issues.extend(syntax_result.warnings)
+
+    return result
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _strip_comments_and_strings(source: str) -> str:
@@ -340,4 +428,4 @@ def _strip_comments_and_strings(source: str) -> str:
     return result
 
 
-__all__ = ["ValidationIssue", "ValidationResult", "validate_harness"]
+__all__ = ["ValidationIssue", "ValidationResult", "validate_harness", "validate_harness_full", "syntax_check_harness"]

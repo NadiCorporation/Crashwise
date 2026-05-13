@@ -19,6 +19,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from crashwise.core.config import get_settings
 from crashwise.core.logging import get_logger
 from crashwise.core.models import FuzzJob
 
@@ -203,6 +204,10 @@ class DockerManager:
             # Prevents a runaway corpus or crash dump from filling the host.
             "--ulimit",
             "fsize=10737418240:10737418240",
+            # Disk quota: cap total container writable layer size.
+            # Requires overlay2 driver on xfs with pquota mount option.
+            "--storage-opt",
+            f"size={get_settings().docker_disk_quota}",
             # OOM handling: disable OOM kill so we can detect OOM state
             # and log it cleanly rather than having the container vanish.
             "--oom-kill-disable=false",
@@ -433,6 +438,51 @@ class DockerManager:
         log.warning("docker.preserve_corpus.failed", job_id=job_id)
         return preserve_dir
 
+    async def extract_coverage_data(self, job_id: str, dest_dir: Path) -> Path | None:
+        """Extract llvm-cov/sancov coverage data from a stopped container.
+
+        Looks for:
+          1. .sancov files (SanitizerCoverage raw bitmaps)
+          2. default.profraw (llvm source-based coverage)
+
+        Returns the path to the extracted coverage directory, or None.
+        """
+        container_id = self._containers.get(job_id)
+        if not container_id:
+            return None
+
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        coverage_sources = ["/tmp/*.sancov", "/tmp/default.profraw", "/out/*.sancov"]
+
+        for pattern in coverage_sources:
+            # Use docker exec + find to locate files matching the pattern.
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "exec", container_id,
+                "sh", "-c", f"ls {pattern} 2>/dev/null",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0 or not stdout.strip():
+                continue
+            for fpath in stdout.decode("utf-8", errors="replace").strip().splitlines():
+                fpath = fpath.strip()
+                if not fpath:
+                    continue
+                cp_proc = await asyncio.create_subprocess_exec(
+                    "docker", "cp", f"{container_id}:{fpath}", str(dest_dir),
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await cp_proc.communicate()
+
+        # Check if we got anything.
+        extracted = list(dest_dir.iterdir())
+        if extracted:
+            log.info("docker.extract_coverage", job_id=job_id, files=len(extracted))
+            return dest_dir
+        return None
+
     async def update_resource_limits(
         self,
         job_id: str,
@@ -540,6 +590,56 @@ class DockerManager:
         }
 
     # ── Internals ────────────────────────────────────────────────────────────
+    @staticmethod
+    async def check_disk_quota_support() -> tuple[bool, str]:
+        """Check if the Docker storage driver supports per-container quotas.
+
+        Returns (supported, message) for use by ``crashwise doctor``.
+        Requires overlay2 on xfs with project quotas (pquota mount option).
+        """
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "info", "--format", "{{.Driver}}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        driver = stdout.decode("utf-8", errors="replace").strip()
+        if driver != "overlay2":
+            return False, (
+                f"Storage driver is '{driver}', not overlay2. "
+                "--storage-opt size= requires overlay2 on xfs with pquota."
+            )
+        # Check if Docker's data-root is on xfs with pquota.
+        proc2 = await asyncio.create_subprocess_exec(
+            "docker", "info", "--format", "{{.DockerRootDir}}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout2, _ = await proc2.communicate()
+        root_dir = stdout2.decode("utf-8", errors="replace").strip()
+        # Read /proc/mounts to find the filesystem type and options.
+        try:
+            mounts = Path("/proc/mounts").read_text()
+            for line in mounts.splitlines():
+                parts = line.split()
+                if len(parts) >= 4 and root_dir.startswith(parts[1]):
+                    fs_type = parts[2]
+                    opts = parts[3]
+                    if fs_type != "xfs":
+                        return False, (
+                            f"Docker root '{root_dir}' is on {fs_type}, not xfs. "
+                            "--storage-opt size= requires xfs with pquota."
+                        )
+                    if "pquota" not in opts and "prjquota" not in opts:
+                        return False, (
+                            f"xfs at '{root_dir}' lacks pquota mount option. "
+                            "Remount with '-o pquota' or add to /etc/fstab."
+                        )
+                    return True, "Disk quotas supported (overlay2 + xfs + pquota)."
+        except OSError:
+            pass
+        return False, "Could not verify quota support. --storage-opt size= may fail at runtime."
+
     async def _docker_available(self) -> bool:
         """Verify Docker daemon is installed AND responsive.
 
