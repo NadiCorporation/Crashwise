@@ -439,102 +439,138 @@ Crashwise/
 
 ---
 
-## Development Roadmap
+## Development Status
 
-| Phase | Status | Highlights |
-|-------|--------|-----------|
-| Phase 0 | ✅ Complete | Skeleton, config, logging, models |
-| Phase 1 | ✅ Complete | Temporal orchestration (workflows, activities, worker) |
-| Phase 2 | ✅ Complete | AI-driven harness synthesis (LangGraph agent) |
-| Phase 3 | ✅ Complete | Intelligent triage (ASAN/GDB/LLM classification) |
-| Phase 4 | ✅ Complete | KernelBridge (syzkaller integration) |
-| Phase 5 | ✅ Complete | Execution engine (Docker, QEMU, resource monitoring) |
-| Phase 6 | ✅ Complete | Feedback loop (coverage → prompt → re-synth) |
-| Phase 7 | ✅ Complete | Seeding brain (CVE harvester, PoC transformer) |
-| Phase 8 | ✅ Complete | Persistence (PostgreSQL, SQLite, FastAPI REST) |
-| Phase 9 | ✅ Complete | Distributed storage (R2, Redis, MinIO) |
-| Phase 10 | ✅ Complete | Hybrid AI agent (Ollama, Venice, Null providers) |
-| Phase 11 | ✅ Complete | Intelligence dashboard (Streamlit, export) |
-| Phase 12 | ✅ Complete | Patch verification (VerifyPatchWorkflow, regression) |
-| Phase 13 | ✅ Complete | Auto-disclosure (CVSS, reports, notifications) |
-| Phase 14 | ✅ Complete | Production packaging (Docker, CI/CD, release) |
-| Phase 15 | ✅ Complete | PoC generation (Exploit Architect, reachability) |
-| Phase 16 | ✅ Complete | Target profiling (domain, complexity, attack surface) |
-| Phase 17 | ✅ Complete | MAB strategy switching (Thompson, UCB1, plateau) |
-| Phase 18 | ✅ Complete | Harness re-synthesis (7 blocker types, hot-swap) |
-| Phase 19 | ✅ Complete | Unified manifest & zero-config onboarding |
-| Phase 20 | ✅ Complete | System Sentinel & Master Worker image |
-| Phase 21 | ✅ Complete | Real-World Bridge — live Docker fuzzing with stdout parsing |
-| **S6 Hardening** | ✅ Complete | Sandbox lockdown (`--network none`, `--read-only`, `tmpfs`), shell-free hot-swap, persistent build cache, AFL stats parser, zero-coverage stall detection |
-| **God-Mode Signals** | ✅ Complete | `force_pivot` / `inject_seed` / `pause_hunt` / `resume_hunt` workflow signals + `crashwise signal` CLI command |
-| **Linux Native** | ✅ Complete | DistroDetector for Arch/Ubuntu/Fedora, sudo-aware install hints, AUR split, interactive `setup`, mandatory pre-flight gate on `run` |
-| **Intelligence Loop** | ✅ Complete | `_run_evolution` now calls `analyze_coverage` to identify the exact `BlockerType` + source line, passes structured blocker into LLM evolution agent (no more `BlockerType.UNKNOWN` stubs); bounded by `max_evolution_count` |
-| **v1.0.0-rc2** | 🚀 **Current** | **21 phases, 405 tests passing, libjxl-ready** |
-| v1.1.0 | 📋 Planned | Live `coverage_data` wired into evolution, dashboard cockpit (live execs/sec, MAB arm, code hotspots) |
-| v1.2.0 | 📋 Planned | DB schema for harness lineage (Crash → run_id → MAB arm → harness version) |
-| v2.0.0 | 📋 Planned | Multi-target scheduling, WebAssembly target support, cloud-native scaling |
+> **CrashWise is under active development (pre-alpha).** The core autonomous
+> pipeline works end-to-end, but some components are more mature than others.
+> Contributions from the security research community are welcome to help
+> improve coverage, fix edge cases, and expand target support.
+
+### What Works Today (Verified)
+
+| Component | Status | Detail |
+|-----------|--------|--------|
+| Target cloning | ✅ Working | `git clone --recursive` with branch/tag support, shallow + full fallback |
+| Build system detection | ✅ Working | CMake, Make, Meson, Bazel, Cargo, Go auto-detected |
+| Instrumented build | ✅ Working | Injects `-fsanitize=address,undefined` + coverage flags via CC/CXX/CFLAGS |
+| Existing harness detection | ✅ Working | Finds `LLVMFuzzerTestOneInput` in fuzz/harness files |
+| AI harness synthesis | ✅ Working | LangGraph agent with retry loop + deterministic fallback |
+| Docker fuzzing execution | ✅ Working | Hardened containers with real AFL++/libFuzzer invocation |
+| Coverage feedback loop | ✅ Working | AFL++ stats/plot_data parsed, stall detection with 5 conditions |
+| MAB strategy switching | ✅ Working | Thompson Sampling between 5 fuzzing configurations |
+| Crash triage | ✅ Working | ASAN regex parsing (0.85 confidence) + LLM deep analysis |
+| Stack-hash deduplication | ✅ Working | Eliminates duplicate crashes before reporting |
+| God-Mode signals | ✅ Working | Pause/resume/pivot/inject with acknowledgement queries |
+| Pre-flight gate | ✅ Working | Refuses to launch without Docker/Clang/GCC |
+
+### What's Still Maturing
+
+| Component | Status | What to Expect |
+|-----------|--------|----------------|
+| Harness evolution (LLM) | ⚠️ Works, quality varies | LLM-generated rewrites depend on model quality; fallback templates always compile |
+| Kernel fuzzing (syzkaller) | ⚠️ Parsers only | OOPS/KASAN/KFENCE log parsing works; automated syzkaller campaign orchestration is planned |
+| PoC / exploit generation | ⚠️ Template + LLM | Produces standalone C PoCs; reachability analysis is heuristic-based |
+| Patch verification | ⚠️ Basic pipeline | Clone → apply → build → test works; complex patches may need manual review |
+| Seed harvester | ⚠️ Format-aware generation | Generates valid format seeds (PNG/JPEG/ZIP/etc.); real CVE corpus download is planned |
+
+### What's Planned (Not Yet Implemented)
+
+| Feature | Target Version |
+|---------|---------------|
+| Multi-target parallel scheduling | v2.0 |
+| WebAssembly/WASI target support | v2.0 |
+| Cloud-native auto-scaling (Kubernetes) | v2.0 |
+| Real CVE corpus download from OSS-Fuzz/exploit-db | v1.2 |
+| Dashboard cockpit (live execs/sec, MAB arm, hotspots) | v1.1 |
+| Harness lineage DB (crash → run → MAB arm → harness version) | v1.2 |
 
 ---
 
-## Validation Campaign
+## Supported Targets
 
-CrashWise has been validated against real-world targets and hardened
-through a Zero-Trust Audit:
+### What CrashWise IS Designed For
 
-| Target | Component | Result |
-|--------|-----------|--------|
-| **libtgvoip** (Telegram) | json11 JSON parser | ✅ 754K execs/60s, 788 coverage blocks, 0 crashes |
-| **libjxl** (JPEG XL) | Container box parser, ANS entropy decoder | 🚀 Ready for live campaign (S6-hardened) |
+CrashWise autonomously finds **memory-safety vulnerabilities** in
+**open-source C/C++ projects** that compile with standard build systems.
 
-### Fixes discovered during validation
+| Requirement | Detail |
+|-------------|--------|
+| **Source code** | Must be available (git-cloneable). CrashWise compiles with sanitizer instrumentation. |
+| **Language** | C, C++, Rust (via Cargo), Go (via go-fuzz) |
+| **Build system** | CMake, Make, Meson, Bazel, Cargo, Go modules |
+| **Compiler** | Must compile with Clang (for `-fsanitize` support) |
+| **OS** | Linux only (AFL++/libFuzzer are Linux-native) |
+| **Input type** | File/buffer parsers (image, archive, network, crypto, font, etc.) |
 
-1. `--depth 1` clone misses CMake submodules → use `--recursive`
-2. `json11.cpp` missing `#include <cstdint>` on Clang 22 → added
-3. Temporal auto-setup fails with missing dynamic config → removed env var
-4. MinIO pinned image removed from Docker Hub → use `latest`
-5. `init_db()` takes `drop` not `drop_all` → fixed CLI mapping
+**Best results with:**
+- Projects that already have fuzz harnesses (libjxl, openssl, libpng, zlib, freetype)
+- Parser libraries that take `(uint8_t*, size_t)` as input
+- Projects with CMakeLists.txt or Makefile at the root
+- Code with clear entry points (functions named `parse`, `decode`, `read`, etc.)
 
-### S6 / Zero-Trust Audit hardening
+### What CrashWise is NOT Designed For
 
-* **Sandbox lockdown** (`crashwise/execution/docker_manager.py`) — fuzzer
-  containers run with `--network none`, `--read-only`, size-capped
-  `--tmpfs`, `--cap-drop ALL`, `no-new-privileges`, conditional
-  `SYS_PTRACE` (AFL only), and a pre-flight `docker rm -f` against the
-  container name to neutralise zombies from a prior worker crash.
-* **Shell-free hot-swap** (`crashwise/orchestration/activities/hot_swap_harness.py`) —
-  `create_subprocess_shell` replaced with `create_subprocess_exec` over a
-  `shlex.split` argv against an allow-list of compilers (`gcc` / `clang` /
-  `clang++` / `afl-clang-fast` / …). LLM-supplied compile commands cannot
-  spawn subshells.
-* **Persistent build cache** — compiled harness binaries are copied to
-  `~/.cache/crashwise/build/{job_id}/harness` (or `$CRASHWISE_BUILD_CACHE`)
-  *before* the `TemporaryDirectory` exits, so successful evolutions
-  outlive their compile sandbox.
-* **AFL stats parser dispatch** (`crashwise/execution/monitor.py`) — the
-  health checker now reads `fuzzer_stats` for AFL jobs instead of
-  pushing TUI output through the libFuzzer regex.
-* **Zero-coverage stall detection** (`crashwise/agents/feedback/analyzer.py`) —
-  `edges_hit == 0` past a 2-iteration warm-up is now flagged STALLED with
-  an instrumentation-failure hint, not silently reported as healthy.
-* **Pre-flight gate** (`crashwise/cli.py`) — `crashwise run` refuses to
-  submit a workflow when Docker / Clang / GCC are missing; passes a
-  full-distro install hint to the user.
+| Target Type | Why It Won't Work |
+|-------------|-------------------|
+| **Closed-source binaries** | Requires source for sanitizer instrumentation. Use AFL++ QEMU mode directly instead. |
+| **Windows-only code (MSVC)** | Requires Clang compilation. MSVC sanitizers are not supported. |
+| **Managed languages (Java, Python, C#)** | Memory-safety bugs don't apply. Use language-specific fuzzers (Jazzer, Atheris). |
+| **Network services / daemons** | CrashWise fuzzes file/buffer parsers, not live network protocols. Use Boofuzz/AFL++ network mode. |
+| **GUI applications** | No UI interaction. CrashWise targets library functions, not user-facing apps. |
+| **Projects with proprietary dependencies** | Build will fail if required SDKs aren't available in the Docker container. |
+| **Extremely large monorepos** | Clone + build timeout (10min + 15min). Projects like Chromium need custom setup. |
+
+### What Might Give False or Poor Results
+
+| Scenario | Risk | Mitigation |
+|----------|------|------------|
+| No LLM configured | Harness synthesis falls back to a trivial XOR consumer — minimal coverage | Configure at least one LLM (see `.env.example`) |
+| Target has no clear entry point | Regex-based entry detection may miss deeply nested APIs | Use `--harness` flag to specify a known fuzz target |
+| Complex build (custom toolchains) | Auto-build may fail; campaign continues with source-only harness | Pre-build manually, provide binary via `crashwise.yaml` |
+| Short timeout (< 60s) | Not enough time for AFL++ to calibrate | Use `--timeout 600` minimum for meaningful results |
+| Target is already heavily fuzzed | Unlikely to find new bugs that OSS-Fuzz missed | Focus on newer/untested code paths or custom entry points |
+
+---
+
+## Current Limitations (Honest Assessment)
+
+This is a **pre-alpha** project. Known limitations:
+
+1. **Build failures are non-fatal** — If the target doesn't compile with
+   the injected sanitizer flags (common with complex projects), the
+   workflow continues with harness synthesis via `#include`. This may
+   produce a harness that exercises fewer code paths.
+
+2. **LLM quality matters** — Harness synthesis quality depends directly on
+   the LLM model. Claude Sonnet / GPT-4o produce good harnesses;
+   smaller models (7B-13B) often produce code that doesn't compile.
+   The fallback harness always works but provides minimal coverage.
+
+3. **No source-level coverage mapping** — Coverage data from AFL++ is
+   edge-count-based, not line-level (would require `llvm-cov` integration).
+   The coverage analyzer uses heuristic blocker detection.
+
+4. **Single-target campaigns** — Each `crashwise run` fuzzes one target.
+   Parallel multi-target scheduling is planned for v2.0.
+
+5. **Docker worker required** — The fuzzing execution itself happens inside
+   Docker containers. The host needs Docker running and the
+   `aflplusplus/aflplusplus` / `libfuzzer-runner` images available.
 
 ---
 
 ## Contributing
 
-We welcome contributions from the security research community. Please read
-[CONTRIBUTING.md](./CONTRIBUTING.md) for our standards on code quality,
-commit messages, and pull request etiquette.
+CrashWise is a community-driven project. We welcome contributions that:
 
-**Project Standards (by Yahya Toubali):**
-- Every file must include `SPDX-License-Identifier: MIT`
-- Strict mypy typing (`--strict`) on all new code
-- ruff lint + format before commit
-- Tests must pass (`pytest`) and coverage should not drop
-- Pydantic models on every public API boundary
-- Temporal workflow determinism: no non-deterministic imports in workflow modules
+- **Fix real bugs** in the pipeline (clone/build/fuzz/triage)
+- **Add target support** (new build systems, languages, formats)
+- **Improve harness quality** (better LLM prompts, more fallback templates)
+- **Expand seed generation** (new format-aware seeds, real corpus download)
+- **Harden the sandbox** (seccomp profiles, better OOM handling)
+
+Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for coding standards,
+commit format, and PR process.
 
 ---
 
