@@ -234,6 +234,36 @@ async def hot_swap_harness(payload: HotSwapInput) -> HotSwapOutput:
         src_path = workdir / "harness.cpp"
         src_path.write_text(payload.new_harness_code, encoding="utf-8")
 
+        # 1b. Semantic validation — block dangerous code BEFORE compilation.
+        from crashwise.agents.harness_synth.validator import validate_harness
+
+        validation = validate_harness(payload.new_harness_code)
+        if not validation.passed:
+            log.warning(
+                "hot_swap.validation_blocked",
+                job_id=payload.job_id,
+                issues=len(validation.blocking_issues),
+                summary=validation.summary(),
+            )
+            return HotSwapOutput(
+                swapped=False,
+                stdout="",
+                stderr=f"Harness validation failed: {validation.summary()}",
+                notes=(
+                    f"LLM-generated harness blocked by semantic validator. "
+                    f"{len(validation.blocking_issues)} dangerous pattern(s) detected: "
+                    f"{'; '.join(i.message for i in validation.blocking_issues[:3])}. "
+                    f"Keeping current binary."
+                ),
+            )
+        if validation.warnings:
+            log.info(
+                "hot_swap.validation_warnings",
+                job_id=payload.job_id,
+                warnings=len(validation.warnings),
+                details=[w.message for w in validation.warnings[:3]],
+            )
+
         # 2. Build a safe argv for compilation.
         tmp_binary = workdir / "harness"
         argv = _materialise_compile_argv(
