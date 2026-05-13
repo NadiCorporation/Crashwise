@@ -45,6 +45,7 @@ async def synthesize_harness(
     source_path: Path,
     workdir: Path,
     max_retries: int = 4,
+    feedback: str = "",
 ) -> HarnessSynthesisResult:
     """Run the LangGraph harness-synthesis agent against ``source_path``.
 
@@ -58,6 +59,10 @@ async def synthesize_harness(
     max_retries:
         Maximum number of LLM regenerations before falling back to the
         deterministic minimal harness.
+    feedback:
+        Structured feedback from the coverage analyzer (stall reasons,
+        mutation suggestions). Injected into the LLM prompt so the next
+        harness iteration addresses coverage blockers.
     """
     if not source_path.is_absolute():
         source_path = source_path.resolve()
@@ -68,6 +73,7 @@ async def synthesize_harness(
         workdir=workdir,
         language=detect_language(source_path),
         max_retries=max_retries,
+        feedback=feedback,
     )
     log.info(
         "harness_synth.synthesize.start",
