@@ -33,6 +33,7 @@ Hardening posture
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shlex
 import shutil
@@ -259,13 +260,37 @@ async def hot_swap_harness(payload: HotSwapInput) -> HotSwapOutput:
         # 3. Compile WITHOUT a shell. ``shell=False`` is implicit in
         # ``create_subprocess_exec``; metacharacters in ``argv`` cannot
         # spawn subshells.
+        # Timeout: 5 minutes max for compilation. Pathological headers or
+        # template metaprogramming can hang clang indefinitely without this.
         proc = await asyncio.create_subprocess_exec(
             *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workdir),
         )
-        stdout_b, stderr_b = await proc.communicate()
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(), timeout=300.0  # 5-minute compile timeout.
+            )
+        except asyncio.TimeoutError:
+            # Kill the stuck compiler.
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            log.warning(
+                "hot_swap.compile_timeout",
+                job_id=payload.job_id,
+                timeout_seconds=300,
+            )
+            return HotSwapOutput(
+                swapped=False,
+                stdout="",
+                stderr="Compilation timed out after 300 seconds.",
+                notes=(
+                    "Compilation of evolved harness exceeded 5-minute limit. "
+                    "Likely pathological template expansion or infinite loop "
+                    "in preprocessor. Keeping current binary."
+                ),
+            )
         # HotSwapOutput caps stdout/stderr at 8192 chars (see models.py).
         stdout = stdout_b.decode("utf-8", errors="replace")[:8000]
         stderr = stderr_b.decode("utf-8", errors="replace")[:8000]
