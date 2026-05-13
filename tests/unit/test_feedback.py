@@ -126,6 +126,7 @@ def test_analyze_campaign_detects_stall_coverage_plateau() -> None:
         max_iterations=5,
         last_coverage=CoverageReport(edges_hit=100, exec_per_sec=100.0),
         best_coverage=CoverageReport(edges_hit=100),
+        consecutive_plateau_count=2,  # Already 2 stalls; this call triggers threshold.
     )
     result = analyze_campaign(state)
     assert result.status == CampaignStatus.STALLED

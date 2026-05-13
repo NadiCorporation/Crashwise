@@ -423,6 +423,10 @@ class FuzzingCampaignState(_StrictModel):
     should_continue: bool = True
     mutation_hint: str = ""
     crash_count: int = Field(default=0, ge=0)
+    consecutive_plateau_count: int = Field(
+        default=0, ge=0,
+        description="Consecutive iterations with < 1% edge growth. Stall triggers at threshold.",
+    )
     last_coverage_data_path: Path | None = Field(
         default=None,
         description="Path to the most recent raw coverage data (AFL plot_data/showmap output).",

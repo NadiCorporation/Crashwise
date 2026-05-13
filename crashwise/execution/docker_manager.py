@@ -204,14 +204,14 @@ class DockerManager:
             # Prevents a runaway corpus or crash dump from filling the host.
             "--ulimit",
             "fsize=10737418240:10737418240",
-            # Disk quota: cap total container writable layer size.
-            # Requires overlay2 driver on xfs with pquota mount option.
-            "--storage-opt",
-            f"size={get_settings().docker_disk_quota}",
             # OOM handling: disable OOM kill so we can detect OOM state
             # and log it cleanly rather than having the container vanish.
             "--oom-kill-disable=false",
         ]
+
+        # Disk quota: --storage-opt requires overlay2 on xfs with pquota.
+        # Try with it; if Docker rejects it, retry without.
+        _storage_opt_args = ["--storage-opt", f"size={get_settings().docker_disk_quota}"]
         # AFL forkserver needs SYS_PTRACE; libFuzzer does not.
         if is_afl:
             cmd.extend(["--cap-add", "SYS_PTRACE"])
@@ -267,14 +267,36 @@ class DockerManager:
             memory_mb=job.memory_limit_mb,
         )
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"docker run failed: {stderr.decode('utf-8', errors='replace')}")
+        # Try with --storage-opt first; retry without if unsupported.
+        for attempt_with_quota in (True, False):
+            run_cmd = cmd.copy()
+            if attempt_with_quota:
+                # Insert storage-opt before the image argument.
+                run_cmd = cmd[:2] + _storage_opt_args + cmd[2:]
+            else:
+                run_cmd = cmd
+
+            proc = await asyncio.create_subprocess_exec(
+                *run_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            err_text = stderr.decode("utf-8", errors="replace")
+
+            if proc.returncode == 0:
+                break
+
+            # If storage-opt caused the failure, retry without it.
+            if attempt_with_quota and "storage-opt" in err_text.lower():
+                log.warning(
+                    "docker.storage_opt_unsupported",
+                    detail="Filesystem does not support --storage-opt; retrying without disk quota.",
+                )
+                await self._force_remove_by_name(container_name)
+                continue
+
+            raise RuntimeError(f"docker run failed: {err_text}")
 
         container_id = stdout.decode("utf-8", errors="replace").strip()
         self._containers[job.job_id] = container_id
