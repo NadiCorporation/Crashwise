@@ -53,20 +53,39 @@ async def seed_corpus(inp: SeedCorpusInput) -> list[Path]:
 
     # 1. Harvest seed metadata from public sources.
     seeds: list[SeedMetadata] = await harvest_seeds(
-        inp.target_name, max_results=inp.max_seeds
+        inp.target_name, max_results=inp.max_seeds, workdir=inp.workdir,
     )
 
-    # 2. For each seed, write a mock PoC file (Phase-7 stub) then transform.
+    # 2. For each seed, resolve its binary payload and write to corpus.
     seed_paths: list[Path] = []
     for seed in seeds:
-        # Stub: create a minimal PoC source file so the transformer has
-        # something to chew on.  In a real implementation this would be
-        # the result of an HTTP download.
+        # If the seed already has a valid path (repo-scanned), use it directly.
+        if seed.seed_path is not None and seed.seed_path.exists():
+            # Copy into corpus directory for the fuzzer.
+            dest = corpus_dir / seed.seed_path.name
+            if not dest.exists():
+                try:
+                    dest.write_bytes(seed.seed_path.read_bytes())
+                    seed_paths.append(dest)
+                except OSError:
+                    pass
+            continue
+
+        # Resolve payload from the harvester's seed tables.
+        from crashwise.agents.research.harvester import get_seed_payload
+        payload = get_seed_payload(seed)
+        if payload is not None:
+            seed_file = corpus_dir / f"{seed.seed_id}.seed"
+            seed_file.write_bytes(payload)
+            seed.seed_path = seed_file
+            seed_paths.append(seed_file)
+            continue
+
+        # Fallback: create a stub PoC and transform it.
         poc_dir = inp.workdir / "pocs"
         poc_dir.mkdir(parents=True, exist_ok=True)
         poc_path = poc_dir / f"{seed.seed_id}.poc"
 
-        # Write a language-appropriate stub.
         if seed.language == "python":
             poc_path.write_text(
                 f"# PoC for {seed.seed_id}\n"
@@ -75,7 +94,6 @@ async def seed_corpus(inp: SeedCorpusInput) -> list[Path]:
                 encoding="utf-8",
             )
         else:
-            # Default C stub.
             poc_path.write_text(
                 f"/* PoC for {seed.seed_id} */\n"
                 f"unsigned char payload[] = {{\n"
@@ -87,8 +105,6 @@ async def seed_corpus(inp: SeedCorpusInput) -> list[Path]:
             )
 
         seed.downloaded_path = poc_path
-
-        # Transform into binary seed.
         seed = await transform_poc(seed, output_dir=corpus_dir)
         if seed.seed_path is not None and seed.seed_path.exists():
             seed_paths.append(seed.seed_path)
