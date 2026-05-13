@@ -227,6 +227,8 @@ services:
       context: .
       dockerfile: Dockerfile.worker
     command: ["crashwise", "worker"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       CRASHWISE_ENV: production
       LOG_LEVEL: info

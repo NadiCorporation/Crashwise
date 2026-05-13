@@ -378,21 +378,49 @@ async def _compile_harness(
 ) -> Path | None:
     """Compile an existing harness source with sanitizer instrumentation.
 
+    Automatically discovers built static libraries (.a) and object files
+    in the workdir to link against the target.
+
     Returns the binary path on success, None on failure.
     """
     binary_path = workdir / "harness_binary"
     san_flags = f"-fsanitize=fuzzer,{sanitizers}" if sanitizers else "-fsanitize=fuzzer"
+
+    # Discover include paths: add common subdirectories.
+    include_dirs = {harness_source.parent, workdir}
+    for subdir in ("include", "src", "lib", "build"):
+        candidate = workdir / subdir
+        if candidate.is_dir():
+            include_dirs.add(candidate)
+
+    # Discover static libraries (.a) and object files to link against.
+    link_libs: list[str] = []
+    for lib_file in workdir.rglob("*.a"):
+        # Skip test/example libraries.
+        if any(skip in str(lib_file) for skip in ("test", "example", "CMakeFiles")):
+            continue
+        link_libs.append(str(lib_file))
+    # If no .a found, try linking .o files from build directory.
+    if not link_libs:
+        build_dir = workdir / "build"
+        if build_dir.exists():
+            obj_files = list(build_dir.rglob("*.o"))
+            # Only link if reasonable number of objects (not hundreds).
+            if 0 < len(obj_files) <= 50:
+                link_libs.extend(str(o) for o in obj_files)
 
     cmd = [
         "clang++",
         san_flags,
         "-g", "-O1",
         "-fno-omit-frame-pointer",
-        f"-I{harness_source.parent}",
-        f"-I{workdir}",
-        "-o", str(binary_path),
-        str(harness_source),
     ]
+    for inc in include_dirs:
+        cmd.append(f"-I{inc}")
+    cmd.extend(["-o", str(binary_path), str(harness_source)])
+    cmd.extend(link_libs)
+    # Common system libs that targets often need.
+    cmd.extend(["-lm", "-lz", "-lpthread"])
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,

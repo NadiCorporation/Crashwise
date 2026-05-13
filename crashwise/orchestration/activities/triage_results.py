@@ -63,23 +63,56 @@ def _parse_gdb_backtrace(raw: str) -> list[StackFrame]:
     return frames
 
 
-def _harvest_reports(crashes_dir: Path) -> list[CrashReport]:
-    """Walk ``crashes_dir`` and build :class:`CrashReport` objects."""
+def _harvest_reports(crashes_dir: Path, logs_path: Path | None = None) -> list[CrashReport]:
+    """Walk ``crashes_dir`` and build :class:`CrashReport` objects.
+
+    Also parses the fuzzer log (fuzz.log) for ASAN output, since AFL++
+    writes raw crash inputs to crashes_dir (not ASAN logs). The actual
+    ASAN report is in the fuzzer's stderr captured in fuzz.log.
+    """
     reports: list[CrashReport] = []
     if not crashes_dir.exists():
         log.warning("triage_results.crashes_dir_missing", path=str(crashes_dir))
         return reports
 
+    # Extract ASAN blocks from fuzz.log (fuzzer stderr).
+    log_asan_blocks: list[str] = []
+    if logs_path and logs_path.exists():
+        try:
+            log_text = logs_path.read_text(encoding="utf-8", errors="replace")
+            # Split on ASAN error boundaries to get individual crash reports.
+            import re
+            asan_pattern = re.compile(
+                r"(=+\d+=+ERROR: AddressSanitizer:.*?)(?==+\d+=+ERROR:|SUMMARY: AddressSanitizer)",
+                re.DOTALL,
+            )
+            # Simpler fallback: find all ASAN blocks.
+            idx = 0
+            while True:
+                start = log_text.find("ERROR: AddressSanitizer", idx)
+                if start == -1:
+                    break
+                end = log_text.find("SUMMARY: AddressSanitizer", start)
+                if end == -1:
+                    end = min(start + 4096, len(log_text))
+                else:
+                    end = log_text.find("\n", end) + 1 or end + 50
+                log_asan_blocks.append(log_text[start:end])
+                idx = end
+        except OSError:
+            pass
+
     for entry in sorted(crashes_dir.iterdir()):
         if not entry.is_file():
             continue
         raw = entry.read_text(encoding="utf-8", errors="replace")
-        # Heuristic: if the file looks like a GDB log, parse frames.
+
+        # Heuristic: if the file itself looks like a GDB/ASAN log, parse it.
         gdb_frames: list[StackFrame] = []
         if "#0" in raw and ("in " in raw or "at " in raw):
             gdb_frames = _parse_gdb_backtrace(raw)
 
-        # Extract ASAN block.
+        # Extract ASAN block from the file itself (if it's a log, not binary).
         asan_block = ""
         if "ERROR: AddressSanitizer" in raw:
             start = raw.find("ERROR: AddressSanitizer")
@@ -88,12 +121,19 @@ def _harvest_reports(crashes_dir: Path) -> list[CrashReport]:
                 end = len(raw)
             asan_block = raw[start:end]
 
+        # If no ASAN in the crash file (it's a raw binary input from AFL++),
+        # try to match it with an ASAN block from fuzz.log.
+        if not asan_block and log_asan_blocks:
+            # Use the next available ASAN block (order matches crash order).
+            asan_block = log_asan_blocks.pop(0)
+            gdb_frames = gdb_frames or _parse_gdb_backtrace(asan_block)
+
         reports.append(
             CrashReport(
                 crash_id=entry.name,
-                raw_text=raw,
+                raw_text=raw if asan_block in raw else asan_block or raw,
                 asan_output=asan_block,
-                gdb_output=raw if gdb_frames else "",
+                gdb_output=asan_block if gdb_frames else "",
                 stack_frames=gdb_frames,
                 crash_file=entry,
             )
@@ -114,7 +154,7 @@ async def triage_results(payload: TriageInput) -> TriageOutput:
         crashes_dir=str(payload.crashes_dir),
     )
 
-    reports = _harvest_reports(payload.crashes_dir)
+    reports = _harvest_reports(payload.crashes_dir, payload.logs_path)
     if not reports:
         # No crash files on disk — fall back to stub semantics.
         severity = _severity_from_count(payload.crash_count)
