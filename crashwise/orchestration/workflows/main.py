@@ -194,6 +194,25 @@ class MainFuzzingWorkflow:
         # Return a copy so callers can't mutate workflow state.
         return list(self._operator_notes)
 
+    @workflow.query(name="signal_status")
+    def signal_status(self) -> dict[str, object]:
+        """Return the current state of all God-Mode controls.
+
+        Operators can poll this query to confirm their signals were
+        received and see what's pending.
+        """
+        return {
+            "paused": self._paused,
+            "force_pivot_pending": self._force_pivot_requested,
+            "pending_seeds": len(self._pending_seeds),
+            "pivot_count": self._pivot_count,
+            "evolution_count": self._evolution_count,
+            "iteration": self._iteration,
+            "stage": self._stage.value,
+            "notes_count": len(self._operator_notes),
+            "last_note": self._operator_notes[-1] if self._operator_notes else "",
+        }
+
     # ── God-Mode signals ────────────────────────────────────────────────
     @workflow.signal(name="force_pivot")
     def force_pivot(self, reason: str = "operator request") -> None:
@@ -203,9 +222,17 @@ class MainFuzzingWorkflow:
         that on the next loop turn either the MAB pivots OR (if MAB
         re-picks the same arm twice) the workflow escalates to
         evolution.  Idempotent.
+
+        Signal is acknowledged immediately via operator_notes. Query
+        ``signal_status`` to confirm receipt.
         """
         self._force_pivot_requested = True
-        self._operator_notes.append(f"force_pivot: {reason[:120]}")
+        # Also bump consecutive pivots so evolution escalation is triggered
+        # even if the MAB decides not to pivot.
+        self._consecutive_pivots_no_growth += 1
+        self._operator_notes.append(
+            f"[ACK] force_pivot received at iteration {self._iteration}: {reason[:120]}"
+        )
         workflow.logger.warning(
             "main_workflow.force_pivot_signal "
             f"reason={reason[:80]} iteration={self._iteration}"
@@ -220,10 +247,16 @@ class MainFuzzingWorkflow:
         where ``data_b64`` is base64-encoded raw bytes.  Validation and
         the actual filesystem write happen in the ``inject_seed``
         activity to keep the workflow body deterministic.
+
+        Signal is acknowledged immediately. Query ``signal_status`` to
+        confirm receipt and see pending seed count.
         """
         filename = seed.get("filename", "")
         data_b64 = seed.get("data_b64", "")
         if not filename or not data_b64:
+            self._operator_notes.append(
+                f"[REJECTED] inject_seed: invalid payload (filename={filename!r})"
+            )
             workflow.logger.warning(
                 "main_workflow.inject_seed_signal_invalid "
                 f"filename={filename!r} has_data={bool(data_b64)}"
@@ -231,13 +264,17 @@ class MainFuzzingWorkflow:
             return
         # Sanitise filename — must be a basename, no path separators.
         if "/" in filename or "\\" in filename or ".." in filename:
+            self._operator_notes.append(
+                f"[REJECTED] inject_seed: unsafe filename {filename!r}"
+            )
             workflow.logger.warning(
                 f"main_workflow.inject_seed_signal_rejected filename={filename!r}"
             )
             return
         self._pending_seeds.append((filename, data_b64))
         self._operator_notes.append(
-            f"inject_seed: {filename} ({len(data_b64)} b64 chars)"
+            f"[ACK] inject_seed: {filename} ({len(data_b64)} b64 chars) "
+            f"queued at iteration {self._iteration}"
         )
         workflow.logger.info(
             f"main_workflow.inject_seed_signal filename={filename} "
@@ -251,10 +288,14 @@ class MainFuzzingWorkflow:
         While paused, the loop sleeps in 5 s ticks and checks the flag.
         Heartbeats from the active execute_fuzzing activity (if any)
         keep Temporal happy until the operator resumes.
+
+        Signal is acknowledged immediately. Query ``signal_status`` to
+        confirm the paused state.
         """
         self._paused = bool(paused)
+        action = "paused" if paused else "resumed"
         self._operator_notes.append(
-            f"pause_hunt: {'paused' if paused else 'resumed'}"
+            f"[ACK] pause_hunt: {action} at iteration {self._iteration}"
         )
         workflow.logger.warning(
             "main_workflow.pause_hunt_signal "
@@ -383,6 +424,14 @@ class MainFuzzingWorkflow:
                         "main_workflow.seed_inject_failed "
                         f"count={len(seeds_to_inject)} error={exc!s:.120}"
                     )
+            elif self._pending_seeds and corpus_dir is None:
+                # Seeds arrived before corpus was set up. Keep them queued
+                # — they'll be injected on the next iteration when corpus_dir
+                # is available. Log so operator knows they're waiting.
+                log.info(
+                    "main_workflow.seeds_queued_waiting_for_corpus "
+                    f"count={len(self._pending_seeds)}"
+                )
 
             fuzz_out: ExecuteFuzzingOutput = await workflow.execute_activity(
                 "execute_fuzzing",
@@ -649,6 +698,7 @@ class MainFuzzingWorkflow:
         blocker, target_function = await self._identify_blocker(
             setup_out=setup_out,
             harness_path=harness_path,
+            campaign=campaign,
         )
 
         # ── 2. Ask the LLM to rewrite the harness against the blocker. ─
@@ -717,6 +767,7 @@ class MainFuzzingWorkflow:
         *,
         setup_out: SetupTargetOutput,
         harness_path: Path,
+        campaign: FuzzingCampaignState,
     ) -> tuple[CoverageBlocker, str]:
         """Run ``analyze_coverage_activity`` and pick the best blocker.
 
@@ -734,12 +785,33 @@ class MainFuzzingWorkflow:
         # ``setup_target``.  Fall back to the workdir if the harness
         # path is unset.
         source_root = harness_path.parent if harness_path else setup_out.workdir
+
+        # Load live coverage data collected by execute_fuzzing activity.
+        coverage_data = ""
+        if campaign.last_coverage_data_path is not None:
+            try:
+                _cov_path = campaign.last_coverage_data_path
+                # Read coverage data in an activity to maintain determinism.
+                coverage_data = await workflow.execute_activity(
+                    "read_coverage_data",
+                    {"path": str(_cov_path)},
+                    result_type=str,
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=_COVERAGE_RETRY,
+                )
+            except Exception as exc:
+                log.warning(
+                    "main_workflow.evolution.coverage_data_read_failed "
+                    f"error={exc!s:.120}"
+                )
+                # Fall through — static analysis is still useful.
+
         try:
             analysis: CoverageAnalysis = await workflow.execute_activity(
                 "analyze_coverage_activity",
                 AnalyzeCoverageInput(
                     source_path=source_root,
-                    coverage_data="",  # Live coverage data wired in a later phase.
+                    coverage_data=coverage_data,
                 ),
                 result_type=CoverageAnalysis,
                 start_to_close_timeout=timedelta(minutes=2),

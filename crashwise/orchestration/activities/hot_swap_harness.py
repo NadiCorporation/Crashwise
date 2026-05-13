@@ -33,6 +33,7 @@ Hardening posture
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shlex
 import shutil
@@ -233,6 +234,36 @@ async def hot_swap_harness(payload: HotSwapInput) -> HotSwapOutput:
         src_path = workdir / "harness.cpp"
         src_path.write_text(payload.new_harness_code, encoding="utf-8")
 
+        # 1b. Semantic validation — block dangerous code BEFORE compilation.
+        from crashwise.agents.harness_synth.validator import validate_harness
+
+        validation = validate_harness(payload.new_harness_code)
+        if not validation.passed:
+            log.warning(
+                "hot_swap.validation_blocked",
+                job_id=payload.job_id,
+                issues=len(validation.blocking_issues),
+                summary=validation.summary(),
+            )
+            return HotSwapOutput(
+                swapped=False,
+                stdout="",
+                stderr=f"Harness validation failed: {validation.summary()}",
+                notes=(
+                    f"LLM-generated harness blocked by semantic validator. "
+                    f"{len(validation.blocking_issues)} dangerous pattern(s) detected: "
+                    f"{'; '.join(i.message for i in validation.blocking_issues[:3])}. "
+                    f"Keeping current binary."
+                ),
+            )
+        if validation.warnings:
+            log.info(
+                "hot_swap.validation_warnings",
+                job_id=payload.job_id,
+                warnings=len(validation.warnings),
+                details=[w.message for w in validation.warnings[:3]],
+            )
+
         # 2. Build a safe argv for compilation.
         tmp_binary = workdir / "harness"
         argv = _materialise_compile_argv(
@@ -259,13 +290,37 @@ async def hot_swap_harness(payload: HotSwapInput) -> HotSwapOutput:
         # 3. Compile WITHOUT a shell. ``shell=False`` is implicit in
         # ``create_subprocess_exec``; metacharacters in ``argv`` cannot
         # spawn subshells.
+        # Timeout: 5 minutes max for compilation. Pathological headers or
+        # template metaprogramming can hang clang indefinitely without this.
         proc = await asyncio.create_subprocess_exec(
             *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workdir),
         )
-        stdout_b, stderr_b = await proc.communicate()
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(), timeout=300.0  # 5-minute compile timeout.
+            )
+        except asyncio.TimeoutError:
+            # Kill the stuck compiler.
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            log.warning(
+                "hot_swap.compile_timeout",
+                job_id=payload.job_id,
+                timeout_seconds=300,
+            )
+            return HotSwapOutput(
+                swapped=False,
+                stdout="",
+                stderr="Compilation timed out after 300 seconds.",
+                notes=(
+                    "Compilation of evolved harness exceeded 5-minute limit. "
+                    "Likely pathological template expansion or infinite loop "
+                    "in preprocessor. Keeping current binary."
+                ),
+            )
         # HotSwapOutput caps stdout/stderr at 8192 chars (see models.py).
         stdout = stdout_b.decode("utf-8", errors="replace")[:8000]
         stderr = stderr_b.decode("utf-8", errors="replace")[:8000]

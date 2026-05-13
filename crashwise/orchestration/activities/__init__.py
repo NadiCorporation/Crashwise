@@ -28,6 +28,7 @@ from crashwise.orchestration.activities.notify_stakeholders import notify_stakeh
 from crashwise.orchestration.activities.hot_swap_harness import hot_swap_harness
 from crashwise.orchestration.activities.pivot_strategy import pivot_strategy
 from crashwise.orchestration.activities.profile_target import profile_target
+from crashwise.orchestration.activities.read_coverage_data import read_coverage_data
 from crashwise.orchestration.activities.seed_corpus import seed_corpus
 from crashwise.orchestration.activities.setup_target import setup_target
 from crashwise.orchestration.activities.triage_results import triage_results
@@ -60,6 +61,7 @@ ALL_ACTIVITIES: list[Callable[..., Any]] = [
     notify_stakeholders,
     pivot_strategy,
     profile_target,
+    read_coverage_data,
     evolve_harness_activity,
     verify_poc,
 ]
@@ -81,6 +83,7 @@ __all__ = [
     "notify_stakeholders",
     "pivot_strategy",
     "profile_target",
+    "read_coverage_data",
     "update_verification_status",
     "verify_with_seed",
     "verify_poc",

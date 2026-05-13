@@ -25,6 +25,7 @@ from sqlalchemy import (
     JSON,
     ForeignKey,
     String,
+    Text,
     UniqueConstraint,
     select,
 )
@@ -180,6 +181,30 @@ class Seed(Base):
     crashes: Mapped[list[Crash]] = relationship(
         back_populates="seed",
         lazy="selectin",
+    )
+
+
+class CampaignKV(Base):
+    """Generic key-value store for campaign-scoped ephemeral state.
+
+    Used as a database fallback when Redis is unavailable (e.g., MAB state
+    persistence). Supports ON CONFLICT upsert via the unique constraint
+    on (campaign_id, key).
+    """
+
+    __tablename__ = "campaign_kv"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    campaign_id: Mapped[str] = mapped_column(String(36), index=True)
+    key: Mapped[str] = mapped_column(String(64))
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        default=lambda: datetime.now(tz=UTC),
+        onupdate=lambda: datetime.now(tz=UTC),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "key", name="uq_campaign_kv_cid_key"),
     )
 
 
