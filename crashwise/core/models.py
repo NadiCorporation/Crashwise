@@ -215,6 +215,11 @@ class ExecuteFuzzingOutput(_StrictModel):
     crash_count: int = Field(default=0, ge=0)
     executions: int = Field(default=0, ge=0, description="Total fuzzer iterations")
     duration_seconds: float = Field(default=0.0, ge=0.0)
+    coverage_edges: int = Field(default=0, ge=0, description="Edges discovered during this iteration")
+    coverage_data_path: Path | None = Field(
+        default=None,
+        description="Path to raw coverage data file (AFL plot_data or sancov output)",
+    )
 
 
 class SeedCorpusInput(_StrictModel):
@@ -418,6 +423,10 @@ class FuzzingCampaignState(_StrictModel):
     should_continue: bool = True
     mutation_hint: str = ""
     crash_count: int = Field(default=0, ge=0)
+    last_coverage_data_path: Path | None = Field(
+        default=None,
+        description="Path to the most recent raw coverage data (AFL plot_data/showmap output).",
+    )
 
 
 class SeedMetadata(_StrictModel):

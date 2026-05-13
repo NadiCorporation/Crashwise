@@ -105,6 +105,21 @@ async def generate_harness(state: HarnessState) -> HarnessState:
         log.warning("harness_synth.node.generate.empty_response")
         return await _apply_fallback(state, reason="LLM returned no code block")
 
+    # Semantic validation — block dangerous LLM-generated code.
+    from crashwise.agents.harness_synth.validator import validate_harness as _validate_safety
+
+    safety_result = _validate_safety(code)
+    if not safety_result.passed:
+        log.warning(
+            "harness_synth.node.generate.validation_blocked",
+            issues=len(safety_result.blocking_issues),
+            summary=safety_result.summary(),
+        )
+        return await _apply_fallback(
+            state,
+            reason=f"LLM code blocked by validator: {safety_result.summary()}",
+        )
+
     harness_path = state.workdir / "harness.cpp"
     harness_path.parent.mkdir(parents=True, exist_ok=True)
     harness_path.write_text(code, encoding="utf-8")
