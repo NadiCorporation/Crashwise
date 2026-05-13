@@ -82,6 +82,7 @@ async def mutate_harness(payload: dict[str, Any]) -> SetupTargetOutput:
             source_path=source_path,
             workdir=synth_workdir,
             max_retries=2,
+            feedback=feedback,
         )
     except Exception as exc:  # broad-except
         log.warning(
@@ -95,9 +96,6 @@ async def mutate_harness(payload: dict[str, Any]) -> SetupTargetOutput:
             harness_path=harness_path,
         )
 
-    # TODO: In a full implementation we would pass feedback into the
-    # HarnessState before running the graph. For Phase 6 the stub
-    # re-runs synthesis; the feedback is logged for human review.
     log.info(
         "mutate_harness.complete",
         success=result.success,
