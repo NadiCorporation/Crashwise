@@ -59,6 +59,10 @@ async def analyze_progress(
     campaign.last_coverage = coverage
     campaign.crash_count = fuzz_output.crash_count
 
+    # Propagate coverage data path so the evolution engine can use it.
+    if fuzz_output.coverage_data_path is not None:
+        campaign.last_coverage_data_path = fuzz_output.coverage_data_path
+
     # Run the feedback analyzer.
     campaign = analyze_campaign(campaign)
 
