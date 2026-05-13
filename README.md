@@ -645,6 +645,126 @@ crashwise/
 
 ---
 
+## Development Status
+
+> **CrashWise is under active development (pre-alpha).** The core autonomous
+> pipeline works end-to-end, but some components are more mature than others.
+> Contributions from the security research community are welcome to help
+> improve coverage, fix edge cases, and expand target support.
+
+### What Works Today (Verified)
+
+| Component | Status | Detail |
+|-----------|--------|--------|
+| Target cloning | ✅ Working | `git clone --recursive` with branch/tag support, shallow + full fallback |
+| Build system detection | ✅ Working | CMake, Make, Meson, Bazel, Cargo, Go auto-detected |
+| Instrumented build | ✅ Working | Injects `-fsanitize=address,undefined` + coverage flags via CC/CXX/CFLAGS |
+| Existing harness detection | ✅ Working | Finds `LLVMFuzzerTestOneInput` in fuzz/harness files |
+| AI harness synthesis | ✅ Working | LangGraph agent with retry loop + deterministic fallback |
+| Docker fuzzing execution | ✅ Working | Hardened containers with real AFL++/libFuzzer invocation |
+| Coverage feedback loop | ✅ Working | AFL++ stats/plot_data parsed, stall detection with 5 conditions |
+| MAB strategy switching | ✅ Working | Thompson Sampling between 5 fuzzing configurations |
+| Crash triage | ✅ Working | ASAN regex parsing (0.85 confidence) + LLM deep analysis |
+| Stack-hash deduplication | ✅ Working | Eliminates duplicate crashes before reporting |
+| God-Mode signals | ✅ Working | Pause/resume/pivot/inject with acknowledgement queries |
+| Pre-flight gate | ✅ Working | Refuses to launch without Docker/Clang/GCC |
+
+### What's Still Maturing
+
+| Component | Status | What to Expect |
+|-----------|--------|----------------|
+| Harness evolution (LLM) | ⚠️ Works, quality varies | LLM-generated rewrites depend on model quality; fallback templates always compile |
+| Kernel fuzzing (syzkaller) | ⚠️ Parsers only | OOPS/KASAN/KFENCE log parsing works; automated syzkaller campaign orchestration is planned |
+| PoC / exploit generation | ⚠️ Template + LLM | Produces standalone C PoCs; reachability analysis is heuristic-based |
+| Patch verification | ⚠️ Basic pipeline | Clone → apply → build → test works; complex patches may need manual review |
+| Seed harvester | ⚠️ Format-aware generation | Generates valid format seeds (PNG/JPEG/ZIP/etc.); real CVE corpus download is planned |
+
+### What's Planned (Not Yet Implemented)
+
+| Feature | Target Version |
+|---------|---------------|
+| Multi-target parallel scheduling | v2.0 |
+| WebAssembly/WASI target support | v2.0 |
+| Cloud-native auto-scaling (Kubernetes) | v2.0 |
+| Real CVE corpus download from OSS-Fuzz/exploit-db | v1.2 |
+| Dashboard cockpit (live execs/sec, MAB arm, hotspots) | v1.1 |
+| Harness lineage DB (crash → run → MAB arm → harness version) | v1.2 |
+
+---
+
+## Supported Targets
+
+### What CrashWise IS Designed For
+
+CrashWise autonomously finds **memory-safety vulnerabilities** in
+**open-source C/C++ projects** that compile with standard build systems.
+
+| Requirement | Detail |
+|-------------|--------|
+| **Source code** | Must be available (git-cloneable). CrashWise compiles with sanitizer instrumentation. |
+| **Language** | C, C++, Rust (via Cargo), Go (via go-fuzz) |
+| **Build system** | CMake, Make, Meson, Bazel, Cargo, Go modules |
+| **Compiler** | Must compile with Clang (for `-fsanitize` support) |
+| **OS** | Linux only (AFL++/libFuzzer are Linux-native) |
+| **Input type** | File/buffer parsers (image, archive, network, crypto, font, etc.) |
+
+**Best results with:**
+- Projects that already have fuzz harnesses (libjxl, openssl, libpng, zlib, freetype)
+- Parser libraries that take `(uint8_t*, size_t)` as input
+- Projects with CMakeLists.txt or Makefile at the root
+- Code with clear entry points (functions named `parse`, `decode`, `read`, etc.)
+
+### What CrashWise is NOT Designed For
+
+| Target Type | Why It Won't Work |
+|-------------|-------------------|
+| **Closed-source binaries** | Requires source for sanitizer instrumentation. Use AFL++ QEMU mode directly instead. |
+| **Windows-only code (MSVC)** | Requires Clang compilation. MSVC sanitizers are not supported. |
+| **Managed languages (Java, Python, C#)** | Memory-safety bugs don't apply. Use language-specific fuzzers (Jazzer, Atheris). |
+| **Network services / daemons** | CrashWise fuzzes file/buffer parsers, not live network protocols. Use Boofuzz/AFL++ network mode. |
+| **GUI applications** | No UI interaction. CrashWise targets library functions, not user-facing apps. |
+| **Projects with proprietary dependencies** | Build will fail if required SDKs aren't available in the Docker container. |
+| **Extremely large monorepos** | Clone + build timeout (10min + 15min). Projects like Chromium need custom setup. |
+
+### What Might Give False or Poor Results
+
+| Scenario | Risk | Mitigation |
+|----------|------|------------|
+| No LLM configured | Harness synthesis falls back to a trivial XOR consumer — minimal coverage | Configure at least one LLM (see `.env.example`) |
+| Target has no clear entry point | Regex-based entry detection may miss deeply nested APIs | Use `--harness` flag to specify a known fuzz target |
+| Complex build (custom toolchains) | Auto-build may fail; campaign continues with source-only harness | Pre-build manually, provide binary via `crashwise.yaml` |
+| Short timeout (< 60s) | Not enough time for AFL++ to calibrate | Use `--timeout 600` minimum for meaningful results |
+| Target is already heavily fuzzed | Unlikely to find new bugs that OSS-Fuzz missed | Focus on newer/untested code paths or custom entry points |
+
+---
+
+## Current Limitations (Honest Assessment)
+
+This is a **pre-alpha** project. Known limitations:
+
+1. **Build failures are non-fatal** — If the target doesn't compile with
+   the injected sanitizer flags (common with complex projects), the
+   workflow continues with harness synthesis via `#include`. This may
+   produce a harness that exercises fewer code paths.
+
+2. **LLM quality matters** — Harness synthesis quality depends directly on
+   the LLM model. Claude Sonnet / GPT-4o produce good harnesses;
+   smaller models (7B-13B) often produce code that doesn't compile.
+   The fallback harness always works but provides minimal coverage.
+
+3. **No source-level coverage mapping** — Coverage data from AFL++ is
+   edge-count-based, not line-level (would require `llvm-cov` integration).
+   The coverage analyzer uses heuristic blocker detection.
+
+4. **Single-target campaigns** — Each `crashwise run` fuzzes one target.
+   Parallel multi-target scheduling is planned for v2.0.
+
+5. **Docker worker required** — The fuzzing execution itself happens inside
+   Docker containers. The host needs Docker running and the
+   `aflplusplus/aflplusplus` / `libfuzzer-runner` images available.
+
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for coding standards, testing
