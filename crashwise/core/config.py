@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     r2_region: str = Field(default="auto", description="S3 region for R2")
     r2_enabled: bool = Field(default=False, description="Enable R2 distributed storage")
 
+    # ── Docker execution limits ──────────────────────────────────────────────
+    docker_disk_quota: str = Field(
+        default="5G",
+        description="Per-container storage quota (--storage-opt size=). Requires overlay2 + xfs with pquota.",
+    )
+
     # ── Distributed state (Redis) ────────────────────────────────────────────
     redis_url: str = Field(
         default="redis://localhost:6379/0",

@@ -250,6 +250,16 @@ async def _real_execute(
                 job_id=job_id,
                 error=str(exc),
             )
+        # Extract coverage data (sancov/profraw) from container.
+        coverage_dir = payload.workdir / "coverage"
+        try:
+            await mgr.extract_coverage_data(job_id, coverage_dir)
+        except Exception as exc:
+            log.warning(
+                "execute_fuzzing.extract_coverage_failed",
+                job_id=job_id,
+                error=str(exc),
+            )
         # Now safe to remove the container.
         await mgr.cleanup(job_id)
     except asyncio.CancelledError:
@@ -437,6 +447,11 @@ def _collect_coverage_data(output_dir: Path, payload: ExecuteFuzzingInput) -> Pa
     libFuzzer writes coverage stats to stderr which we already capture in the
     fuzz.log file.
 
+    When source-based coverage is available (default.profraw from
+    -fprofile-instr-generate), we run llvm-profdata + llvm-cov export to
+    produce line-level JSON coverage that the analyze_coverage_activity
+    can parse for precise blocker identification.
+
     This function produces a unified coverage summary file that the
     ``analyze_coverage_activity`` can parse to identify which code paths
     are hit vs missed.
@@ -446,7 +461,84 @@ def _collect_coverage_data(output_dir: Path, payload: ExecuteFuzzingInput) -> Pa
     coverage_summary_path = output_dir / "coverage_summary.txt"
     lines: list[str] = []
 
-    # ── AFL++ coverage collection ────────────────────────────────────────
+    # ── Try llvm-cov export for line-level coverage (best quality) ────────
+    profraw = output_dir / "coverage" / "default.profraw"
+    if not profraw.exists():
+        # Also check directly in output_dir.
+        profraw = output_dir / "default.profraw"
+    if profraw.exists():
+        llvm_cov_path = output_dir / "coverage_llvm.json"
+        profdata = output_dir / "default.profdata"
+        harness = payload.harness_path or (payload.workdir / "harness")
+        import shlex
+        import subprocess
+        # Merge raw profile data.
+        try:
+            subprocess.run(
+                ["llvm-profdata", "merge", "-sparse", str(profraw), "-o", str(profdata)],
+                capture_output=True, timeout=30, check=True,
+            )
+            # Export as line-level JSON.
+            result = subprocess.run(
+                ["llvm-cov", "export", str(harness), f"-instr-profile={profdata}",
+                 "-format=text"],
+                capture_output=True, timeout=60, check=True,
+            )
+            llvm_cov_path.write_bytes(result.stdout)
+            # Parse the JSON into lcov-style DA: lines for the existing parser.
+            import json as _json
+            cov_data = _json.loads(result.stdout)
+            lines.append("# llvm-cov export line-level coverage")
+            for file_data in cov_data.get("data", [{}])[0].get("files", []):
+                fname = file_data.get("filename", "")
+                lines.append(f"SF:{fname}")
+                for seg in file_data.get("segments", []):
+                    # segments: [line, col, count, has_count, is_region_entry]
+                    if len(seg) >= 3:
+                        lines.append(f"DA:{seg[0]},{seg[2]}")
+                lines.append("end_of_record")
+            # Write and return early — this is the highest quality data.
+            coverage_summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return coverage_summary_path
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError):
+            # Fall through to AFL/libFuzzer heuristic collection.
+            lines.clear()
+
+    # ── Check for .sancov files (SanitizerCoverage bitmaps) ──────────────
+    sancov_dir = output_dir / "coverage"
+    sancov_files = list(sancov_dir.glob("*.sancov")) if sancov_dir.exists() else []
+    if not sancov_files:
+        sancov_files = list(output_dir.glob("*.sancov"))
+    if sancov_files:
+        import subprocess
+        harness = payload.harness_path or (payload.workdir / "harness")
+        try:
+            result = subprocess.run(
+                ["sancov", "-symbolize"] + [str(f) for f in sancov_files] + [str(harness)],
+                capture_output=True, timeout=30, check=True,
+            )
+            # sancov -symbolize outputs "file:line" per covered PC.
+            lines.append("# sancov symbolized line-level coverage")
+            covered_lines: dict[str, set[int]] = {}
+            for sline in result.stdout.decode("utf-8", errors="replace").splitlines():
+                if ":" in sline:
+                    parts = sline.rsplit(":", 1)
+                    try:
+                        covered_lines.setdefault(parts[0], set()).add(int(parts[1]))
+                    except ValueError:
+                        pass
+            for fname, lnums in covered_lines.items():
+                lines.append(f"SF:{fname}")
+                for ln in sorted(lnums):
+                    lines.append(f"DA:{ln},1")
+                lines.append("end_of_record")
+            if lines:
+                coverage_summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                return coverage_summary_path
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            lines.clear()
+
+    # ── AFL++ coverage collection (fallback) ─────────────────────────────
     if payload.fuzzer_type == FuzzerType.AFLPP:
         # 1. Parse fuzzer_stats for edge bitmap info.
         stats_path = output_dir / "fuzzer_stats"
