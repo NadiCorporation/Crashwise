@@ -157,14 +157,19 @@ def analyze_campaign(state: FuzzingCampaignState) -> FuzzingCampaignState:
     if last.stability > 0 and last.stability < _STALL_STABILITY:
         stall_reasons.append(f"Stability degraded to {last.stability:.1f}%")
 
-    # 3. Coverage plateau.
+    # 3. Coverage plateau — only trigger after _PLATEAU_THRESHOLD consecutive
+    # iterations without meaningful growth.
     if best.edges_hit > 0:
         growth = (last.edges_hit - best.edges_hit) / best.edges_hit
         if growth < 0.01:
-            stall_reasons.append(
-                f"Coverage plateaued at {best.edges_hit} edges "
-                f"(last: {last.edges_hit})"
-            )
+            state.consecutive_plateau_count += 1
+            if state.consecutive_plateau_count >= _PLATEAU_THRESHOLD:
+                stall_reasons.append(
+                    f"Coverage plateaued at {best.edges_hit} edges for "
+                    f"{state.consecutive_plateau_count} consecutive iterations"
+                )
+        else:
+            state.consecutive_plateau_count = 0
 
     # 4. No pending favourites (AFL has exhausted interesting seeds).
     if last.pending_favs == 0 and last.corpus_count > 10:

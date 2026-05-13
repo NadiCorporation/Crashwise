@@ -182,8 +182,10 @@ async def _real_execute(
                 last_coverage = max(last_coverage, int(parsed_lf["coverage"]))
                 last_exec_per_sec = parsed_lf["exec_per_sec"]
 
-            # AFL++ writes a fuzzer_stats file under -o/.
-            afl_stats_path = crashes_dir.parent / "fuzzer_stats"
+            # AFL++ writes a fuzzer_stats file under -o/default/.
+            afl_stats_path = crashes_dir.parent / "default" / "fuzzer_stats"
+            if not afl_stats_path.exists():
+                afl_stats_path = crashes_dir.parent / "fuzzer_stats"
             if (
                 payload.fuzzer_type == FuzzerType.AFLPP
                 and afl_stats_path.exists()
