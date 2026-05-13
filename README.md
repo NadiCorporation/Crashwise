@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-405%20passing-brightgreen" alt="405 tests passing">
+  <img src="https://img.shields.io/badge/tests-416%20passing-brightgreen" alt="416 tests passing">
   <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue" alt="Python versions">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
   <img src="https://img.shields.io/badge/temporal-1.25-blue" alt="Temporal">
@@ -78,7 +78,7 @@
 ├─────────┼────────────────┼────────────────┼─────────────────────────────────┤
 │         ▼                ▼                ▼                                  │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                     Temporal Activities (18 total)                   │    │
+│  │                     Temporal Activities (22 total)                   │    │
 │  │  setup_target      execute_fuzzing     triage_results               │    │
 │  │  seed_corpus       analyze_progress    analyze_crash                │    │
 │  │  pivot_strategy    analyze_coverage    evolve_harness               │    │
@@ -591,7 +591,7 @@ crashwise signal <campaign-id> resume_hunt
 ## Testing
 
 ```bash
-# Run the full test suite (405 tests)
+# Run the full test suite (416 tests)
 uv run pytest tests/ -v
 
 # With coverage report
@@ -628,7 +628,7 @@ crashwise/
 │   └── notifications.py      #   Webhook/SMTP/PGP alerts
 ├── orchestration/            # Temporal workflows + activities
 │   ├── workflows/            #   MainFuzzingWorkflow, VerifyPatch, etc.
-│   └── activities/           #   18 activity implementations
+│   └── activities/           #   22 activity implementations
 ├── agents/                   # LangGraph AI agents
 │   ├── harness_synth/        #   Harness generation & evolution
 │   ├── triage/               #   Crash classification & exploit gen
@@ -752,9 +752,10 @@ This is a **pre-alpha** project. Known limitations:
    smaller models (7B-13B) often produce code that doesn't compile.
    The fallback harness always works but provides minimal coverage.
 
-3. **No source-level coverage mapping** — Coverage data from AFL++ is
-   edge-count-based, not line-level (would require `llvm-cov` integration).
-   The coverage analyzer uses heuristic blocker detection.
+3. **Source-level coverage requires llvm-cov tooling** — When `llvm-profdata`
+   and `llvm-cov` are available on the worker, CrashWise extracts real
+   line-level coverage via `llvm-cov export`. Falls back to sancov
+   symbolization, then AFL++ edge-count heuristics when tooling is absent.
 
 4. **Single-target campaigns** — Each `crashwise run` fuzzes one target.
    Parallel multi-target scheduling is planned for v2.0.
