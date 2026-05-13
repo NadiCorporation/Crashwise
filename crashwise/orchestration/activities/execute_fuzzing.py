@@ -280,6 +280,8 @@ async def _real_execute(
         crash_count=crash_count_observed,
         executions=last_executions,
         duration_seconds=round(duration, 3),
+        coverage_edges=last_coverage,
+        coverage_data_path=_collect_coverage_data(crashes_dir.parent, payload),
     )
 
     log.info(
@@ -418,6 +420,137 @@ def _simulated_execs_per_tick(fuzzer: FuzzerType) -> int:
         FuzzerType.AFLPP: 2_500,
         FuzzerType.HONGGFUZZ: 3_500,
     }.get(fuzzer, 1_000)
+
+
+# ── Coverage data collection ─────────────────────────────────────────────────
+
+
+def _collect_coverage_data(output_dir: Path, payload: ExecuteFuzzingInput) -> Path | None:
+    """Collect raw coverage data from the fuzzer's output directory.
+
+    AFL++ writes several coverage-relevant files:
+      - ``plot_data``: CSV with ``unix_time, cycles_done, cur_item, corpus_count,
+        pending_total, pending_favs, bit_flips, ... , edges_found, ...``
+      - ``fuzzer_stats``: key-value pairs including ``edges_found``, ``bitmap_cvg``
+      - ``default/queue/``: corpus files (each triggers a new edge)
+
+    libFuzzer writes coverage stats to stderr which we already capture in the
+    fuzz.log file.
+
+    This function produces a unified coverage summary file that the
+    ``analyze_coverage_activity`` can parse to identify which code paths
+    are hit vs missed.
+
+    Returns the path to the generated coverage summary, or None if no data.
+    """
+    coverage_summary_path = output_dir / "coverage_summary.txt"
+    lines: list[str] = []
+
+    # ── AFL++ coverage collection ────────────────────────────────────────
+    if payload.fuzzer_type == FuzzerType.AFLPP:
+        # 1. Parse fuzzer_stats for edge bitmap info.
+        stats_path = output_dir / "fuzzer_stats"
+        if not stats_path.exists():
+            stats_path = output_dir / "default" / "fuzzer_stats"
+        if stats_path.exists():
+            try:
+                stats_text = stats_path.read_text(encoding="utf-8", errors="replace")
+                lines.append("# AFL++ fuzzer_stats coverage data")
+                lines.append(f"# source: {stats_path}")
+                for line in stats_text.splitlines():
+                    if ":" not in line:
+                        continue
+                    key, _, val = line.partition(":")
+                    key = key.strip()
+                    val = val.strip()
+                    if key in (
+                        "edges_found", "total_edges", "bitmap_cvg",
+                        "corpus_count", "stability", "execs_done",
+                        "execs_per_sec", "pending_favs", "pending_total",
+                        "var_byte_count", "bitmap_bits",
+                    ):
+                        lines.append(f"{key}: {val}")
+            except OSError:
+                pass
+
+        # 2. Parse plot_data for coverage timeline (last entry = current state).
+        plot_path = output_dir / "plot_data"
+        if not plot_path.exists():
+            plot_path = output_dir / "default" / "plot_data"
+        if plot_path.exists():
+            try:
+                plot_text = plot_path.read_text(encoding="utf-8", errors="replace")
+                plot_lines = [l for l in plot_text.splitlines() if l.strip() and not l.startswith("#")]
+                if plot_lines:
+                    lines.append("")
+                    lines.append("# AFL++ plot_data (last 50 entries)")
+                    # Include header + last 50 data points for trend analysis
+                    header_line = next(
+                        (l for l in plot_text.splitlines() if l.startswith("#")), ""
+                    )
+                    if header_line:
+                        lines.append(header_line)
+                    for entry in plot_lines[-50:]:
+                        lines.append(entry)
+            except OSError:
+                pass
+
+        # 3. Count queue files (each represents a unique coverage path).
+        queue_dir = output_dir / "queue"
+        if not queue_dir.exists():
+            queue_dir = output_dir / "default" / "queue"
+        if queue_dir.exists():
+            try:
+                queue_files = [f.name for f in queue_dir.iterdir() if f.is_file()]
+                lines.append("")
+                lines.append(f"# Queue corpus: {len(queue_files)} files")
+                # Include filenames — AFL names encode coverage info
+                # e.g. "id:000042,time:12345,execs:67890,op:havoc,rep:4,+cov"
+                cov_files = [f for f in queue_files if "+cov" in f]
+                lines.append(f"# Files with +cov: {len(cov_files)}")
+                for fname in cov_files[-100:]:
+                    lines.append(f"+{fname}")
+            except OSError:
+                pass
+
+    # ── libFuzzer coverage collection ────────────────────────────────────
+    else:
+        log_path = output_dir / "fuzz.log"
+        if log_path.exists():
+            try:
+                log_text = log_path.read_text(encoding="utf-8", errors="replace")
+                lines.append("# libFuzzer coverage data")
+                lines.append(f"# source: {log_path}")
+                # Extract coverage-relevant lines from libFuzzer output.
+                # libFuzzer reports: "#12345 NEW   cov: 456 ft: 789 ..."
+                import re
+                cov_pattern = re.compile(
+                    r"#(\d+)\s+(?:NEW|REDUCE|pulse)\s+cov:\s*(\d+)\s+ft:\s*(\d+)"
+                )
+                entries: list[tuple[int, int, int]] = []
+                for log_line in log_text.splitlines():
+                    m = cov_pattern.search(log_line)
+                    if m:
+                        entries.append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
+
+                if entries:
+                    lines.append(f"# Total coverage events: {len(entries)}")
+                    lines.append(f"# Final coverage: cov={entries[-1][1]} ft={entries[-1][2]}")
+                    lines.append("")
+                    lines.append("# exec_count, cov_edges, cov_features")
+                    for exec_n, cov, ft in entries[-100:]:
+                        lines.append(f"{exec_n},{cov},{ft}")
+            except OSError:
+                pass
+
+    if not lines:
+        return None
+
+    try:
+        coverage_summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return coverage_summary_path
+    except OSError:
+        return None
 
 
 __all__ = ["execute_fuzzing"]

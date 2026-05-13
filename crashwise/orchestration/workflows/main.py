@@ -649,6 +649,7 @@ class MainFuzzingWorkflow:
         blocker, target_function = await self._identify_blocker(
             setup_out=setup_out,
             harness_path=harness_path,
+            campaign=campaign,
         )
 
         # ── 2. Ask the LLM to rewrite the harness against the blocker. ─
@@ -717,6 +718,7 @@ class MainFuzzingWorkflow:
         *,
         setup_out: SetupTargetOutput,
         harness_path: Path,
+        campaign: FuzzingCampaignState,
     ) -> tuple[CoverageBlocker, str]:
         """Run ``analyze_coverage_activity`` and pick the best blocker.
 
@@ -734,12 +736,33 @@ class MainFuzzingWorkflow:
         # ``setup_target``.  Fall back to the workdir if the harness
         # path is unset.
         source_root = harness_path.parent if harness_path else setup_out.workdir
+
+        # Load live coverage data collected by execute_fuzzing activity.
+        coverage_data = ""
+        if campaign.last_coverage_data_path is not None:
+            try:
+                _cov_path = campaign.last_coverage_data_path
+                # Read coverage data in an activity to maintain determinism.
+                coverage_data = await workflow.execute_activity(
+                    "read_coverage_data",
+                    {"path": str(_cov_path)},
+                    result_type=str,
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=_COVERAGE_RETRY,
+                )
+            except Exception as exc:
+                log.warning(
+                    "main_workflow.evolution.coverage_data_read_failed "
+                    f"error={exc!s:.120}"
+                )
+                # Fall through — static analysis is still useful.
+
         try:
             analysis: CoverageAnalysis = await workflow.execute_activity(
                 "analyze_coverage_activity",
                 AnalyzeCoverageInput(
                     source_path=source_root,
-                    coverage_data="",  # Live coverage data wired in a later phase.
+                    coverage_data=coverage_data,
                 ),
                 result_type=CoverageAnalysis,
                 start_to_close_timeout=timedelta(minutes=2),
