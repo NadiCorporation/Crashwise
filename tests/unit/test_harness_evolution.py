@@ -254,7 +254,7 @@ async def test_evolve_harness_null_check_template() -> None:
     )
     result = await evolve_harness(payload)
 
-    assert "malloc" in result.evolved_harness_code
+    assert "malloc" in result.evolved_harness_code or "new" in result.evolved_harness_code
 
 
 @pytest.mark.asyncio

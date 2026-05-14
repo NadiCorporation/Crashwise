@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 import uuid
+from pathlib import Path
 
 import pytest
 from temporalio.client import Client
@@ -37,6 +38,20 @@ _EF_MODULE = sys.modules[ef_module.__module__]
 def _fast_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     """Compress the fuzz tick so workflows resolve in milliseconds."""
     monkeypatch.setattr(_EF_MODULE, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+
+
+@pytest.fixture(autouse=True)
+def _mock_clone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Mock git clone so workflow tests don't need network access."""
+    from crashwise.orchestration.activities.setup_target import setup_target  # noqa: F401
+
+    st_module = sys.modules["crashwise.orchestration.activities.setup_target"]
+
+    async def _fake_clone(repo_url: str, branch: str | None, workdir: Path) -> str:
+        (workdir / "main.c").write_text("int main() { return 0; }\n")
+        return "abc123deadbeef"
+
+    monkeypatch.setattr(st_module, "_clone_repo", _fake_clone)
 
 
 async def _run_main(client: Client, task_queue: str, payload: FuzzingInput) -> FuzzingOutput:

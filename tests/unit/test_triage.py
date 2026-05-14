@@ -29,7 +29,13 @@ class _StubLLM:
 
 @pytest.fixture(autouse=True)
 def _clear_llm_override() -> None:
-    set_chat_model_override(None)
+    """Force LLM path to fail so heuristic fallback is exercised."""
+
+    class _FailingLLM:
+        async def ainvoke(self, *args: object, **kwargs: object) -> None:
+            raise RuntimeError("LLM disabled for heuristic tests")
+
+    set_chat_model_override(_FailingLLM())
     yield
     set_chat_model_override(None)
 
