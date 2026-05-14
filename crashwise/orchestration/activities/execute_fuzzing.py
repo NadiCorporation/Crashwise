@@ -128,6 +128,7 @@ async def _real_execute(
     job = FuzzJob(
         job_id=job_id,
         backend=ExecutionBackend.DOCKER,
+        fuzzer_type=payload.fuzzer_type,
         harness_path=harness_path,
         corpus_dir=corpus_dir,
         output_dir=crashes_dir.parent,

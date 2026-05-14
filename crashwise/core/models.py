@@ -296,6 +296,7 @@ class FuzzJob(_StrictModel):
 
     job_id: str
     backend: ExecutionBackend = ExecutionBackend.DOCKER
+    fuzzer_type: FuzzerType = FuzzerType.LIBFUZZER
     harness_path: Path
     corpus_dir: Path
     output_dir: Path

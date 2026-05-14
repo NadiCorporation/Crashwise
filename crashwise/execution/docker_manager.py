@@ -21,7 +21,7 @@ from typing import Any
 
 from crashwise.core.config import get_settings
 from crashwise.core.logging import get_logger
-from crashwise.core.models import FuzzJob
+from crashwise.core.models import FuzzJob, FuzzerType
 
 log = get_logger(__name__)
 
@@ -115,11 +115,9 @@ def parse_afl_fuzzer_stats(stats_text: str) -> dict[str, float]:
     return out
 
 
-def _resolve_image(harness_path: Path) -> str:
-    """Pick a base image based on the harness binary type."""
-    # Heuristic: if the harness filename contains "afl", use AFL++.
-    name = harness_path.name.lower()
-    if "afl" in name:
+def _resolve_image(harness_path: Path, fuzzer_type: FuzzerType = FuzzerType.LIBFUZZER) -> str:
+    """Pick a base image based on the fuzzer type."""
+    if fuzzer_type == FuzzerType.AFLPP:
         return _AFL_IMAGE
     return _LIBFUZZER_IMAGE
 
@@ -156,7 +154,7 @@ class DockerManager:
         if not await self._docker_available():
             raise RuntimeError("docker daemon not reachable")
 
-        image = _resolve_image(job.harness_path)
+        image = _resolve_image(job.harness_path, job.fuzzer_type)
         await self._ensure_image(image)
 
         # Prepare host paths.
