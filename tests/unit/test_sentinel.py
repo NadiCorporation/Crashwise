@@ -442,15 +442,12 @@ async def test_check_service_temporal_ok() -> None:
 
 @pytest.mark.anyio
 async def test_check_service_temporal_warn() -> None:
-    async def _mock_get(*args, **kwargs):
-        raise Exception("connection refused")
+    with patch("socket.socket") as mock_socket_cls:
+        mock_sock = MagicMock()
+        mock_sock.connect = MagicMock(side_effect=Exception("connection refused"))
+        mock_socket_cls.return_value = mock_sock
 
-    mock_client = AsyncMock()
-    mock_client.get = _mock_get
-    mock_client.__aenter__.return_value = mock_client
-
-    with patch("httpx.AsyncClient", return_value=mock_client):
-        result = await check_service_temporal()
+        result = await check_service_temporal("localhost", 7233)
         assert result.status == CheckStatus.WARN
 
 

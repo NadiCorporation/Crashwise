@@ -49,7 +49,8 @@ def sample_job(tmp_path: Path) -> FuzzJob:
 # ── DockerManager tests ──────────────────────────────────────────────────────
 @pytest.mark.asyncio
 async def test_docker_manager_start_success(sample_job: FuzzJob) -> None:
-    with patch("asyncio.create_subprocess_exec") as mock_exec:
+    with patch("asyncio.create_subprocess_exec") as mock_exec, \
+         patch.object(DockerManager, "_docker_available", return_value=True):
         # First call: docker rm -f (B13 pre-flight; no-op on first run).
         # Second call: docker images (returns empty → needs pull).
         # Third call: docker pull.
@@ -73,7 +74,8 @@ async def test_docker_manager_stop(sample_job: FuzzJob) -> None:
 
     Removal happens in cleanup(); stop alone must keep tracking the id.
     """
-    with patch("asyncio.create_subprocess_exec") as mock_exec:
+    with patch("asyncio.create_subprocess_exec") as mock_exec, \
+         patch.object(DockerManager, "_docker_available", return_value=True):
         mock_exec.side_effect = [
             _fake_proc(stdout=b"", returncode=1),  # pre-flight rm -f
             _fake_proc(stdout=b""),
@@ -94,7 +96,8 @@ async def test_docker_manager_stop(sample_job: FuzzJob) -> None:
 
 @pytest.mark.asyncio
 async def test_docker_manager_is_alive_true(sample_job: FuzzJob) -> None:
-    with patch("asyncio.create_subprocess_exec") as mock_exec:
+    with patch("asyncio.create_subprocess_exec") as mock_exec, \
+         patch.object(DockerManager, "_docker_available", return_value=True):
         mock_exec.side_effect = [
             _fake_proc(stdout=b"", returncode=1),  # pre-flight rm -f
             _fake_proc(stdout=b""),
@@ -111,7 +114,8 @@ async def test_docker_manager_is_alive_true(sample_job: FuzzJob) -> None:
 
 @pytest.mark.asyncio
 async def test_docker_manager_logs(sample_job: FuzzJob) -> None:
-    with patch("asyncio.create_subprocess_exec") as mock_exec:
+    with patch("asyncio.create_subprocess_exec") as mock_exec, \
+         patch.object(DockerManager, "_docker_available", return_value=True):
         mock_exec.side_effect = [
             _fake_proc(stdout=b"", returncode=1),  # pre-flight rm -f
             _fake_proc(stdout=b""),

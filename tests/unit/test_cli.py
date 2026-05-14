@@ -47,7 +47,7 @@ def test_init_creates_tables() -> None:
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 0
         assert "created successfully" in result.output
-        mock_init.assert_awaited_once_with(drop_all=False)
+        mock_init.assert_awaited_once_with(drop=False)
         mock_close.assert_awaited_once()
 
 
@@ -61,7 +61,7 @@ def test_init_force_recreate() -> None:
         result = runner.invoke(app, ["init", "--db-force"])
         assert result.exit_code == 0
         assert "recreated successfully" in result.output
-        mock_init.assert_awaited_once_with(drop_all=True)
+        mock_init.assert_awaited_once_with(drop=True)
 
 
 # ── run command ──────────────────────────────────────────────────────────────
