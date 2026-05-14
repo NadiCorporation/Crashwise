@@ -276,6 +276,75 @@ class VeniceProvider(BaseInference):
         return _safe_parse_json(raw)
 
 
+# ── OpenAI-Compatible provider (NVIDIA, Together, Groq, etc.) ────────────────
+
+class OpenAICompatibleProvider(BaseInference):
+    """Inference via any OpenAI-compatible API (NVIDIA, Together, Groq, etc.)."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        api_key: str | None = None,
+        timeout: float = 120.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.api_key = api_key
+        self.timeout = timeout
+
+    async def analyze(self, crash_context: str) -> dict[str, Any]:
+        return await self._chat(
+            system=_TRIAGE_SYSTEM_PROMPT,
+            user=_wrap_untrusted(crash_context),
+        )
+
+    async def suggest_patch(self, root_cause: str) -> dict[str, Any]:
+        return await self._chat(
+            system=_PATCH_SYSTEM_PROMPT,
+            user=f"Root cause analysis:\n{_wrap_untrusted(root_cause)}",
+        )
+
+    async def health_check(self) -> bool:
+        try:
+            headers: dict[str, str] = {}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    f"{self.base_url}/models",
+                    headers=headers,
+                )
+                return resp.status_code == 200
+        except Exception:
+            return False
+
+    async def _chat(self, system: str, user: str) -> dict[str, Any]:
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "response_format": {"type": "json_object"},
+        }
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        raw = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return _safe_parse_json(raw)
+
+
 # ── Factory ───────────────────────────────────────────────────────────────────
 
 
@@ -288,10 +357,32 @@ def get_provider() -> BaseInference:
     provider_name = (settings.ai_provider or "").lower().strip()
 
     if provider_name == "ollama":
+        ollama_url = getattr(settings, "ollama_url", "http://localhost:11434")
+        # Detect misconfiguration: remote URL with ollama provider → use OpenAI-compatible
+        if "localhost" not in ollama_url and "127.0.0.1" not in ollama_url:
+            log.info(
+                "ai_provider.openai_compatible_fallback",
+                model=settings.ai_model,
+                base_url=ollama_url,
+            )
+            return OpenAICompatibleProvider(
+                base_url=ollama_url,
+                model=settings.ai_model or "llama3.1:8b",
+                api_key=settings.ai_api_key,
+            )
         log.info("ai_provider.ollama", model=settings.ai_model)
         return OllamaProvider(
-            base_url=getattr(settings, "ollama_url", "http://localhost:11434"),
+            base_url=ollama_url,
             model=settings.ai_model or "llama3.1:8b",
+        )
+
+    if provider_name == "openai_compatible":
+        base_url = getattr(settings, "ollama_url", "")
+        log.info("ai_provider.openai_compatible", model=settings.ai_model, base_url=base_url)
+        return OpenAICompatibleProvider(
+            base_url=base_url,
+            model=settings.ai_model or "llama3.1:8b",
+            api_key=settings.ai_api_key,
         )
 
     if provider_name == "venice":

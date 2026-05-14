@@ -180,13 +180,16 @@ def run_configure_wizard(env_path: Path | None = None) -> Path:
 
     elif triage_choice == "custom":
         console.print(
-            "[dim]Custom triage uses the same Ollama provider class with a custom URL.[/]"
+            "[dim]Custom triage uses an OpenAI-compatible endpoint (/v1/chat/completions).[/]"
         )
-        base_url = Prompt.ask("API base URL (must support /api/chat like Ollama)")
+        base_url = Prompt.ask("API base URL (e.g. https://integrate.api.nvidia.com/v1)")
+        api_key = Prompt.ask("API key (leave empty if none)", password=True, default="")
         model = Prompt.ask("Model name")
-        env_lines["AI_PROVIDER"] = "ollama"
+        env_lines["AI_PROVIDER"] = "openai_compatible"
         env_lines["AI_MODEL"] = model
         env_lines["OLLAMA_URL"] = base_url
+        if api_key:
+            env_lines["AI_API_KEY"] = api_key
 
     elif triage_choice == "none":
         env_lines["AI_PROVIDER"] = ""

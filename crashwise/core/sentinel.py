@@ -934,26 +934,158 @@ async def check_service_llm(
     base_url: str = "http://localhost:11434",
     timeout: float = 3.0,
 ) -> CheckResult:
-    """Check LLM API (Ollama) connectivity."""
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(f"{base_url}/api/tags")
-            if resp.status_code == 200:
-                data = resp.json()
-                models = [m.get("name", "?") for m in data.get("models", [])]
-                model_list = ", ".join(models[:3]) if models else "no models"
-                return CheckResult(
-                    name="service.llm",
-                    status=CheckStatus.OK,
-                    message=f"Ollama reachable. Models: {model_list}",
+    """Check LLM API connectivity.
+
+    Detects the configured provider from settings and checks the
+    appropriate endpoint:
+      - Agentic (OPENAI_API_BASE): OpenAI-compatible /models
+      - Triage (AI_PROVIDER=ollama): Ollama /api/tags
+      - Triage (AI_PROVIDER=openai_compatible): OpenAI /models
+      - Triage (AI_PROVIDER=venice): Venice /models
+      - Fallback: local Ollama at base_url
+    """
+    from crashwise.core.config import get_settings
+
+    settings = get_settings()
+    ok_parts: list[str] = []
+    fail_parts: list[str] = []
+
+    # ── Check agentic LLM (LangChain layer) ──
+    agentic_base = settings.openai_api_base
+    agentic_model = settings.crashwise_llm_model
+    if agentic_base and agentic_base != "http://localhost:11434/v1":
+        try:
+            headers: dict[str, str] = {}
+            api_key = settings.openai_api_key
+            if api_key and api_key.get_secret_value() not in ("", "ollama"):
+                headers["Authorization"] = f"Bearer {api_key.get_secret_value()}"
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(
+                    f"{agentic_base.rstrip('/')}/models",
+                    headers=headers,
                 )
-    except Exception as exc:
-        pass
+                if resp.status_code == 200:
+                    ok_parts.append(f"Agentic LLM: {agentic_model} via {agentic_base}")
+                else:
+                    fail_parts.append(f"Agentic LLM: HTTP {resp.status_code} from {agentic_base}")
+        except Exception as exc:
+            fail_parts.append(f"Agentic LLM: unreachable at {agentic_base}")
+    elif agentic_base and "localhost:11434" in agentic_base:
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get("http://localhost:11434/api/tags")
+                if resp.status_code == 200:
+                    ok_parts.append(f"Agentic LLM: {agentic_model} via local Ollama")
+                else:
+                    fail_parts.append("Agentic LLM: local Ollama returned non-200")
+        except Exception:
+            fail_parts.append("Agentic LLM: local Ollama not reachable")
+
+    # ── Check triage LLM ──
+    ai_provider = (settings.ai_provider or "").lower().strip()
+    if ai_provider == "ollama":
+        ollama_url = settings.ollama_url.rstrip("/")
+        if "localhost" in ollama_url or "127.0.0.1" in ollama_url:
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.get(f"{ollama_url}/api/tags")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        models = [m.get("name", "?") for m in data.get("models", [])]
+                        model_list = ", ".join(models[:3]) if models else "no models"
+                        ok_parts.append(f"Triage: Ollama ({model_list})")
+                    else:
+                        fail_parts.append(f"Triage: Ollama returned HTTP {resp.status_code}")
+            except Exception:
+                fail_parts.append(f"Triage: Ollama not reachable at {ollama_url}")
+        else:
+            try:
+                headers = {}
+                if settings.ai_api_key:
+                    headers["Authorization"] = f"Bearer {settings.ai_api_key}"
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.get(f"{ollama_url}/models", headers=headers)
+                    if resp.status_code == 200:
+                        ok_parts.append(f"Triage: {settings.ai_model} via {ollama_url}")
+                    else:
+                        fail_parts.append(
+                            f"Triage: {ollama_url} HTTP {resp.status_code} "
+                            f"(hint: use AI_PROVIDER=openai_compatible for non-Ollama endpoints)"
+                        )
+            except Exception:
+                fail_parts.append(f"Triage: unreachable at {ollama_url}")
+    elif ai_provider == "venice":
+        try:
+            headers = {}
+            if settings.ai_api_key:
+                headers["Authorization"] = f"Bearer {settings.ai_api_key}"
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(
+                    "https://api.venice.ai/api/v1/models", headers=headers,
+                )
+                if resp.status_code == 200:
+                    ok_parts.append(f"Triage: Venice ({settings.ai_model})")
+                else:
+                    fail_parts.append(f"Triage: Venice returned HTTP {resp.status_code}")
+        except Exception:
+            fail_parts.append("Triage: Venice unreachable")
+    elif ai_provider == "openai_compatible":
+        ollama_url = settings.ollama_url.rstrip("/")
+        try:
+            headers = {}
+            if settings.ai_api_key:
+                headers["Authorization"] = f"Bearer {settings.ai_api_key}"
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"{ollama_url}/models", headers=headers)
+                if resp.status_code == 200:
+                    ok_parts.append(f"Triage: {settings.ai_model} via {ollama_url}")
+                else:
+                    fail_parts.append(f"Triage: {ollama_url} returned HTTP {resp.status_code}")
+        except Exception:
+            fail_parts.append(f"Triage: unreachable at {ollama_url}")
+    elif not ai_provider:
+        ok_parts.append("Triage: heuristic-only (no AI provider)")
+
+    # ── Fallback: if nothing was configured at all, check local Ollama ──
+    if not ok_parts and not fail_parts:
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"{base_url}/api/tags")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = [m.get("name", "?") for m in data.get("models", [])]
+                    model_list = ", ".join(models[:3]) if models else "no models"
+                    ok_parts.append(f"Ollama reachable. Models: {model_list}")
+        except Exception:
+            pass
+
+    # ── Build result ──
+    if ok_parts and not fail_parts:
+        return CheckResult(
+            name="service.llm",
+            status=CheckStatus.OK,
+            message="; ".join(ok_parts),
+        )
+    elif ok_parts and fail_parts:
+        return CheckResult(
+            name="service.llm",
+            status=CheckStatus.OK,
+            message="; ".join(ok_parts),
+            detail="; ".join(fail_parts),
+        )
+    elif fail_parts:
+        return CheckResult(
+            name="service.llm",
+            status=CheckStatus.WARN,
+            message="; ".join(fail_parts),
+            remediation="Run crashwise configure to set up an LLM provider.",
+        )
+
     return CheckResult(
         name="service.llm",
         status=CheckStatus.WARN,
         message=f"LLM API not reachable at {base_url}.",
-        remediation="Start Ollama:  ollama serve  (or configure a remote provider)",
+        remediation="Run crashwise configure to set up an LLM provider.",
     )
 
 
