@@ -65,6 +65,19 @@ def version() -> None:
 
 
 @app.command()
+def configure() -> None:
+    """Interactive LLM provider setup wizard.
+
+    Guides you through choosing AI providers for agentic workflows
+    (harness synthesis, evolution) and crash triage (root-cause analysis).
+    Saves configuration to .env in the current directory.
+    """
+    from crashwise.core.configure import run_configure_wizard
+
+    run_configure_wizard()
+
+
+@app.command()
 def info() -> None:
     """Print runtime + configuration metadata."""
     settings = get_settings()
@@ -76,6 +89,8 @@ def info() -> None:
     typer.echo(f"  db_url:     {settings.database_url}")
     typer.echo(f"  redis:      {settings.redis_url or 'disabled'}")
     typer.echo(f"  r2:         {'enabled' if settings.r2_enabled else 'disabled'}")
+    typer.echo(f"  llm_model:  {settings.crashwise_llm_model}")
+    typer.echo(f"  ai_triage:  {settings.ai_provider or 'disabled'}")
 
 
 @app.command()
