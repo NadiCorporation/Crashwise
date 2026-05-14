@@ -48,6 +48,10 @@ class Settings(BaseSettings):
 
     crashwise_llm_model: str = Field(default="claude-sonnet-4-5")
     crashwise_llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    openai_api_base: str | None = Field(
+        default=None,
+        description="Custom OpenAI-compatible base URL (e.g. http://localhost:11434/v1)",
+    )
 
     # ── Filesystem layout ────────────────────────────────────────────────────
     crashwise_harness_dir: Path = Field(default=Path("./harnesses"))

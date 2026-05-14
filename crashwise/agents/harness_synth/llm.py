@@ -83,12 +83,15 @@ def get_chat_model() -> ChatModelLike:
     from langchain_openai import ChatOpenAI
 
     openai_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
-    return ChatOpenAI(
-        model=model_name,
-        temperature=temperature,
-        api_key=openai_key,
-        timeout=120,
-    )
+    kwargs: dict[str, Any] = {
+        "model": model_name,
+        "temperature": temperature,
+        "api_key": openai_key,
+        "timeout": 120,
+    }
+    if settings.openai_api_base:
+        kwargs["base_url"] = settings.openai_api_base
+    return ChatOpenAI(**kwargs)
 
 
 __all__ = ["ChatModelLike", "get_chat_model", "set_chat_model_override"]
