@@ -19,6 +19,7 @@ Pages
 
 from __future__ import annotations
 
+import os
 import urllib.parse
 from typing import Any
 
@@ -27,7 +28,7 @@ import streamlit as st
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-API_BASE = st.secrets.get("api_url", "http://localhost:8000")
+API_BASE = os.environ.get("CRASHWISE_API_URL", os.environ.get("API_URL", "http://localhost:8000"))
 
 st.set_page_config(
     page_title="CrashWise Intelligence Dashboard",
@@ -127,8 +128,7 @@ if page == "🏠 Campaigns":
         for c in campaigns:
             with st.container():
                 c1, c2, c3 = st.columns([3, 1, 1])
-                c1.markdown(f"**{c['target_name']}**  
-`{c['target_repo']}`")
+                c1.markdown(f"**{c['target_name']}**  \n`{c['target_repo']}`")
                 c2.markdown(f"Status: **{c['status']}**")
                 c3.markdown(f"Runs: {c['run_count']} | Seeds: {c['seed_count']}")
                 if st.button("🔍 View Details", key=f"btn_{c['id']}"):
@@ -335,7 +335,7 @@ elif page == "⚙️ Settings":
     st.markdown("### Webhook")
     webhook_url = st.text_input(
         "Webhook URL",
-        value=st.secrets.get("webhook_url", ""),
+        value=os.environ.get("WEBHOOK_URL", ""),
         help="Slack/Discord incoming webhook URL",
     )
     webhook_format = st.selectbox(
@@ -345,24 +345,24 @@ elif page == "⚙️ Settings":
     )
 
     st.markdown("### SMTP (Secure Email)")
-    smtp_host = st.text_input("SMTP Host", value=st.secrets.get("smtp_host", ""))
+    smtp_host = st.text_input("SMTP Host", value=os.environ.get("SMTP_HOST", ""))
     smtp_port = st.number_input("SMTP Port", value=587, min_value=1, max_value=65535)
-    smtp_user = st.text_input("SMTP Username", value=st.secrets.get("smtp_user", ""))
+    smtp_user = st.text_input("SMTP Username", value=os.environ.get("SMTP_USER", ""))
     smtp_password = st.text_input(
         "SMTP Password",
         type="password",
-        value=st.secrets.get("smtp_password", ""),
+        value=os.environ.get("SMTP_PASSWORD", ""),
     )
     smtp_from = st.text_input("From Address", value="crashwise@localhost")
     smtp_to = st.text_input(
         "To Addresses (comma-separated)",
-        value=st.secrets.get("smtp_to", ""),
+        value=os.environ.get("SMTP_TO", ""),
     )
 
     st.markdown("### PGP Encryption")
     pgp_key = st.text_area(
         "PGP Public Key (armored)",
-        value=st.secrets.get("pgp_public_key", ""),
+        value=os.environ.get("PGP_PUBLIC_KEY", ""),
         help="Optional: encrypt email notifications with PGP",
         height=150,
     )

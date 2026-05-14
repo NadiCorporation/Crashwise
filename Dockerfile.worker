@@ -146,6 +146,10 @@ COPY --from=afl-builder /usr/local/share/afl /usr/local/share/afl/
 COPY --from=py-builder /app/.venv /app/.venv
 COPY --from=py-builder /app/crashwise /app/crashwise
 
+# Fix venv python symlink: py-builder uses /usr/local/bin/python3 (uv image)
+# but runtime has python3 at /usr/bin/python3 (debian bookworm-slim).
+RUN ln -sf /usr/bin/python3 /app/.venv/bin/python
+
 # Verify key tools are present.
 #
 # AFL++ has no dedicated --version flag. ``-V`` is fuzz duration (takes a
