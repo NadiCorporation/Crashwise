@@ -485,7 +485,17 @@ async def test_check_service_llm_ok() -> None:
     mock_client.get = _mock_get
     mock_client.__aenter__.return_value = mock_client
 
-    with patch("httpx.AsyncClient", return_value=mock_client):
+    mock_settings = MagicMock()
+    mock_settings.openai_api_base = None
+    mock_settings.crashwise_llm_model = "codellama"
+    mock_settings.ai_provider = "ollama"
+    mock_settings.ollama_url = "http://localhost:11434"
+    mock_settings.ai_model = "codellama"
+    mock_settings.ai_api_key = None
+    mock_settings.openai_api_key = None
+
+    with patch("httpx.AsyncClient", return_value=mock_client), \
+         patch("crashwise.core.config.get_settings", return_value=mock_settings):
         result = await check_service_llm()
         assert result.status == CheckStatus.OK
         assert "codellama" in result.message
@@ -500,7 +510,17 @@ async def test_check_service_llm_warn() -> None:
     mock_client.get = _mock_get
     mock_client.__aenter__.return_value = mock_client
 
-    with patch("httpx.AsyncClient", return_value=mock_client):
+    mock_settings = MagicMock()
+    mock_settings.openai_api_base = None
+    mock_settings.crashwise_llm_model = "codellama"
+    mock_settings.ai_provider = "ollama"
+    mock_settings.ollama_url = "http://localhost:11434"
+    mock_settings.ai_model = "codellama"
+    mock_settings.ai_api_key = None
+    mock_settings.openai_api_key = None
+
+    with patch("httpx.AsyncClient", return_value=mock_client), \
+         patch("crashwise.core.config.get_settings", return_value=mock_settings):
         result = await check_service_llm()
         assert result.status == CheckStatus.WARN
 
