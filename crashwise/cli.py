@@ -40,7 +40,9 @@ from crashwise.core.manifest import CrashwiseManifest, load_manifest_or_none
 from crashwise.core.models import FuzzerType, FuzzingInput
 from crashwise.orchestration.client import (
     TemporalConnectionError,
+    connect,
     execute_main_workflow,
+    start_main_workflow,
 )
 from crashwise.orchestration.worker import run_worker
 
@@ -552,6 +554,12 @@ def run(
             "Dockerised worker)."
         ),
     ),
+    detach: bool = typer.Option(
+        False,
+        "--detach",
+        "-d",
+        help="Submit the workflow and exit immediately (print workflow ID).",
+    ),
 ) -> None:
     """Submit a :class:`MainFuzzingWorkflow` and print the result.
 
@@ -606,20 +614,31 @@ def run(
     console.print(JSON(payload.model_dump_json(indent=2)))
 
     try:
-        result = asyncio.run(
-            execute_main_workflow(
-                payload,
-                host=host,
-                namespace=namespace,
-                task_queue=task_queue,
+        if detach:
+            async def _submit() -> str:
+                client = await connect(host=host, namespace=namespace)
+                handle = await start_main_workflow(
+                    client, payload, task_queue=task_queue,
+                )
+                return handle.id
+
+            workflow_id = asyncio.run(_submit())
+            console.print(f"[bold green]Workflow submitted:[/] {workflow_id}")
+            console.print(f"Use [bold]crashwise signal {workflow_id} <signal>[/] to control it.")
+        else:
+            result = asyncio.run(
+                execute_main_workflow(
+                    payload,
+                    host=host,
+                    namespace=namespace,
+                    task_queue=task_queue,
+                )
             )
-        )
+            console.print("[bold green]Workflow result:[/]")
+            console.print(JSON(result.model_dump_json(indent=2)))
     except TemporalConnectionError as exc:
         console.print(f"[bold red]Temporal connection failed:[/] {exc}")
         raise typer.Exit(code=1) from exc
-
-    console.print("[bold green]Workflow result:[/]")
-    console.print(JSON(result.model_dump_json(indent=2)))
 
 
 def _fuzzer_from_string(value: str) -> FuzzerType | None:

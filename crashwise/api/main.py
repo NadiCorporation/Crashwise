@@ -27,6 +27,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
+from pathlib import Path
+
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy.ext.asyncio import AsyncSession
