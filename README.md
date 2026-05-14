@@ -21,8 +21,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-416%20passing-brightgreen" alt="416 tests passing">
-  <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue" alt="Python versions">
+  <img src="https://img.shields.io/badge/tests-428%20passing-brightgreen" alt="428 tests passing">
+  <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12-blue" alt="Python versions">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
   <img src="https://img.shields.io/badge/temporal-1.25-blue" alt="Temporal">
   <img src="https://img.shields.io/badge/docker-ready-blue" alt="Docker Ready">
@@ -336,10 +336,15 @@ These use **LangChain** and require a high-quality code model. Configure in `.en
 
 #### Using OpenAI-Compatible Providers
 
-Any provider with an OpenAI-compatible API works (Together AI, Groq, Fireworks,
-local vLLM, Ollama with OpenAI shim, etc.):
+Any provider with an OpenAI-compatible API works (NVIDIA NIM, Together AI, Groq,
+Fireworks, local vLLM, Ollama with OpenAI shim, etc.):
 
 ```bash
+# Example: NVIDIA NIM
+CRASHWISE_LLM_MODEL=qwen/qwen3-coder-480b-a35b-instruct
+OPENAI_API_KEY=nvapi-...
+OPENAI_API_BASE=https://integrate.api.nvidia.com/v1
+
 # Example: Together AI
 CRASHWISE_LLM_MODEL=meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
 OPENAI_API_KEY=your-together-api-key
@@ -364,10 +369,10 @@ works via heuristic ASAN/GDB parsing.
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `AI_PROVIDER` | Backend: `ollama`, `venice`, or empty | `ollama` |
+| `AI_PROVIDER` | Backend: `ollama`, `venice`, `openai_compatible`, or empty | `ollama` |
 | `AI_MODEL` | Model name for the chosen provider | `llama3.1:8b` |
-| `AI_API_KEY` | API key (Venice only) | `your-key` |
-| `OLLAMA_URL` | Ollama server URL | `http://localhost:11434` |
+| `AI_API_KEY` | API key (Venice, OpenAI-compatible providers) | `your-key` |
+| `OLLAMA_URL` | Ollama server URL (or base URL for openai_compatible) | `http://localhost:11434` |
 
 #### Option A: Ollama (Local, Free, Private)
 
@@ -397,7 +402,25 @@ AI_API_KEY=your-venice-api-key
 AI_MODEL=llama-3.3-70b
 ```
 
-#### Option C: No AI Provider (Heuristic-Only)
+#### Option C: OpenAI-Compatible API (NVIDIA, Together, Groq, etc.)
+
+Any provider with an OpenAI-compatible `/v1/chat/completions` endpoint:
+
+```bash
+# Example: NVIDIA NIM
+AI_PROVIDER=openai_compatible
+AI_MODEL=qwen/qwen2.5-coder-32b-instruct
+AI_API_KEY=nvapi-...
+OLLAMA_URL=https://integrate.api.nvidia.com/v1
+
+# Example: Together AI
+AI_PROVIDER=openai_compatible
+AI_MODEL=meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
+AI_API_KEY=your-together-key
+OLLAMA_URL=https://api.together.xyz/v1
+```
+
+#### Option D: No AI Provider (Heuristic-Only)
 
 Perfectly functional — crashes are still classified via regex-based ASAN/GDB
 parsing and stack-hash deduplication. You just won't get deep root-cause
@@ -421,6 +444,23 @@ ANTHROPIC_API_KEY=sk-ant-api03-...
 AI_PROVIDER=venice
 AI_API_KEY=your-venice-key
 AI_MODEL=llama-3.3-70b
+```
+</details>
+
+<details>
+<summary><strong>NVIDIA NIM Setup (High Performance)</strong></summary>
+
+```bash
+# Agentic workflows — NVIDIA NIM
+CRASHWISE_LLM_MODEL=qwen/qwen3-coder-480b-a35b-instruct
+OPENAI_API_KEY=nvapi-...
+OPENAI_API_BASE=https://integrate.api.nvidia.com/v1
+
+# Triage — NVIDIA NIM (same key)
+AI_PROVIDER=openai_compatible
+AI_MODEL=qwen/qwen2.5-coder-32b-instruct
+AI_API_KEY=nvapi-...
+OLLAMA_URL=https://integrate.api.nvidia.com/v1
 ```
 </details>
 
@@ -560,8 +600,9 @@ crashwise --help
 | Command | Description |
 |---------|-------------|
 | `crashwise version` | Print installed version |
+| `crashwise configure` | Interactive LLM provider setup wizard |
 | `crashwise info` | Print runtime configuration |
-| `crashwise doctor` | System health diagnostic (checks Docker, build tools, services) |
+| `crashwise doctor` | System health diagnostic (checks Docker, build tools, LLM connectivity) |
 | `crashwise setup` | Interactive distro-aware dependency installer |
 | `crashwise init` | Zero-config project onboarding (generates `crashwise.yaml`) |
 | `crashwise run` | Submit a fuzzing workflow (with pre-flight gate) |
@@ -569,6 +610,7 @@ crashwise --help
 | `crashwise api` | Launch the FastAPI management server |
 | `crashwise dashboard` | Launch the Streamlit intelligence dashboard |
 | `crashwise signal <id> <signal>` | Send a God-Mode signal to a live campaign |
+| `crashwise exploit <crash-id>` | Generate a standalone PoC exploit for a confirmed crash |
 
 ### God-Mode Signals
 
@@ -591,7 +633,7 @@ crashwise signal <campaign-id> resume_hunt
 ## Testing
 
 ```bash
-# Run the full test suite (416 tests)
+# Run the full test suite (428 tests)
 uv run pytest tests/ -v
 
 # With coverage report
@@ -618,29 +660,39 @@ crashwise/
 ├── dashboard/                # Streamlit intelligence dashboard
 ├── core/                     # Shared foundation layer
 │   ├── config.py             #   Pydantic-settings (env-based config)
+│   ├── configure.py          #   Interactive LLM setup wizard
 │   ├── models.py             #   Shared Pydantic data models
+│   ├── manifest.py           #   crashwise.yaml manifest handling
 │   ├── database.py           #   SQLAlchemy async ORM
 │   ├── discovery.py          #   Auto-detection of build systems
 │   ├── sentinel.py           #   System diagnostics & provisioning
+│   ├── logging.py            #   Structured logging (structlog)
 │   ├── redis.py              #   Redis client
 │   ├── storage.py            #   R2/S3 object storage
-│   ├── ai_provider.py        #   Ollama/Venice inference providers
+│   ├── ai_provider.py        #   Ollama/Venice/OpenAI-compatible inference
 │   └── notifications.py      #   Webhook/SMTP/PGP alerts
 ├── orchestration/            # Temporal workflows + activities
 │   ├── workflows/            #   MainFuzzingWorkflow, VerifyPatch, etc.
-│   └── activities/           #   22 activity implementations
+│   ├── activities/           #   22 activity implementations
+│   ├── worker.py             #   Temporal worker bootstrap
+│   └── data_converter.py     #   Pydantic ↔ Temporal serialisation
 ├── agents/                   # LangGraph AI agents
 │   ├── harness_synth/        #   Harness generation & evolution
 │   ├── triage/               #   Crash classification & exploit gen
 │   ├── feedback/             #   Coverage feedback loop
-│   ├── research/             #   Target profiling, CVE harvesting
+│   ├── research/             #   Seed harvesting & PoC transformation
 │   ├── execution/            #   MAB strategist (Thompson Sampling)
 │   └── reporting/            #   CVSS scoring & report generation
 ├── execution/                # Fuzzer execution layer
 │   ├── docker_manager.py     #   Hardened Docker orchestration
 │   ├── qemu_manager.py       #   QEMU/KVM VMs
-│   └── monitor.py            #   Fuzzer stats parsing
+│   ├── dispatcher.py         #   Backend routing (Docker/QEMU/local)
+│   └── monitor.py            #   Fuzzer stats parsing & health checks
+├── research/                 # Standalone research utilities
+│   └── reachability.py       #   Call-graph reachability analysis
 └── kernelbridge/             # Linux kernel fuzzing (syzkaller)
+    ├── parser.py             #   OOPS/KASAN/KFENCE log parsing
+    └── models.py             #   Kernel crash data models
 ```
 
 ---
