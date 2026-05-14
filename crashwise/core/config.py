@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     # ── AI inference provider ────────────────────────────────────────────────
     ai_provider: str | None = Field(
         default=None,
-        description="Inference backend: 'ollama', 'venice', or None",
+        description="Inference backend: 'ollama', 'venice', 'openai_compatible', or None",
     )
     ai_api_key: str | None = Field(
         default=None,
