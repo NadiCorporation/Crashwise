@@ -244,6 +244,14 @@ services:
       R2_SECRET_ACCESS_KEY: crashwise-secret
       R2_BUCKET_NAME: crashwise
       NOTIFICATIONS_ENABLED: "false"
+      CRASHWISE_LLM_MODEL: ${CRASHWISE_LLM_MODEL}
+      CRASHWISE_LLM_TEMPERATURE: ${CRASHWISE_LLM_TEMPERATURE:-0.0}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_API_BASE: ${OPENAI_API_BASE}
+      AI_PROVIDER: ${AI_PROVIDER:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      OLLAMA_URL: ${OLLAMA_URL:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -881,25 +881,28 @@ async def check_service_temporal(
     port: int = 7233,
     timeout: float = 3.0,
 ) -> CheckResult:
-    """Check Temporal server connectivity."""
+    """Check Temporal server connectivity via TCP socket probe."""
+    import asyncio
+    import socket
+
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            # Temporal gRPC health check isn't HTTP; try the Web UI port as proxy
-            resp = await client.get(f"http://{host}:8233")
-            if resp.status_code < 500:
-                return CheckResult(
-                    name="service.temporal",
-                    status=CheckStatus.OK,
-                    message=f"Temporal Web UI reachable at {host}:8233.",
-                )
-    except Exception as exc:
-        pass
-    return CheckResult(
-        name="service.temporal",
-        status=CheckStatus.WARN,
-        message=f"Temporal server not reachable at {host}:{port}.",
-        remediation="Start Temporal:  docker compose up -d temporal-server",
-    )
+        loop = asyncio.get_running_loop()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        await loop.run_in_executor(None, sock.connect, (host, port))
+        sock.close()
+        return CheckResult(
+            name="service.temporal",
+            status=CheckStatus.OK,
+            message=f"Temporal server reachable at {host}:{port}.",
+        )
+    except Exception:
+        return CheckResult(
+            name="service.temporal",
+            status=CheckStatus.WARN,
+            message=f"Temporal server not reachable at {host}:{port}.",
+            remediation="Start Temporal:  docker compose up -d temporal-server",
+        )
 
 
 async def check_service_redis(
