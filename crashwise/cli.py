@@ -537,7 +537,7 @@ def _run_preflight_or_exit() -> None:
 def run(
     target_repo: str | None = typer.Argument(None, help="Git URL of the target project (optional if crashwise.yaml present)"),
     fuzzer: FuzzerType = typer.Option(FuzzerType.LIBFUZZER, "--fuzzer", "-f"),
-    timeout_seconds: int = typer.Option(60, "--timeout", "-t", min=10, max=86_400),
+    timeout_seconds: int = typer.Option(300, "--timeout", "-t", min=10, max=86_400),
     branch: str | None = typer.Option(None, "--branch", "-b"),
     harness: str | None = typer.Option(None, "--harness", "-H"),
     sanitizers: str = typer.Option("address,undefined", "--sanitizers", "-s"),
@@ -613,32 +613,74 @@ def run(
     console.print("[bold cyan]Submitting MainFuzzingWorkflow[/]")
     console.print(JSON(payload.model_dump_json(indent=2)))
 
-    try:
-        if detach:
-            async def _submit() -> str:
-                client = await connect(host=host, namespace=namespace)
-                handle = await start_main_workflow(
-                    client, payload, task_queue=task_queue,
-                )
-                return handle.id
+    api_url = os.environ.get("CRASHWISE_API_URL", "http://localhost:8000")
 
-            workflow_id = asyncio.run(_submit())
-            console.print(f"[bold green]Workflow submitted:[/] {workflow_id}")
-            console.print(f"Use [bold]crashwise signal {workflow_id} <signal>[/] to control it.")
-        else:
-            result = asyncio.run(
-                execute_main_workflow(
-                    payload,
-                    host=host,
-                    namespace=namespace,
-                    task_queue=task_queue,
+    # Try submitting via the API (creates campaign record + starts workflow).
+    async def _submit_via_api() -> tuple[str, str] | None:
+        import httpx
+
+        target_name = target_repo.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+        try:
+            async with httpx.AsyncClient(timeout=10) as http:
+                resp = await http.post(
+                    f"{api_url}/campaigns/start",
+                    json={
+                        "target_repo": target_repo,
+                        "target_name": target_name,
+                        "fuzzer_type": fuzzer.value,
+                        "timeout_seconds": timeout_seconds,
+                        "sanitizers": sanitizers,
+                    },
                 )
-            )
-            console.print("[bold green]Workflow result:[/]")
+                resp.raise_for_status()
+                data = resp.json()
+                return str(data["campaign_id"]), data["workflow_id"]
+        except Exception:
+            return None
+
+    # Fall back to direct Temporal submission (no campaign record in dashboard).
+    async def _submit_direct() -> str:
+        client = await connect(host=host, namespace=namespace)
+        handle = await start_main_workflow(client, payload, task_queue=task_queue)
+        return handle.id
+
+    # Submit
+    api_result = asyncio.run(_submit_via_api())
+    if api_result:
+        campaign_id, workflow_id = api_result
+        console.print(f"[bold green]Campaign created:[/] {campaign_id}")
+        console.print(f"[bold green]Workflow started:[/] {workflow_id}")
+    else:
+        try:
+            workflow_id = asyncio.run(_submit_direct())
+            console.print(f"[bold green]Workflow submitted (direct):[/] {workflow_id}")
+            console.print("[dim]API unreachable — campaign won't appear in dashboard.[/]")
+        except TemporalConnectionError as exc:
+            console.print(f"[bold red]Temporal connection failed:[/] {exc}")
+            raise typer.Exit(code=1) from exc
+
+    if detach:
+        console.print(f"Use [bold]crashwise signal {workflow_id} <signal>[/] to control it.")
+    else:
+        console.print(f"\n[bold cyan]⏳ Workflow running...[/] (timeout: {timeout_seconds}s)")
+        console.print("[dim]Waiting for result. Use --detach to submit and exit immediately.[/]\n")
+        try:
+            async def _await_result() -> "FuzzingOutput":
+                from crashwise.core.models import FuzzingOutput
+
+                client = await connect(host=host, namespace=namespace)
+                handle = client.get_workflow_handle(workflow_id)
+                return await handle.result()
+
+            result = asyncio.run(_await_result())
+            console.print("[bold green]✓ Workflow complete![/]")
             console.print(JSON(result.model_dump_json(indent=2)))
-    except TemporalConnectionError as exc:
-        console.print(f"[bold red]Temporal connection failed:[/] {exc}")
-        raise typer.Exit(code=1) from exc
+        except TemporalConnectionError as exc:
+            console.print(f"[bold red]Temporal connection failed:[/] {exc}")
+            raise typer.Exit(code=1) from exc
+        except Exception as exc:
+            console.print(f"[bold red]Workflow failed:[/] {exc}")
+            raise typer.Exit(code=1) from exc
 
 
 def _fuzzer_from_string(value: str) -> FuzzerType | None:

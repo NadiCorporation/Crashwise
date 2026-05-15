@@ -89,6 +89,7 @@ dependencies = [
 
     # Distributed state (Redis)
     "redis>=5.0.0",
+    "async-timeout>=4.0.0",
 
     # Intelligence Dashboard
     "streamlit>=1.40.0",

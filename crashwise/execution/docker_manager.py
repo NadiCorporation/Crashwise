@@ -27,7 +27,7 @@ log = get_logger(__name__)
 
 # Well-known fuzzer images.
 _AFL_IMAGE = "aflplusplus/aflplusplus:latest"
-_LIBFUZZER_IMAGE = "gcr.io/oss-fuzz-base/libfuzzer-runner:latest"
+_LIBFUZZER_IMAGE = "crashwise-worker:latest"
 
 
 # ── libFuzzer / AFL stdout parser (Phase 21) ────────────────────────────────
@@ -251,8 +251,10 @@ class DockerManager:
                     image,
                     harness_in_container,
                     "/corpus",
-                    "-max_total_time=0",
+                    f"-max_total_time={job.timeout_seconds}",
                     "-max_len=4096",
+                    "-print_final_stats=1",
+                    "-detect_leaks=0",
                 ]
             )
 

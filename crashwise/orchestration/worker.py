@@ -89,9 +89,26 @@ async def run_worker(
 
     log.info("worker.ready", task_queue=task_queue)
 
+    async def _heartbeat_loop() -> None:
+        """Periodically register this worker in Redis."""
+        from crashwise.core.redis import heartbeat
+
+        while not stop_event.is_set():
+            try:
+                await heartbeat()
+            except Exception:
+                pass
+            await asyncio.sleep(30)
+
+    heartbeat_task = asyncio.create_task(_heartbeat_loop())
+
     async with worker:
         await stop_event.wait()
         log.info("worker.shutting_down")
+
+    heartbeat_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await heartbeat_task
 
     await close_db()
     log.info("worker.stopped")

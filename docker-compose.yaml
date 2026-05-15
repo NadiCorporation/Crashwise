@@ -202,10 +202,14 @@ services:
       CRASHWISE_ENV: production
       LOG_LEVEL: warning
       CRASHWISE_API_URL: http://api:8000
+      REDIS_URL: redis://redis:6379/0
+      REDIS_ENABLED: "true"
     ports:
       - "8501:8501"
     depends_on:
       api:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
@@ -229,6 +233,7 @@ services:
     command: ["crashwise", "worker"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp:/tmp
     environment:
       CRASHWISE_ENV: production
       LOG_LEVEL: info
