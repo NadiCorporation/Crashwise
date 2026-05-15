@@ -508,12 +508,7 @@ async def _run_harness_synthesis(
     max_retries: int,
     workflow_id: str,
 ) -> Path | None:
-    """Drive the Phase-2 harness agent and return the compiled-binary path.
-
-    Imported lazily so the workflow sandbox doesn't pull in LangGraph at
-    workflow validation time.
-    """
-    # Lazy import: avoids loading langgraph/langchain in workflow contexts.
+    """Drive the Phase-2 harness agent and return the compiled-binary path."""
     from crashwise.agents.harness_synth import synthesize_harness
 
     source = Path(target_source_path)
@@ -528,11 +523,15 @@ async def _run_harness_synthesis(
         )
         return None
 
+    # Operation Hydra Phase 2: Mine usage examples from tests/examples.
+    usage_example = _find_usage_example(workdir, source)
+
     synth_workdir = workdir / "harness"
     result = await synthesize_harness(
         source_path=source,
         workdir=synth_workdir,
         max_retries=max_retries,
+        usage_example=usage_example,
     )
 
     log.info(
@@ -543,6 +542,76 @@ async def _run_harness_synthesis(
         retries=result.retry_count,
         binary=str(result.binary_path) if result.binary_path else None,
     )
-    # Return the binary if compilation succeeded; otherwise return the
-    # source path so downstream activities can still try (or report).
     return result.binary_path or result.harness_path
+
+
+def _find_usage_example(workdir: Path, source_path: Path) -> str:
+    """Mine tests/examples for a code snippet showing how the target API is called.
+
+    Operation Hydra Phase 2: Context Enrichment.
+    Scans test/example directories for files that call functions defined in
+    the target source, extracts a relevant snippet as a reference pattern.
+    """
+    import re as _re
+
+    # Find function names defined in the target source.
+    try:
+        source_content = source_path.read_text(encoding="utf-8", errors="replace")[:8000]
+    except OSError:
+        return ""
+
+    target_funcs: set[str] = set()
+    for m in _re.finditer(r"^\w[\w\s\*]*\s+(\w+)\s*\([^)]*\)\s*\{", source_content, _re.MULTILINE):
+        name = m.group(1)
+        if name not in ("main", "if", "for", "while", "switch", "static"):
+            target_funcs.add(name)
+
+    if not target_funcs:
+        return ""
+
+    # Search in test/example directories.
+    search_dirs = []
+    for name in ("test", "tests", "example", "examples", "contrib"):
+        candidate = workdir / name
+        if candidate.is_dir():
+            search_dirs.append(candidate)
+    # Also check root-level test files.
+    search_dirs.append(workdir)
+
+    source_exts = {".c", ".cpp", ".cc", ".cxx", ".h"}
+
+    for search_dir in search_dirs:
+        for p in search_dir.rglob("*"):
+            if not p.is_file() or p.suffix.lower() not in source_exts:
+                continue
+            if p == source_path:
+                continue
+            try:
+                content = p.read_text(encoding="utf-8", errors="replace")[:12000]
+            except OSError:
+                continue
+
+            # Find a function call to any of our target functions.
+            for func_name in target_funcs:
+                pattern = rf"\b{_re.escape(func_name)}\s*\("
+                match = _re.search(pattern, content)
+                if match:
+                    # Extract surrounding context (10 lines before, 15 after).
+                    lines = content.splitlines()
+                    match_line = content[:match.start()].count("\n")
+                    start = max(0, match_line - 10)
+                    end = min(len(lines), match_line + 15)
+                    snippet = "\n".join(lines[start:end])
+
+                    log.info(
+                        "setup_target.usage_example_found",
+                        function=func_name,
+                        file=str(p.relative_to(workdir)),
+                        line=match_line + 1,
+                    )
+                    return (
+                        f"// Reference: how '{func_name}' is called in {p.name}:\n"
+                        f"{snippet}"
+                    )
+
+    return ""
