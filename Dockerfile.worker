@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     llvm \
     lld \
+    libclang-rt-dev \
     python3 \
     python3-dev \
     libtool \
@@ -97,6 +98,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lld \
     llvm \
     llvm-dev \
+    libclang-rt-14-dev \
     gcc \
     g++ \
     # Version control
@@ -166,7 +168,7 @@ RUN afl-fuzz -h 2>&1 | head -1 \
 
 # Health check.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD crashwise --version || exit 1
+    CMD crashwise version || exit 1
 
 # Default: start the Temporal worker.
 CMD ["crashwise", "worker"]

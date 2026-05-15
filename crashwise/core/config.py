@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # ── Temporal ─────────────────────────────────────────────────────────────
     temporal_host: str = Field(default="localhost:7233")
     temporal_namespace: str = Field(default="default")
-    temporal_task_queue: str = Field(default="crashwise-default")
+    temporal_task_queue: str = Field(default="crashwise")
 
     # ── LLM providers ────────────────────────────────────────────────────────
     openai_api_key: SecretStr | None = None

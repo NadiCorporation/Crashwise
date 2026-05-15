@@ -347,20 +347,35 @@ def _find_best_source_for_synthesis(workdir: Path) -> str | None:
     source_exts = {".c", ".cpp", ".cc", ".cxx"}
     skip_dirs = {"test", "tests", "examples", "docs", "third_party", "vendor", ".git"}
 
+    # High-value filename patterns — these are where vulnerabilities live.
+    _HIGH_VALUE_NAMES = {
+        "inflate", "deflate", "decompress", "compress", "decode", "parse",
+        "read", "unpack", "deserialize", "load", "import", "extract",
+        "process", "handle", "dispatch", "recv", "input",
+    }
+
     for p in workdir.rglob("*"):
         if not p.is_file() or p.suffix.lower() not in source_exts:
             continue
-        # Skip test/vendor directories.
         if any(part in skip_dirs for part in p.relative_to(workdir).parts):
             continue
-        # Quick check: does it have fuzzable functions?
         try:
             content = p.read_text(encoding="utf-8", errors="replace")[:8000]
         except OSError:
             continue
         eps = find_entry_points(content)
-        if eps and eps[0].score > best_score:
-            best_score = eps[0].score
+        if not eps:
+            continue
+        score = eps[0].score
+        # Boost score for high-value filenames (parsers, decoders, etc.)
+        stem = p.stem.lower()
+        if any(name in stem for name in _HIGH_VALUE_NAMES):
+            score += 0.5
+        # Boost for files with many entry points (complex code = more bugs)
+        if len(eps) >= 3:
+            score += 0.2
+        if score > best_score:
+            best_score = score
             best_path = p
 
     if best_path:

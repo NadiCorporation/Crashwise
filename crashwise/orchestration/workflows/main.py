@@ -315,6 +315,14 @@ class MainFuzzingWorkflow:
         # Derive a short target name from the repo URL for the harvester.
         target_name = str(payload.target_repo).rsplit("/", 1)[-1].replace(".git", "")
 
+        # Update campaign status to running.
+        if payload.campaign_id:
+            await workflow.execute_activity(
+                "update_campaign_status",
+                {"campaign_id": payload.campaign_id, "status": "running"},
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+
         # ── 1. Seed corpus (Phase 7) ────────────────────────────────────────
         self._stage = WorkflowStage.SEEDING
         # Use a deterministic workdir path — the real workdir comes from
@@ -342,6 +350,7 @@ class MainFuzzingWorkflow:
                 target_repo=payload.target_repo,
                 target_branch=payload.target_branch,
                 sanitizers=payload.sanitizers,
+                synthesize_harness=payload.harness_path is None,
             ),
             result_type=SetupTargetOutput,
             start_to_close_timeout=timedelta(minutes=10),
@@ -447,8 +456,8 @@ class MainFuzzingWorkflow:
                 ),
                 result_type=ExecuteFuzzingOutput,
                 start_to_close_timeout=timedelta(seconds=payload.timeout_seconds)
-                + timedelta(minutes=5),
-                heartbeat_timeout=timedelta(seconds=15),
+                + timedelta(minutes=10),
+                heartbeat_timeout=timedelta(minutes=5),
                 retry_policy=_FUZZ_RETRY,
             )
 
@@ -557,9 +566,9 @@ class MainFuzzingWorkflow:
                 and campaign.mutation_hint
             ):
                 log.info(
-                    "main_workflow.mutate",
-                    iteration=campaign.iteration,
-                    hint=campaign.mutation_hint[:80],
+                    f"main_workflow.mutate "
+                    f"iteration={campaign.iteration} "
+                    f"hint={campaign.mutation_hint[:80]}"
                 )
                 self._stage = WorkflowStage.SETUP
                 new_harness: SetupTargetOutput = await workflow.execute_activity(
@@ -599,9 +608,9 @@ class MainFuzzingWorkflow:
         if campaign.crash_count > 0 and payload.campaign_id is not None:
             self._stage = WorkflowStage.TRIAGE
             log.info(
-                "main_workflow.analyze_crash",
-                crash_count=campaign.crash_count,
-                campaign_id=payload.campaign_id,
+                f"main_workflow.analyze_crash "
+                f"crash_count={campaign.crash_count} "
+                f"campaign_id={payload.campaign_id}"
             )
             # Build a lightweight crash context from the campaign state.
             crash_context = (
@@ -641,6 +650,20 @@ class MainFuzzingWorkflow:
             f"severity={result.severity.value} "
             f"crash_count={result.crash_count}"
         )
+
+        # Update campaign status to completed/failed.
+        if payload.campaign_id:
+            final_status = "completed" if result.crash_found else "completed"
+            await workflow.execute_activity(
+                "update_campaign_status",
+                {
+                    "campaign_id": payload.campaign_id,
+                    "status": final_status,
+                    "run_count": campaign.iteration,
+                },
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+
         return result
 
 

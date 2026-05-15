@@ -106,7 +106,7 @@ async def mutate_harness(payload: dict[str, Any]) -> SetupTargetOutput:
     return SetupTargetOutput(
         workdir=synth_workdir,
         commit_sha="mutated",
-        harness_path=result.harness_path,
+        harness_path=result.binary_path or result.harness_path,
     )
 
 
