@@ -200,15 +200,19 @@ async def validate_harness(state: HarnessState) -> HarnessState:
                 # Phase 2 ReAct: If it crashed, run GDB to get precise diagnosis.
                 diagnosis_text = ""
                 if sanity.crashed_immediately and result.binary_path:
-                    diag = await debug_crash(result.binary_path)
-                    diagnosis_text = diag.to_prompt()
-                    state.crash_diagnosis = diagnosis_text
-                    log.info(
-                        "harness_synth.node.validate.gdb_diagnosis",
-                        signal=diag.signal,
-                        function=diag.crash_function,
-                        location=diag.crash_location,
-                    )
+                    try:
+                        diag = await debug_crash(result.binary_path)
+                        diagnosis_text = diag.to_prompt()
+                        state.crash_diagnosis = diagnosis_text
+                        log.info(
+                            "harness_synth.node.validate.gdb_diagnosis",
+                            signal=diag.signal,
+                            function=diag.crash_function,
+                            location=diag.crash_location,
+                            summary=diag.summary[:100],
+                        )
+                    except Exception as exc:
+                        log.warning("harness_synth.node.validate.gdb_failed", error=str(exc)[:100])
 
                 # Build a detailed error message for the LLM.
                 if diagnosis_text:
