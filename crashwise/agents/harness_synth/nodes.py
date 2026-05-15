@@ -22,6 +22,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from crashwise.agents.harness_synth.analyzer import detect_language, find_entry_points
 from crashwise.agents.harness_synth.compiler import compile_harness, sanity_check
+from crashwise.agents.harness_synth.debug_engine import debug_crash
 from crashwise.agents.harness_synth.llm import ChatModelLike, get_chat_model
 from crashwise.agents.harness_synth.prompts import (
     FEEDBACK_SECTION_TEMPLATE,
@@ -196,12 +197,34 @@ async def validate_harness(state: HarnessState) -> HarnessState:
         if result.binary_path:
             sanity = await sanity_check(result.binary_path)
             if not sanity.passed:
-                # Harness compiles but doesn't exercise target code — reject.
-                reason = (
-                    f"Sanity check FAILED: {sanity.edges_hit} edges hit in 5s. "
-                    f"The harness likely does not call into target code. "
-                    f"Ensure the harness calls the target's API functions."
-                )
+                # Phase 2 ReAct: If it crashed, run GDB to get precise diagnosis.
+                diagnosis_text = ""
+                if sanity.crashed_immediately and result.binary_path:
+                    diag = await debug_crash(result.binary_path)
+                    diagnosis_text = diag.to_prompt()
+                    state.crash_diagnosis = diagnosis_text
+                    log.info(
+                        "harness_synth.node.validate.gdb_diagnosis",
+                        signal=diag.signal,
+                        function=diag.crash_function,
+                        location=diag.crash_location,
+                    )
+
+                # Build a detailed error message for the LLM.
+                if diagnosis_text:
+                    reason = (
+                        f"CRASH DETECTED during sanity check.\n"
+                        f"{diagnosis_text}\n"
+                        f"FIX: Properly initialize all buffers, structs, and pointers "
+                        f"before calling the target function."
+                    )
+                else:
+                    reason = (
+                        f"Sanity check FAILED: {sanity.edges_hit} edges hit in 5s. "
+                        f"The harness does not exercise target code. "
+                        f"Ensure the harness calls the target's API functions with valid arguments."
+                    )
+
                 state.error_history.append(reason)
                 state.retry_count += 1
                 log.warning(
@@ -209,6 +232,7 @@ async def validate_harness(state: HarnessState) -> HarnessState:
                     attempt=state.retry_count,
                     edges_hit=sanity.edges_hit,
                     crashed=sanity.crashed_immediately,
+                    has_gdb=bool(diagnosis_text),
                 )
                 if state.retry_count > state.max_retries:
                     await _apply_fallback(state, reason="sanity check failed after max retries")
@@ -379,6 +403,31 @@ def _build_user_prompt(state: HarnessState) -> str:
             feedback=state.feedback,
         )
 
+    # Operation Hydra Phase 2: Crash diagnosis from GDB.
+    crash_section = ""
+    if state.crash_diagnosis.strip():
+        crash_section = (
+            "\n## GDB CRASH DIAGNOSIS (from your previous harness)\n"
+            "Your previous harness CRASHED. Here is the GDB backtrace:\n"
+            "```\n"
+            f"{state.crash_diagnosis}\n"
+            "```\n"
+            "YOU MUST fix the initialization that caused this crash. "
+            "Allocate buffers with sufficient size, initialize all struct fields, "
+            "and ensure pointers are valid before calling the target function.\n"
+        )
+
+    # Operation Hydra Phase 2: Usage example from tests/examples.
+    usage_section = ""
+    if state.usage_example.strip():
+        usage_section = (
+            "\n## REFERENCE: How this API is used in the project's own tests\n"
+            "```c\n"
+            f"{state.usage_example}\n"
+            "```\n"
+            "Use this as a reference for proper initialization and calling convention.\n"
+        )
+
     retry_section = ""
     if state.retry_count > 0 and state.last_compile is not None:
         # Show the *previous* (not current) errors so the LLM sees a trend.
@@ -402,7 +451,7 @@ def _build_user_prompt(state: HarnessState) -> str:
             profile_section=profile_section,
             source_code=_truncate_source(state.source_code),
             feedback_section=feedback_section,
-            retry_section=retry_section,
+            retry_section=crash_section + usage_section + retry_section,
         ).rstrip()
         + "\n"
     )
