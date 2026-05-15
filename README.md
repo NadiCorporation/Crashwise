@@ -4,6 +4,7 @@
 -->
 
 <h1 align="center">CrashWise</h1>
+<h2 align="center">Alpha version</h1>
 
 <h4 align="center">Autonomous AI-Powered Fuzzing & Crash Triage Platform</h4>
 
