@@ -21,7 +21,7 @@ import re
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from crashwise.agents.harness_synth.analyzer import detect_language, find_entry_points
-from crashwise.agents.harness_synth.compiler import compile_harness
+from crashwise.agents.harness_synth.compiler import compile_harness, sanity_check
 from crashwise.agents.harness_synth.llm import ChatModelLike, get_chat_model
 from crashwise.agents.harness_synth.prompts import (
     FEEDBACK_SECTION_TEMPLATE,
@@ -120,6 +120,24 @@ async def generate_harness(state: HarnessState) -> HarnessState:
             reason=f"LLM code blocked by validator: {safety_result.summary()}",
         )
 
+    # Operation Hydra Fix 4: Anti-hallucination guardrail.
+    # The harness must NOT redefine or modify target source functions.
+    # It may only: #include headers, call target APIs, define LLVMFuzzerTestOneInput.
+    hallucination = _check_target_redefinition(code, state.source_path)
+    if hallucination:
+        log.warning(
+            "harness_synth.node.generate.hallucination_blocked",
+            reason=hallucination,
+        )
+        state.error_history.append(
+            f"BLOCKED: {hallucination}. "
+            "Do NOT redefine target functions. Only #include headers and call the API."
+        )
+        state.retry_count += 1
+        if state.retry_count > state.max_retries:
+            return await _apply_fallback(state, reason=hallucination)
+        return state
+
     harness_path = state.workdir / "harness.cpp"
     harness_path.parent.mkdir(parents=True, exist_ok=True)
     harness_path.write_text(code, encoding="utf-8")
@@ -173,6 +191,39 @@ async def validate_harness(state: HarnessState) -> HarnessState:
     state.last_compile = result
 
     if result.success:
+        # Operation Hydra: 5-second sanity gate.
+        # Verify the harness actually hits target code before accepting it.
+        if result.binary_path:
+            sanity = await sanity_check(result.binary_path)
+            if not sanity.passed:
+                # Harness compiles but doesn't exercise target code — reject.
+                reason = (
+                    f"Sanity check FAILED: {sanity.edges_hit} edges hit in 5s. "
+                    f"The harness likely does not call into target code. "
+                    f"Ensure the harness calls the target's API functions."
+                )
+                state.error_history.append(reason)
+                state.retry_count += 1
+                log.warning(
+                    "harness_synth.node.validate.sanity_failed",
+                    attempt=state.retry_count,
+                    edges_hit=sanity.edges_hit,
+                    crashed=sanity.crashed_immediately,
+                )
+                if state.retry_count > state.max_retries:
+                    await _apply_fallback(state, reason="sanity check failed after max retries")
+                    if state.harness_path is not None:
+                        final_result = await compile_harness(
+                            harness_path=state.harness_path,
+                            workdir=state.workdir,
+                            language=state.language,
+                            extra_includes=extra_includes,
+                            extra_args=extra_link_args,
+                        )
+                        state.last_compile = final_result
+                    state.done = True
+                return state
+
         state.done = True
         log.info(
             "harness_synth.node.validate.success",
@@ -219,6 +270,46 @@ def should_retry(state: HarnessState) -> str:
 
 
 # ── Internals ────────────────────────────────────────────────────────────────
+
+def _check_target_redefinition(harness_code: str, source_path: Path) -> str | None:
+    """Detect if the LLM redefined target functions (anti-hallucination).
+
+    Returns a reason string if hallucination detected, None if clean.
+    The harness is ONLY allowed to:
+    - #include header files
+    - Define LLVMFuzzerTestOneInput
+    - Define helper wrappers that call target APIs
+    It must NOT redefine functions that exist in the target source.
+    """
+    import re as _re
+
+    # Read target source to find its function names.
+    try:
+        target_content = source_path.read_text(encoding="utf-8", errors="replace")[:16000]
+    except OSError:
+        return None  # Can't check — allow.
+
+    # Find function definitions in the target.
+    target_funcs: set[str] = set()
+    for m in _re.finditer(r"^\w[\w\s\*]*\s+(\w+)\s*\([^)]*\)\s*\{", target_content, _re.MULTILINE):
+        name = m.group(1)
+        if name not in ("main", "if", "for", "while", "switch"):
+            target_funcs.add(name)
+
+    if not target_funcs:
+        return None
+
+    # Check if the harness redefines any target function.
+    for m in _re.finditer(r"^\w[\w\s\*]*\s+(\w+)\s*\([^)]*\)\s*\{", harness_code, _re.MULTILINE):
+        name = m.group(1)
+        if name == "LLVMFuzzerTestOneInput":
+            continue  # This is expected.
+        if name in target_funcs:
+            return f"Harness redefines target function '{name}' — target source is read-only"
+
+    return None
+
+
 def _message_text(message: AIMessage) -> str:
     content = message.content
     if isinstance(content, str):

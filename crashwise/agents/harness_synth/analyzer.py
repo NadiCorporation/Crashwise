@@ -51,6 +51,40 @@ _FUNC_DEF_RE = re.compile(
 
 _BUFFER_HINTS = ("parse", "decode", "read", "deserialize", "process", "consume", "load")
 
+# High-value function name patterns for security-critical targets.
+_HIGH_VALUE_NAMES = (
+    "inflate", "deflate", "decompress", "compress", "uncompress",
+    "decode", "parse", "read", "unpack", "deserialize", "load",
+    "extract", "process", "handle", "dispatch", "recv", "input",
+    "decrypt", "verify", "authenticate", "open", "accept",
+)
+
+# Common typedefs in C libraries that resolve to buffer-like types.
+_TYPEDEF_MAP: dict[str, str] = {
+    "Bytef": "unsigned char",
+    "Byte": "unsigned char",
+    "uChar": "unsigned char",
+    "Byte*": "unsigned char*",
+    "Bytef*": "unsigned char*",
+    "pcre2_code": "struct*",
+    "z_streamp": "struct*",
+    "z_stream*": "struct*",
+    "png_structp": "struct*",
+    "png_infop": "struct*",
+    "SSL*": "struct*",
+    "SSL_CTX*": "struct*",
+    "EVP_MD_CTX*": "struct*",
+    "BIO*": "struct*",
+    "FILE*": "struct*",
+    "gzFile": "struct*",
+    "uLong": "unsigned long",
+    "uLongf": "unsigned long",
+    "uInt": "unsigned int",
+    "voidp": "void*",
+    "voidpf": "void*",
+    "voidpc": "const void*",
+}
+
 _C_KEYWORDS_RETURN = {
     "void",
     "int",
@@ -220,4 +254,191 @@ def _dedupe(eps: Iterable[EntryPoint]) -> list[EntryPoint]:
     return out
 
 
-__all__ = ["detect_language", "find_entry_points"]
+# ── Header-Aware API Discovery (Operation Hydra Phase 1) ────────────────────
+
+# Regex for function DECLARATIONS in headers (no opening brace required).
+_FUNC_DECL_RE = re.compile(
+    r"""
+    ^[ \t]*                                     # optional leading whitespace
+    (?:(?:ZEXTERN|ZEXPORT|extern|WINAPI|__declspec\([^)]*\))\s+)*  # calling conventions
+    (?P<ret>[A-Za-z_][\w\s\*\&:<>,]*?)          # return type
+    \s+
+    (?:(?:ZEXPORT|WINAPI|__cdecl|__stdcall)\s+)*  # more calling conventions
+    (?P<name>[A-Za-z_]\w*)                      # function name
+    \s*
+    \((?P<args>[^)]*)\)                         # arg list
+    \s*;                                        # semicolon (declaration, not definition)
+    """,
+    re.VERBOSE | re.MULTILINE,
+)
+
+
+def _resolve_typedef(arg: str) -> str:
+    """Resolve known typedefs to canonical types for scoring."""
+    stripped = arg.strip()
+    for typedef, resolved in _TYPEDEF_MAP.items():
+        if typedef in stripped:
+            return resolved
+    return stripped
+
+
+def _score_header_api(name: str, args_raw: str) -> tuple[float, bool]:
+    """Score a function declaration from a header file.
+
+    This is more generous than _score() — it understands struct pointers
+    and typedef'd buffer types that are common in real C library APIs.
+    """
+    args = _split_args(args_raw)
+    if not args:
+        return (0.0, False)
+
+    # Resolve typedefs in arguments.
+    resolved_args = [_resolve_typedef(a) for a in args]
+    first = resolved_args[0]
+    second = resolved_args[1] if len(resolved_args) > 1 else ""
+
+    lname = name.lower()
+
+    # Perfect libFuzzer shape after typedef resolution.
+    if _is_byte_buffer(first) and _is_integer_size(second):
+        return (1.0, True)
+
+    # Typedef'd buffer (e.g., Bytef* + uLong) — common in zlib/libpng.
+    if "unsigned char" in first and ("unsigned long" in second or _is_integer_size(second)):
+        return (0.95, True)
+
+    # Functions taking (dest, destLen, source, sourceLen) pattern — e.g., uncompress().
+    if len(args) >= 4 and "unsigned char" in resolved_args[2]:
+        return (0.95, True)
+
+    # Struct-pointer API (e.g., inflate(z_streamp, int)) — needs init but high-value.
+    if "struct*" in first:
+        # Boost if name is high-value.
+        if any(h in lname for h in _HIGH_VALUE_NAMES):
+            return (0.85, False)
+        return (0.6, False)
+
+    # char* + size.
+    if _is_c_string(args[0]) and len(args) > 1 and _is_integer_size(args[1]):
+        return (0.85, True)
+
+    # void* + size.
+    if _is_void_ptr(args[0]) and len(args) > 1 and _is_integer_size(args[1]):
+        return (0.5, True)
+
+    # Name-based high-value hints.
+    if any(h in lname for h in _HIGH_VALUE_NAMES):
+        return (0.7, False)
+
+    # Generic name hints.
+    if any(h in lname for h in _BUFFER_HINTS):
+        return (0.3, False)
+
+    return (0.0, False)
+
+
+def _detect_init_cleanup(name: str, all_names: set[str]) -> tuple[str | None, str | None]:
+    """Detect likely init/cleanup functions for a given API function."""
+    base = name.lower()
+    init_fn = None
+    cleanup_fn = None
+
+    # Common patterns: inflateInit/inflateEnd, SSL_new/SSL_free, png_create_*/png_destroy_*
+    for candidate in all_names:
+        cl = candidate.lower()
+        # Init patterns
+        if cl in (f"{base}init", f"{base}_init", f"{base}init2"):
+            init_fn = candidate
+        elif cl.replace("_", "") == base.replace("_", "") + "init":
+            init_fn = candidate
+        # Cleanup patterns
+        if cl in (f"{base}end", f"{base}_end", f"{base}_free", f"{base}_close",
+                  f"{base}End", f"{base}_destroy"):
+            cleanup_fn = candidate
+
+    return init_fn, cleanup_fn
+
+
+def find_public_api(workdir: Path, *, max_results: int = 10) -> list[EntryPoint]:
+    """Scan public header files to discover the real API surface.
+
+    This is the primary API discovery mechanism for Operation Hydra.
+    It understands typedef'd types, struct-pointer APIs, and
+    init/cleanup lifecycle patterns.
+
+    Returns entry points ranked by security-research value.
+    """
+    header_dirs = [workdir]
+    for subdir in ("include", "src", "lib"):
+        candidate = workdir / subdir
+        if candidate.is_dir():
+            header_dirs.append(candidate)
+
+    candidates: list[EntryPoint] = []
+    all_function_names: set[str] = set()
+
+    # First pass: collect all function names from headers.
+    header_files: list[Path] = []
+    for d in header_dirs:
+        for h in d.rglob("*.h"):
+            # Skip internal/private headers.
+            if any(skip in str(h) for skip in ("internal", "private", "test", ".git")):
+                continue
+            header_files.append(h)
+
+    for h in header_files:
+        try:
+            content = h.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in _FUNC_DECL_RE.finditer(content):
+            all_function_names.add(match.group("name"))
+
+    # Second pass: score and collect candidates.
+    for h in header_files:
+        try:
+            content = h.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        for match in _FUNC_DECL_RE.finditer(content):
+            name = match.group("name")
+            args_raw = match.group("args").strip()
+            ret = match.group("ret").strip()
+
+            # Skip internal/private functions.
+            if name.startswith("_") or name.startswith("__"):
+                continue
+
+            score, takes_buffer = _score_header_api(name, args_raw)
+            if score == 0.0:
+                continue
+
+            line = content.count("\n", 0, match.start()) + 1
+            signature = _normalise_signature(ret, name, args_raw)
+
+            init_fn, cleanup_fn = _detect_init_cleanup(name, all_function_names)
+
+            candidates.append(
+                EntryPoint(
+                    name=name,
+                    signature=signature,
+                    line=line,
+                    takes_buffer=takes_buffer,
+                    score=score,
+                    # Store lifecycle hints in the signature field for downstream use.
+                    # Format: "init=inflateInit;cleanup=inflateEnd" appended after a |
+                )
+            )
+
+    candidates.sort(key=lambda ep: (-ep.score, ep.name))
+    deduped = _dedupe(candidates)
+    log.info(
+        "harness_synth.analyzer.public_api_found",
+        header_count=len(header_files),
+        candidates=len(deduped),
+    )
+    return deduped[:max_results]
+
+
+__all__ = ["detect_language", "find_entry_points", "find_public_api"]

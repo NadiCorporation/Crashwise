@@ -335,19 +335,47 @@ def _detect_existing_harness(workdir: Path) -> Path | None:
 
 
 def _find_best_source_for_synthesis(workdir: Path) -> str | None:
-    """Find the most promising C/C++ source file for harness synthesis.
+    """Find the most promising source file for harness synthesis.
 
-    Picks files with parser-like names or high-priority entry points.
+    Strategy (Operation Hydra):
+    1. First, scan PUBLIC HEADERS to find the real API surface.
+       If a high-scoring header API is found, locate its implementation .c file.
+    2. Fall back to scanning .c files directly if no headers found.
     """
-    from crashwise.agents.harness_synth.analyzer import find_entry_points
+    from crashwise.agents.harness_synth.analyzer import find_entry_points, find_public_api
 
+    # ── Strategy 1: Header-aware API discovery ───────────────────────────
+    api_entries = find_public_api(workdir, max_results=5)
+    if api_entries and api_entries[0].score >= 0.5:
+        best_api = api_entries[0]
+        log.info(
+            "setup_target.api_discovery",
+            function=best_api.name,
+            score=best_api.score,
+            strategy="header_scan",
+        )
+        # Find the .c file that implements this function.
+        source_exts = {".c", ".cpp", ".cc", ".cxx"}
+        for p in workdir.rglob("*"):
+            if not p.is_file() or p.suffix.lower() not in source_exts:
+                continue
+            if ".git" in str(p) or "test" in p.parts:
+                continue
+            try:
+                content = p.read_text(encoding="utf-8", errors="replace")[:16000]
+            except OSError:
+                continue
+            # Look for the function definition (not just declaration).
+            if re.search(rf"\b{re.escape(best_api.name)}\s*\(", content):
+                return str(p)
+
+    # ── Strategy 2: Fallback — scan .c files directly ────────────────────
     best_path: Path | None = None
     best_score: float = 0.0
 
     source_exts = {".c", ".cpp", ".cc", ".cxx"}
     skip_dirs = {"test", "tests", "examples", "docs", "third_party", "vendor", ".git"}
 
-    # High-value filename patterns — these are where vulnerabilities live.
     _HIGH_VALUE_NAMES = {
         "inflate", "deflate", "decompress", "compress", "decode", "parse",
         "read", "unpack", "deserialize", "load", "import", "extract",
@@ -367,11 +395,9 @@ def _find_best_source_for_synthesis(workdir: Path) -> str | None:
         if not eps:
             continue
         score = eps[0].score
-        # Boost score for high-value filenames (parsers, decoders, etc.)
         stem = p.stem.lower()
         if any(name in stem for name in _HIGH_VALUE_NAMES):
             score += 0.5
-        # Boost for files with many entry points (complex code = more bugs)
         if len(eps) >= 3:
             score += 0.2
         if score > best_score:
