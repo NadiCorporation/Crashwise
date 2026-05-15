@@ -67,10 +67,10 @@ class Campaign(Base):
     target_name: Mapped[str] = mapped_column(String(128))
     fuzzer_type: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(32), default="pending")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(tz=UTC))
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        default=lambda: datetime.now(tz=UTC),
-        onupdate=lambda: datetime.now(tz=UTC),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
     )
 
     # Relationships
@@ -96,7 +96,7 @@ class FuzzingRun(Base):
         ForeignKey("campaigns.id", ondelete="CASCADE")
     )
     iteration: Mapped[int] = mapped_column(default=0)
-    started_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(tz=UTC))
+    started_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
     executions: Mapped[int] = mapped_column(default=0)
     duration_seconds: Mapped[float] = mapped_column(default=0.0)
@@ -140,7 +140,7 @@ class Crash(Base):
     stack_hash: Mapped[str] = mapped_column(String(128), default="")
     signal: Mapped[str] = mapped_column(String(32), default="")
     logs_path: Mapped[str] = mapped_column(String(512), default="")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(tz=UTC))
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     verified_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     # Phase 15: PoC generation & reachability
@@ -174,7 +174,7 @@ class Seed(Base):
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     downloaded_path: Mapped[str] = mapped_column(String(512), default="")
     seed_path: Mapped[str] = mapped_column(String(512), default="")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(tz=UTC))
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     # Relationships
     campaign: Mapped[Campaign] = relationship(back_populates="seeds")
@@ -199,8 +199,8 @@ class CampaignKV(Base):
     key: Mapped[str] = mapped_column(String(64))
     value: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(
-        default=lambda: datetime.now(tz=UTC),
-        onupdate=lambda: datetime.now(tz=UTC),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
     )
 
     __table_args__ = (
