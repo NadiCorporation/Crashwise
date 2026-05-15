@@ -32,6 +32,7 @@ from crashwise.orchestration.activities.read_coverage_data import read_coverage_
 from crashwise.orchestration.activities.seed_corpus import seed_corpus
 from crashwise.orchestration.activities.setup_target import setup_target
 from crashwise.orchestration.activities.triage_results import triage_results
+from crashwise.orchestration.activities.update_campaign import update_campaign_status
 from crashwise.orchestration.activities.verify_patch import (
     apply_patch,
     build_patched,
@@ -64,6 +65,7 @@ ALL_ACTIVITIES: list[Callable[..., Any]] = [
     read_coverage_data,
     evolve_harness_activity,
     verify_poc,
+    update_campaign_status,
 ]
 
 __all__ = [

@@ -143,11 +143,32 @@ async def validate_harness(state: HarnessState) -> HarnessState:
         state.done = True
         return state
 
+    # Discover built libraries and include paths from the target workdir.
+    # The source_path is inside the target checkout; walk up to find build artifacts.
+    target_root = state.source_path.parent
+    # Walk up to find the project root (where build/ or CMakeLists.txt lives).
+    for parent in [state.source_path.parent] + list(state.source_path.parents):
+        if (parent / "build").is_dir() or (parent / "CMakeLists.txt").is_file():
+            target_root = parent
+            break
+
+    extra_includes = [state.source_path.parent, target_root]
+    extra_link_args: list[str] = []
+    for lib in target_root.rglob("*.a"):
+        if "CMakeFiles" not in str(lib) and "test" not in str(lib).lower():
+            extra_link_args.append(str(lib))
+    # Add common include dirs.
+    for subdir in ("include", "src", "build"):
+        inc = target_root / subdir
+        if inc.is_dir():
+            extra_includes.append(inc)
+
     result = await compile_harness(
         harness_path=state.harness_path,
         workdir=state.workdir,
         language=state.language,
-        extra_includes=[state.source_path.parent],
+        extra_includes=extra_includes,
+        extra_args=extra_link_args,
     )
     state.last_compile = result
 
@@ -181,7 +202,8 @@ async def validate_harness(state: HarnessState) -> HarnessState:
                 harness_path=state.harness_path,
                 workdir=state.workdir,
                 language=state.language,
-                extra_includes=[state.source_path.parent],
+                extra_includes=extra_includes,
+                extra_args=extra_link_args,
             )
             state.last_compile = final_result
         state.done = True
