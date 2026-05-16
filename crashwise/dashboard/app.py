@@ -1,399 +1,548 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 CrashWise Contributors
-"""CrashWise Intelligence Dashboard — Streamlit frontend (Phase 11).
+"""CrashWise Control Plane — real-time campaign command center.
 
-A human-friendly interface for exploring AI-driven triage results,
-monitoring distributed worker health, and exporting crash reports.
+Bi-directional interface: live telemetry polling (1Hz) + God-Mode
+signal dispatch via REST API. Dark-mode terminal aesthetic.
 
 Usage::
-
     streamlit run crashwise/dashboard/app.py
-
-Pages
------
-* **Campaigns** — List all fuzzing campaigns with status.
-* **Crash Intelligence** — Deep-dive into crashes with severity heatmap,
-  CWE filters, and patch viewer.
-* **Cluster Status** — Real-time worker replica health from Redis.
 """
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import os
-import urllib.parse
+import time
 from typing import Any
 
 import httpx
 import streamlit as st
 
-# ── Configuration ──────────────────────────────────────────────────────────────
+# ── Configuration ────────────────────────────────────────────────────────────
 
 API_BASE = os.environ.get("CRASHWISE_API_URL", os.environ.get("API_URL", "http://localhost:8000"))
 
 st.set_page_config(
-    page_title="CrashWise Intelligence Dashboard",
-    page_icon="🧠",
+    page_title="CrashWise",
+    page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
+# ── Dark terminal CSS ────────────────────────────────────────────────────────
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-async def _api_get(path: str, params: dict[str, Any] | None = None) -> Any:
-    """Async GET to the FastAPI backend."""
-    url = f"{API_BASE}{path}"
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        return resp.json()
-
-
-async def _api_post(path: str, payload: dict[str, Any]) -> Any:
-    """Async POST to the FastAPI backend."""
-    url = f"{API_BASE}{path}"
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(url, json=payload)
-        resp.raise_for_status()
-        return resp.json()
-
-
-def _severity_color(score: int) -> str:
-    """Return a CSS color for a severity score (0-10)."""
-    if score >= 8:
-        return "#dc2626"  # red-600
-    if score >= 5:
-        return "#ea580c"  # orange-600
-    if score >= 3:
-        return "#ca8a04"  # yellow-600
-    return "#16a34a"  # green-600
-
-
-def _severity_badge(score: int) -> str:
-    """Return an HTML badge for a severity score."""
-    color = _severity_color(score)
-    label = "CRITICAL" if score >= 8 else "HIGH" if score >= 5 else "MEDIUM" if score >= 3 else "LOW"
-    return f"""
-    <span style="
-        background-color: {color};
-        color: white;
-        padding: 4px 12px;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: bold;
-    ">{label} ({score}/10)</span>
-    """
+st.markdown("""
+<style>
+    .stApp { background-color: #0d1117; color: #c9d1d9; }
+    .stSidebar { background-color: #161b22; }
+    .stMetric label { color: #8b949e !important; font-size: 0.7rem !important; }
+    .stMetric [data-testid="stMetricValue"] { color: #58a6ff !important; font-size: 1.4rem !important; }
+    .block-container { padding-top: 1rem; }
+    h1, h2, h3 { color: #f0f6fc !important; }
+    .status-green { color: #3fb950; font-weight: bold; }
+    .status-amber { color: #d29922; font-weight: bold; }
+    .status-red { color: #f85149; font-weight: bold; }
+    .mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.8rem; }
+    .terminal-pane {
+        background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+        padding: 12px; font-family: monospace; font-size: 0.75rem;
+        color: #c9d1d9; overflow-x: auto; white-space: pre-wrap;
+    }
+    .badge {
+        display: inline-block; padding: 2px 8px; border-radius: 10px;
+        font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+    }
+    .badge-running { background: #1f6feb; color: #fff; }
+    .badge-completed { background: #238636; color: #fff; }
+    .badge-failed { background: #da3633; color: #fff; }
+    .badge-stalled { background: #9e6a03; color: #fff; }
+    .badge-pending { background: #30363d; color: #8b949e; }
+</style>
+""", unsafe_allow_html=True)
 
 
-# ── Navigation ─────────────────────────────────────────────────────────────────
+# ── API helpers ──────────────────────────────────────────────────────────────
 
-page = st.sidebar.radio(
-    "Navigation",
-    ["🏠 Campaigns", "🔥 Crash Intelligence", "🖥️ Cluster Status", "⚙️ Settings"],
-)
-
-st.sidebar.markdown("---")
-st.sidebar.caption("CrashWise v0.1.0 — Phase 13")
-
-
-# ── Page: Campaigns ────────────────────────────────────────────────────────────
-
-if page == "🏠 Campaigns":
-    st.title("🧠 CrashWise Campaigns")
-    st.markdown("Overview of all fuzzing campaigns and their current status.")
-
-    import asyncio
-
+def api_get(path: str, params: dict[str, Any] | None = None) -> Any:
     try:
-        campaigns = asyncio.run(_api_get("/campaigns", {"limit": 100}))
-    except Exception as exc:
-        st.error(f"Failed to fetch campaigns: {exc}")
-        st.stop()
+        resp = httpx.get(f"{API_BASE}{path}", params=params, timeout=10.0)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return None
+
+
+def api_post(path: str, payload: dict[str, Any]) -> Any:
+    try:
+        resp = httpx.post(f"{API_BASE}{path}", json=payload, timeout=15.0)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def api_delete(path: str) -> bool:
+    try:
+        resp = httpx.delete(f"{API_BASE}{path}", timeout=10.0)
+        return resp.status_code in (200, 204)
+    except Exception:
+        return False
+
+
+def status_badge(status: str) -> str:
+    cls = f"badge-{status}" if status in ("running", "completed", "failed", "stalled", "pending") else "badge-pending"
+    return f'<span class="badge {cls}">{status}</span>'
+
+
+# ── Telemetry fetch ──────────────────────────────────────────────────────────
+
+def fetch_telemetry() -> dict[str, Any]:
+    data = api_get("/api/v1/telemetry/stream")
+    if data is None:
+        # Fallback: construct from campaigns
+        return {"global_execs_per_sec": 0, "total_executions": 0, "unique_edges": 0, "crashes_found": 0}
+    return data
+
+
+# ── Navigation ───────────────────────────────────────────────────────────────
+
+tabs = st.tabs(["⚡ LIVE", "📋 CAMPAIGNS", "🔴 CRASHES", "🎛️ GOD-MODE", "🔧 SETUP"])
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB: LIVE TELEMETRY
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tabs[0]:
+    st.markdown("## Live Execution Telemetry")
+
+    # Top metrics bar
+    campaigns = api_get("/campaigns", {"limit": 50}) or []
+    running = [c for c in campaigns if c.get("status") == "running"]
+    workers = api_get("/workers") or []
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Active Campaigns", len(running))
+    m2.metric("Workers Online", len(workers))
+    m3.metric("Total Campaigns", len(campaigns))
+    m4.metric("Completed", sum(1 for c in campaigns if c.get("status") == "completed"))
+    m5.metric("Crashes Found", sum(c.get("run_count", 0) for c in campaigns))
+
+    st.markdown("---")
+
+    if running:
+        for camp in running:
+            cid = camp["id"]
+            st.markdown(f"### `{camp['target_name']}` {status_badge('running')}", unsafe_allow_html=True)
+
+            # Fetch campaign detail for run info
+            detail = api_get(f"/campaigns/{cid}")
+            if detail and detail.get("runs"):
+                latest_run = detail["runs"][-1] if detail["runs"] else {}
+                rc1, rc2, rc3, rc4 = st.columns(4)
+                rc1.metric("Iteration", latest_run.get("iteration", "—"))
+                rc2.metric("Executions", f"{latest_run.get('executions', 0):,}")
+                rc3.metric("Coverage Edges", latest_run.get("coverage_edges", "—"))
+                rc4.metric("Duration", f"{latest_run.get('duration_seconds', 0):.0f}s")
+
+            # Activity state indicator
+            st.markdown(f"""
+            <div class="terminal-pane">
+            <span class="status-green">●</span> Workflow: crashwise-campaign-{cid[:8]}…
+            <span class="status-amber">●</span> Current Stage: EXECUTING
+            <span class="status-green">●</span> Container: crashwise-{cid[:8]}-iter{detail['runs'][-1]['iteration'] if detail and detail.get('runs') else 0}
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("")
+    else:
+        st.info("No active campaigns. Submit one via CLI or the Campaigns tab.")
+
+    # Auto-refresh
+    if st.button("🔄 Refresh", key="refresh_live"):
+        st.rerun()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB: CAMPAIGNS
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tabs[1]:
+    st.markdown("## Campaigns")
+
+    campaigns = api_get("/campaigns", {"limit": 100}) or []
 
     if not campaigns:
-        st.info("No campaigns found. Start one via the API or CLI.")
+        st.info("No campaigns. Run `crashwise run <repo-url>` to start.")
     else:
-        cols = st.columns(4)
-        total = len(campaigns)
-        running = sum(1 for c in campaigns if c["status"] == "running")
-        completed = sum(1 for c in campaigns if c["status"] == "completed")
-        crashed = sum(1 for c in campaigns if c["status"] == "failed")
-        cols[0].metric("Total Campaigns", total)
-        cols[1].metric("Running", running)
-        cols[2].metric("Completed", completed)
-        cols[3].metric("Failed", crashed)
-
-        st.markdown("---")
-
         for c in campaigns:
-            with st.container():
-                c1, c2, c3 = st.columns([3, 1, 1])
-                c1.markdown(f"**{c['target_name']}**  \n`{c['target_repo']}`")
-                c2.markdown(f"Status: **{c['status']}**")
-                c3.markdown(f"Runs: {c['run_count']} | Seeds: {c['seed_count']}")
-                if st.button("🔍 View Details", key=f"btn_{c['id']}"):
-                    st.session_state.selected_campaign = c["id"]
+            col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
+            col1.markdown(
+                f"**{c['target_name']}** {status_badge(c['status'])}<br>"
+                f"<span class='mono'>{c['target_repo']}</span>",
+                unsafe_allow_html=True,
+            )
+            col2.markdown(f"Runs: **{c['run_count']}**")
+            col3.markdown(f"Seeds: **{c['seed_count']}**")
+            with col4:
+                if st.button("🗑️", key=f"del_{c['id']}", help="Delete campaign"):
+                    api_delete(f"/campaigns/{c['id']}")
                     st.rerun()
-                st.markdown("---")
+
+            # Forensic pane for failed/stalled campaigns
+            if c["status"] in ("failed", "stalled"):
+                detail = api_get(f"/campaigns/{c['id']}")
+                if detail:
+                    with st.expander(f"⚠️ Failure Diagnostics — {c['target_name']}", expanded=False):
+                        runs = detail.get("runs", [])
+                        if runs:
+                            last = runs[-1]
+                            st.markdown(f"""
+<div class="terminal-pane">
+<span class="status-red">✗</span> Campaign Status: {c['status'].upper()}
+<span class="status-red">✗</span> Last Iteration: {last.get('iteration', '?')}
+<span class="status-red">✗</span> Executions: {last.get('executions', 0):,}
+<span class="status-red">✗</span> Duration: {last.get('duration_seconds', 0):.1f}s
+<span class="status-red">✗</span> Coverage Edges: {last.get('coverage_edges', 0)}
+<span class="status-amber">→</span> Failure Boundary: {'Zero coverage (instrumentation failure)' if last.get('coverage_edges', 0) == 0 else 'Coverage plateau / stall detected'}
+<span class="status-amber">→</span> Check: crashwise doctor && review build logs
+</div>
+""", unsafe_allow_html=True)
+                        else:
+                            st.markdown("""
+<div class="terminal-pane">
+<span class="status-red">✗</span> No runs recorded — setup_target likely failed.
+<span class="status-amber">→</span> Probable cause: git clone failure, build system incompatibility, or missing harness.
+<span class="status-amber">→</span> Action: Check Temporal UI at :8233 for activity error details.
+</div>
+""", unsafe_allow_html=True)
+
+            st.markdown("<hr style='border-color:#21262d;margin:4px 0'>", unsafe_allow_html=True)
 
 
-# ── Page: Crash Intelligence ───────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB: CRASHES
+# ══════════════════════════════════════════════════════════════════════════════
 
-elif page == "🔥 Crash Intelligence":
-    st.title("🔥 Crash Intelligence")
-    st.markdown("AI-driven triage results with severity heatmap, CWE filters, and patch viewer.")
+with tabs[2]:
+    st.markdown("## Crash Intelligence")
 
-    import asyncio
+    campaigns = api_get("/campaigns", {"limit": 100}) or []
+    campaign_map = {c["target_name"]: c["id"] for c in campaigns}
 
-    # Campaign selector
-    try:
-        campaigns = asyncio.run(_api_get("/campaigns", {"limit": 100}))
-    except Exception as exc:
-        st.error(f"Failed to fetch campaigns: {exc}")
-        st.stop()
+    if not campaign_map:
+        st.info("No campaigns available.")
+    else:
+        sel_col, filt_col1, filt_col2 = st.columns([3, 2, 2])
+        with sel_col:
+            selected = st.selectbox("Campaign", list(campaign_map.keys()), key="crash_campaign")
+        with filt_col1:
+            cwe_filter = st.text_input("CWE Filter", placeholder="cwe-416", key="cwe_f")
+        with filt_col2:
+            min_score = st.number_input("Min Score", 0, 10, 0, key="min_s")
 
-    campaign_options = {c["target_name"]: c["id"] for c in campaigns}
-    if not campaign_options:
-        st.info("No campaigns available. Start a campaign first.")
-        st.stop()
+        cid = campaign_map[selected]
+        params: dict[str, Any] = {}
+        if cwe_filter:
+            params["vulnerability_type"] = cwe_filter
+        if min_score > 0:
+            params["min_severity_score"] = min_score
 
-    selected_name = st.selectbox("Select Campaign", list(campaign_options.keys()))
-    campaign_id = campaign_options[selected_name]
+        crashes = api_get(f"/campaigns/{cid}/crashes", params) or []
 
-    # Filters
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        cwe_filter = st.text_input("🔍 Filter by CWE (e.g., cwe-416)", "")
-    with col2:
-        min_score = st.slider("Minimum Severity Score", 0, 10, 0)
+        if not crashes:
+            st.info("No crashes match filters.")
+        else:
+            st.markdown(f"**{len(crashes)}** unique crashes")
 
-    params: dict[str, Any] = {}
-    if cwe_filter.strip():
-        params["vulnerability_type"] = cwe_filter.strip()
-    if min_score > 0:
-        params["min_severity_score"] = min_score
+            for i, c in enumerate(crashes):
+                sev_color = "#f85149" if c["severity_score"] >= 8 else "#d29922" if c["severity_score"] >= 5 else "#3fb950"
+                with st.expander(
+                    f"#{i+1} {c['crash_type']} — {c['vulnerability_type']} "
+                    f"[{c['severity_score']}/10]"
+                ):
+                    st.markdown(f"""
+<div class="terminal-pane">
+Type:       {c['crash_type']}
+Severity:   <span style="color:{sev_color}">{c['severity']} ({c['severity_score']}/10)</span>
+CWE:        {c['vulnerability_type']}
+Signal:     {c['signal']}
+Stack Hash: {c['stack_hash']}
+Discovered: {c['created_at']}
+</div>
+""", unsafe_allow_html=True)
 
-    try:
-        crashes = asyncio.run(
-            _api_get(f"/campaigns/{campaign_id}/crashes", params)
+                    t1, t2 = st.tabs(["Stack Trace", "Suggested Patch"])
+                    with t1:
+                        st.code(c.get("stack_trace", "N/A")[:3000], language="text")
+                    with t2:
+                        if c.get("suggested_patch"):
+                            st.code(c["suggested_patch"], language="cpp")
+                        else:
+                            st.caption("No patch available. Configure AI_PROVIDER for deep analysis.")
+
+        # Export
+        st.markdown("---")
+        e1, e2 = st.columns(2)
+        e1.link_button("Export Markdown", f"{API_BASE}/campaigns/{cid}/export?fmt=markdown")
+        e2.link_button("Export JSON", f"{API_BASE}/campaigns/{cid}/export?fmt=json")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB: GOD-MODE CONTROL PLANE
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tabs[3]:
+    st.markdown("## God-Mode Runtime Control")
+    st.caption("Bi-directional signal dispatch to active Temporal workflows.")
+
+    campaigns = api_get("/campaigns", {"limit": 50}) or []
+    running = [c for c in campaigns if c.get("status") == "running"]
+
+    if not running:
+        st.warning("No active campaigns to control. Start a campaign first.")
+    else:
+        target_names = {c["target_name"]: c["id"] for c in running}
+        selected_target = st.selectbox("Target Campaign", list(target_names.keys()), key="god_target")
+        workflow_id = f"crashwise-campaign-{target_names[selected_target]}"
+
+        st.markdown("---")
+
+        # ── PAUSE / RESUME ────────────────────────────────────────────────
+        st.markdown("### ⏸️ Pause / Resume")
+        p1, p2 = st.columns(2)
+        with p1:
+            if st.button("⏸️ PAUSE CAMPAIGN", use_container_width=True, type="primary"):
+                from crashwise.orchestration.client import connect as temporal_connect
+                try:
+                    client = asyncio.run(temporal_connect())
+                    handle = client.get_workflow_handle(workflow_id)
+                    asyncio.run(handle.signal("pause_hunt", True))
+                    st.success(f"Signal sent: pause_hunt → {workflow_id[:30]}…")
+                except Exception as e:
+                    st.error(f"Signal failed: {e}")
+        with p2:
+            if st.button("▶️ RESUME CAMPAIGN", use_container_width=True):
+                from crashwise.orchestration.client import connect as temporal_connect
+                try:
+                    client = asyncio.run(temporal_connect())
+                    handle = client.get_workflow_handle(workflow_id)
+                    asyncio.run(handle.signal("pause_hunt", False))
+                    st.success(f"Signal sent: resume → {workflow_id[:30]}…")
+                except Exception as e:
+                    st.error(f"Signal failed: {e}")
+
+        st.markdown("---")
+
+        # ── FORCE PIVOT ───────────────────────────────────────────────────
+        st.markdown("### 🔀 Force Strategy Pivot")
+        pivot_reason = st.text_input("Reason", value="operator override", key="pivot_reason")
+        if st.button("🔀 FORCE PIVOT", use_container_width=True):
+            from crashwise.orchestration.client import connect as temporal_connect
+            try:
+                client = asyncio.run(temporal_connect())
+                handle = client.get_workflow_handle(workflow_id)
+                asyncio.run(handle.signal("force_pivot", pivot_reason))
+                st.success(f"Signal sent: force_pivot ({pivot_reason})")
+            except Exception as e:
+                st.error(f"Signal failed: {e}")
+
+        st.markdown("---")
+
+        # ── INJECT SEED ───────────────────────────────────────────────────
+        st.markdown("### 💉 Inject Seed")
+        uploaded = st.file_uploader(
+            "Drop a seed file (.png, .json, .bin, etc.)",
+            type=None,
+            key="seed_upload",
         )
-    except Exception as exc:
-        st.error(f"Failed to fetch crashes: {exc}")
-        st.stop()
-
-    if not crashes:
-        st.info("No crashes match the selected filters.")
-    else:
-        st.markdown(f"**{len(crashes)} crashes found**")
-
-        # Severity heatmap / distribution
-        st.markdown("### Severity Distribution")
-        scores = [c["severity_score"] for c in crashes]
-        import pandas as pd
-
-        df = pd.DataFrame({"Score": scores})
-        st.bar_chart(df["Score"].value_counts().sort_index())
+        if uploaded and st.button("💉 INJECT INTO CORPUS", use_container_width=True):
+            from crashwise.orchestration.client import connect as temporal_connect
+            raw_b64 = base64.b64encode(uploaded.read()).decode("ascii")
+            try:
+                client = asyncio.run(temporal_connect())
+                handle = client.get_workflow_handle(workflow_id)
+                asyncio.run(handle.signal("inject_seed", {
+                    "filename": uploaded.name,
+                    "data_b64": raw_b64,
+                }))
+                st.success(f"Seed injected: {uploaded.name} ({len(raw_b64)} b64 chars)")
+            except Exception as e:
+                st.error(f"Injection failed: {e}")
 
         st.markdown("---")
 
-        # Crash cards
-        for idx, c in enumerate(crashes, 1):
-            with st.expander(f"Crash #{idx}: {c['crash_type']} — {c['vulnerability_type']}"):
-                st.markdown(_severity_badge(c["severity_score"]), unsafe_allow_html=True)
-                st.markdown(f"**Signal:** {c['signal']}  |  **Stack Hash:** `{c['stack_hash']}`")
+        # ── WORKFLOW QUERY ────────────────────────────────────────────────
+        st.markdown("### 📊 Workflow State Query")
+        if st.button("Query signal_status", key="query_status"):
+            from crashwise.orchestration.client import connect as temporal_connect
+            try:
+                client = asyncio.run(temporal_connect())
+                handle = client.get_workflow_handle(workflow_id)
+                result = asyncio.run(handle.query("signal_status"))
+                st.json(result)
+            except Exception as e:
+                st.error(f"Query failed: {e}")
 
-                tabs = st.tabs(["📋 Details", "🔧 Patch", "📜 Stack Trace"])
 
-                with tabs[0]:
-                    st.json({
-                        "crash_type": c["crash_type"],
-                        "severity": c["severity"],
-                        "severity_score": c["severity_score"],
-                        "vulnerability_type": c["vulnerability_type"],
-                        "signal": c["signal"],
-                        "logs_path": c["logs_path"],
-                        "created_at": c["created_at"],
-                    })
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB: SETUP / ONBOARDING
+# ══════════════════════════════════════════════════════════════════════════════
 
-                with tabs[1]:
-                    if c["suggested_patch"]:
-                        st.code(c["suggested_patch"], language="cpp")
-                        # Bounty Report button
-                        if st.button(
-                            "💰 1-Click Bounty Report",
-                            key=f"bounty_{c['id']}",
-                            help="Copy AI-generated report to clipboard",
-                        ):
-                            report_text = f"""\
-# {c['crash_type'].replace('-', ' ').title()} in {selected_name}
+with tabs[4]:
+    st.markdown("## Platform Configuration")
+    st.caption("Configure LLM providers and infrastructure without editing .env files.")
 
-**Severity:** {c['severity']} ({c['severity_score']}/10)
-**CWE:** {c['vulnerability_type']}
-**Status:** {c.get('verification_status', 'pending')}
+    # ── Step 1: LLM Provider ─────────────────────────────────────────────
+    st.markdown("### 1. Harness Synthesis LLM")
 
-## Suggested Patch
-```cpp
-{c['suggested_patch']}
-```
+    provider = st.selectbox(
+        "Provider",
+        ["anthropic", "openai", "openai_compatible", "ollama"],
+        key="setup_provider",
+    )
 
-## Stack Trace
-```
-{c['stack_trace'][:1500]}
-```
+    model_defaults = {
+        "anthropic": "claude-sonnet-4-5",
+        "openai": "gpt-4o",
+        "openai_compatible": "llama3.1:70b",
+        "ollama": "llama3.1:8b",
+    }
 
----
-*Generated by CrashWise*
-"""
-                            st.code(report_text, language="markdown")
-                            st.success("Report generated! Copy the text above.")
+    model = st.text_input("Model", value=model_defaults.get(provider, ""), key="setup_model")
 
-                        # Verify Patch button
-                        if st.button(
-                            "🧪 Verify Patch",
-                            key=f"verify_{c['id']}",
-                            help="Trigger autonomous patch verification workflow",
-                        ):
-                            with st.spinner("Triggering verification workflow..."):
-                                import asyncio
+    api_key = ""
+    base_url = ""
+    if provider in ("anthropic", "openai"):
+        api_key = st.text_input(
+            "API Key",
+            type="password",
+            placeholder="sk-ant-... or sk-...",
+            key="setup_key",
+        )
+    elif provider == "openai_compatible":
+        base_url = st.text_input("Base URL", value="http://localhost:11434/v1", key="setup_base")
+        api_key = st.text_input("API Key (optional)", type="password", key="setup_compat_key")
+    elif provider == "ollama":
+        base_url = st.text_input("Ollama URL", value="http://localhost:11434", key="setup_ollama_url")
 
-                                try:
-                                    resp = asyncio.run(
-                                        _api_post(
-                                            f"/crashes/{c['id']}/verify",
-                                            {
-                                                "crash_id": c["id"],
-                                                "campaign_id": campaign_id,
-                                                "repo_url": campaign_options.get(selected_name, ""),
-                                                "patch": c["suggested_patch"],
-                                                "seed_path": c["logs_path"],
-                                                "fuzzer_type": "libfuzzer",
-                                                "timeout_seconds": 60,
-                                            },
-                                        )
-                                    )
-                                    st.success(f"Verification started: `{resp['workflow_id']}`")
-                                except Exception as exc:
-                                    st.error(f"Failed to start verification: {exc}")
+    # ── Test Connection ──────────────────────────────────────────────────
+    if st.button("🔌 Test Connection", key="test_llm"):
+        with st.spinner("Testing..."):
+            try:
+                if provider == "ollama":
+                    resp = httpx.get(f"{base_url}/api/tags", timeout=5.0)
+                    if resp.status_code == 200:
+                        models = [m["name"] for m in resp.json().get("models", [])]
+                        st.success(f"Connected. Available models: {', '.join(models[:5])}")
                     else:
-                        st.info("No patch suggestion available. AI provider may not be configured.")
+                        st.error(f"Ollama returned {resp.status_code}")
+                elif provider == "openai_compatible":
+                    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+                    resp = httpx.get(f"{base_url}/models", headers=headers, timeout=5.0)
+                    if resp.status_code == 200:
+                        st.success("Connected to OpenAI-compatible endpoint.")
+                    else:
+                        st.error(f"Endpoint returned {resp.status_code}")
+                elif provider == "anthropic":
+                    resp = httpx.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": api_key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        },
+                        json={"model": model, "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]},
+                        timeout=10.0,
+                    )
+                    if resp.status_code in (200, 201):
+                        st.success(f"Anthropic API key valid. Model: {model}")
+                    elif resp.status_code == 401:
+                        st.error("Invalid API key.")
+                    else:
+                        st.warning(f"Anthropic returned {resp.status_code}: {resp.text[:200]}")
+                elif provider == "openai":
+                    resp = httpx.get(
+                        "https://api.openai.com/v1/models",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        timeout=5.0,
+                    )
+                    if resp.status_code == 200:
+                        st.success("OpenAI API key valid.")
+                    else:
+                        st.error(f"OpenAI returned {resp.status_code}")
+            except Exception as e:
+                st.error(f"Connection failed: {e}")
 
-                with tabs[2]:
-                    st.code(c["stack_trace"][:3000], language="text")
+    st.markdown("---")
 
-        # Export button
-        st.markdown("---")
-        export_col1, export_col2 = st.columns(2)
-        with export_col1:
-            md_url = f"{API_BASE}/campaigns/{campaign_id}/export?fmt=markdown"
-            st.link_button("📥 Export Markdown Report", md_url)
-        with export_col2:
-            json_url = f"{API_BASE}/campaigns/{campaign_id}/export?fmt=json"
-            st.link_button("📥 Export JSON Report", json_url)
+    # ── Step 2: Triage Provider (optional) ────────────────────────────────
+    st.markdown("### 2. Crash Triage LLM (optional)")
+    st.caption("Falls back to regex heuristics if not configured.")
 
-
-# ── Page: Cluster Status ─────────────────────────────────────────────────────
-
-elif page == "🖥️ Cluster Status":
-    st.title("🖥️ Cluster Status")
-    st.markdown("Real-time worker replica health from Redis heartbeat registry.")
-
-    import asyncio
-
-    try:
-        workers = asyncio.run(_api_get("/workers"))
-    except Exception as exc:
-        st.error(f"Failed to fetch worker status: {exc}")
-        st.stop()
-
-    if not workers:
-        st.info("No active workers detected. Ensure Redis is enabled and workers are running.")
-    else:
-        st.markdown(f"**{len(workers)} active worker(s)**")
-
-        cols = st.columns(3)
-        for idx, w in enumerate(workers):
-            with cols[idx % 3]:
-                st.metric(
-                    label=w["name"],
-                    value=w["status"].upper(),
-                    delta="Online" if w["status"] == "online" else "Offline",
-                )
-
-        st.markdown("---")
-        st.markdown("### Worker Details")
-        for w in workers:
-            st.markdown(f"- **{w['name']}** — Status: `{w['status']}`")
-
-
-# ── Page: Settings ───────────────────────────────────────────────────────────
-
-elif page == "⚙️ Settings":
-    st.title("⚙️ Notification Settings")
-    st.markdown("Configure alert channels for high-severity verified crashes.")
-
-    st.markdown("### Webhook")
-    webhook_url = st.text_input(
-        "Webhook URL",
-        value=os.environ.get("WEBHOOK_URL", ""),
-        help="Slack/Discord incoming webhook URL",
+    triage_provider = st.selectbox(
+        "Triage Provider",
+        ["disabled", "ollama", "venice", "openai_compatible"],
+        key="triage_provider",
     )
-    webhook_format = st.selectbox(
-        "Webhook Format",
-        ["slack", "discord", "generic"],
-        index=0,
-    )
+    triage_model = ""
+    triage_url = ""
+    triage_key = ""
+    if triage_provider != "disabled":
+        triage_model = st.text_input("Triage Model", value="llama3.1:8b", key="triage_model")
+        if triage_provider == "ollama":
+            triage_url = st.text_input("Ollama URL", value="http://localhost:11434", key="triage_url")
+        elif triage_provider in ("venice", "openai_compatible"):
+            triage_url = st.text_input("API Base URL", key="triage_base")
+            triage_key = st.text_input("API Key", type="password", key="triage_key")
 
-    st.markdown("### SMTP (Secure Email)")
-    smtp_host = st.text_input("SMTP Host", value=os.environ.get("SMTP_HOST", ""))
-    smtp_port = st.number_input("SMTP Port", value=587, min_value=1, max_value=65535)
-    smtp_user = st.text_input("SMTP Username", value=os.environ.get("SMTP_USER", ""))
-    smtp_password = st.text_input(
-        "SMTP Password",
-        type="password",
-        value=os.environ.get("SMTP_PASSWORD", ""),
-    )
-    smtp_from = st.text_input("From Address", value="crashwise@localhost")
-    smtp_to = st.text_input(
-        "To Addresses (comma-separated)",
-        value=os.environ.get("SMTP_TO", ""),
-    )
+    st.markdown("---")
 
-    st.markdown("### PGP Encryption")
-    pgp_key = st.text_area(
-        "PGP Public Key (armored)",
-        value=os.environ.get("PGP_PUBLIC_KEY", ""),
-        help="Optional: encrypt email notifications with PGP",
-        height=150,
-    )
+    # ── Step 3: Infrastructure ────────────────────────────────────────────
+    st.markdown("### 3. Infrastructure")
 
-    st.markdown("### Thresholds")
-    min_cvss = st.slider(
-        "Minimum CVSS to Notify",
-        0.0,
-        10.0,
-        7.0,
-        0.1,
-        help="Only notify when verified crash CVSS >= this value",
-    )
+    db_url = st.text_input("Database URL", value="sqlite+aiosqlite:///./crashwise.db", key="db_url")
+    redis_url = st.text_input("Redis URL", value="redis://localhost:6379/0", key="redis_url")
+    temporal_host = st.text_input("Temporal Host", value="localhost:7233", key="temporal_host")
 
-    if st.button("💾 Save Settings"):
-        st.success("Settings saved to session state (not persisted to server).")
-        st.session_state.notification_settings = {
-            "webhook_url": webhook_url,
-            "webhook_format": webhook_format,
-            "smtp_host": smtp_host,
-            "smtp_port": smtp_port,
-            "smtp_user": smtp_user,
-            "smtp_password": smtp_password,
-            "smtp_from": smtp_from,
-            "smtp_to": smtp_to,
-            "pgp_public_key": pgp_key,
-            "min_cvss_threshold": min_cvss,
-        }
+    st.markdown("---")
 
+    # ── Save Configuration ────────────────────────────────────────────────
+    if st.button("💾 Save & Apply Configuration", type="primary", use_container_width=True):
+        env_lines = [
+            f"CRASHWISE_LLM_MODEL={model}",
+        ]
+        if provider == "anthropic" and api_key:
+            env_lines.append(f"ANTHROPIC_API_KEY={api_key}")
+        elif provider == "openai" and api_key:
+            env_lines.append(f"OPENAI_API_KEY={api_key}")
+        elif provider in ("openai_compatible", "ollama"):
+            if base_url:
+                env_lines.append(f"OPENAI_API_BASE={base_url}")
+            if api_key:
+                env_lines.append(f"OPENAI_API_KEY={api_key}")
 
-# ── Footer ───────────────────────────────────────────────────────────────────
+        if triage_provider != "disabled":
+            env_lines.append(f"AI_PROVIDER={triage_provider}")
+            env_lines.append(f"AI_MODEL={triage_model}")
+            if triage_url:
+                env_lines.append(f"OLLAMA_URL={triage_url}")
+            if triage_key:
+                env_lines.append(f"AI_API_KEY={triage_key}")
 
-st.sidebar.markdown("---")
-st.sidebar.caption("Built with ❤️ by CrashWise Contributors")
+        env_lines.append(f"DATABASE_URL={db_url}")
+        env_lines.append(f"REDIS_URL={redis_url}")
+        env_lines.append(f"TEMPORAL_HOST={temporal_host}")
+
+        env_content = "\n".join(env_lines) + "\n"
+
+        try:
+            env_path = os.path.join(os.getcwd(), ".env")
+            with open(env_path, "w") as f:
+                f.write(env_content)
+            st.success(f"Configuration written to `{env_path}`")
+            st.code(env_content, language="bash")
+        except OSError as e:
+            st.error(f"Failed to write .env: {e}")
+            st.code(env_content, language="bash")
+            st.caption("Copy the above manually to your .env file.")
