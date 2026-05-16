@@ -5,12 +5,12 @@ import { useEffect, useState } from "react";
 interface Campaign {
   id: string;
   target_name: string;
-  engine: string;
+  target_repo: string;
+  fuzzer_type: string;
   status: string;
-  total_executions: number;
-  edges_covered: number;
-  crash_count: number;
-  started_at: string;
+  run_count: number;
+  seed_count: number;
+  created_at: string;
 }
 
 export function CampaignsTable() {
@@ -18,7 +18,7 @@ export function CampaignsTable() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/v1/campaigns")
+    fetch("/campaigns")
       .then((r) => r.json())
       .then(setCampaigns)
       .catch(() => {})
@@ -36,9 +36,8 @@ export function CampaignsTable() {
             <th className="text-left px-4 py-2 text-muted-foreground font-medium">Target</th>
             <th className="text-left px-4 py-2 text-muted-foreground font-medium">Engine</th>
             <th className="text-left px-4 py-2 text-muted-foreground font-medium">Status</th>
-            <th className="text-right px-4 py-2 text-muted-foreground font-medium">Execs</th>
-            <th className="text-right px-4 py-2 text-muted-foreground font-medium">Edges</th>
-            <th className="text-right px-4 py-2 text-muted-foreground font-medium">Crashes</th>
+            <th className="text-right px-4 py-2 text-muted-foreground font-medium">Runs</th>
+            <th className="text-right px-4 py-2 text-muted-foreground font-medium">Seeds</th>
           </tr>
         </thead>
         <tbody>
@@ -47,9 +46,9 @@ export function CampaignsTable() {
               <td className="px-4 py-3 font-medium">{c.target_name}</td>
               <td className="px-4 py-3">
                 <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                  c.engine === "afl++" ? "bg-accent-orange/20 text-accent-orange" : "bg-accent-blue/20 text-accent-blue"
+                  c.fuzzer_type === "aflpp" ? "bg-accent-orange/20 text-accent-orange" : "bg-accent-blue/20 text-accent-blue"
                 }`}>
-                  {c.engine}
+                  {c.fuzzer_type}
                 </span>
               </td>
               <td className="px-4 py-3">
@@ -60,13 +59,8 @@ export function CampaignsTable() {
                   {c.status}
                 </span>
               </td>
-              <td className="px-4 py-3 text-right tabular-nums">{c.total_executions.toLocaleString()}</td>
-              <td className="px-4 py-3 text-right tabular-nums">{c.edges_covered.toLocaleString()}</td>
-              <td className={`px-4 py-3 text-right tabular-nums font-bold ${
-                c.crash_count > 0 ? "text-accent-red" : "text-muted-foreground"
-              }`}>
-                {c.crash_count}
-              </td>
+              <td className="px-4 py-3 text-right tabular-nums">{c.run_count}</td>
+              <td className="px-4 py-3 text-right tabular-nums">{c.seed_count}</td>
             </tr>
           ))}
         </tbody>

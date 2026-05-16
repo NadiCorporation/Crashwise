@@ -15,13 +15,20 @@ export function LiveTelemetry() {
   const [data, setData] = useState<TelemetryData | null>(null);
 
   useEffect(() => {
-    const es = new EventSource("/api/v1/telemetry/stream");
-    es.onmessage = (event) => {
-      try {
-        setData(JSON.parse(event.data));
-      } catch {}
-    };
-    return () => es.close();
+    try {
+      const es = new EventSource("/api/v1/telemetry/stream");
+      es.onmessage = (event) => {
+        try {
+          setData(JSON.parse(event.data));
+        } catch {}
+      };
+      es.onerror = () => {
+        es.close();
+      };
+      return () => es.close();
+    } catch {
+      return undefined;
+    }
   }, []);
 
   const stats = [
