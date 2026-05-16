@@ -109,6 +109,7 @@ async def setup_target(payload: SetupTargetInput) -> SetupTargetOutput:
                 target_source_path=source_path,
                 max_retries=payload.max_synth_retries,
                 workflow_id=workflow_id,
+                fuzzer_type=payload.fuzzer_type,
             )
 
     output = SetupTargetOutput(
@@ -507,6 +508,7 @@ async def _run_harness_synthesis(
     target_source_path: str,
     max_retries: int,
     workflow_id: str,
+    fuzzer_type: str = "libfuzzer",
 ) -> Path | None:
     """Drive the Phase-2 harness agent and return the compiled-binary path."""
     from crashwise.agents.harness_synth import synthesize_harness
@@ -523,6 +525,9 @@ async def _run_harness_synthesis(
         )
         return None
 
+    # Map fuzzer_type to engine name for harness synthesis.
+    engine = "aflpp" if "afl" in fuzzer_type.lower() else "libfuzzer"
+
     # Operation Hydra Phase 2: Mine usage examples from tests/examples.
     usage_example = _find_usage_example(workdir, source)
 
@@ -532,6 +537,7 @@ async def _run_harness_synthesis(
         workdir=synth_workdir,
         max_retries=max_retries,
         usage_example=usage_example,
+        engine=engine,
     )
 
     log.info(

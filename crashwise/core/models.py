@@ -178,12 +178,10 @@ class SetupTargetInput(_StrictModel):
     target_repo: HttpUrl
     target_branch: str | None = None
     sanitizers: str = "address,undefined"
-    # Optional path (inside the cloned repo) to the source file the harness
-    # synthesiser should target. When ``None``, ``setup_target`` skips
-    # synthesis and Phase 1 stub data is returned unchanged.
     target_source_path: str | None = None
     synthesize_harness: bool = False
     max_synth_retries: int = Field(default=4, ge=0, le=10)
+    fuzzer_type: str = "libfuzzer"
 
 
 class SetupTargetOutput(_StrictModel):

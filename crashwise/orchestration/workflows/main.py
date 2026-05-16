@@ -351,6 +351,7 @@ class MainFuzzingWorkflow:
                 target_branch=payload.target_branch,
                 sanitizers=payload.sanitizers,
                 synthesize_harness=payload.harness_path is None,
+                fuzzer_type=payload.fuzzer_type.value,
             ),
             result_type=SetupTargetOutput,
             start_to_close_timeout=timedelta(minutes=10),
@@ -659,7 +660,6 @@ class MainFuzzingWorkflow:
                 {
                     "campaign_id": payload.campaign_id,
                     "status": final_status,
-                    "run_count": campaign.iteration,
                 },
                 start_to_close_timeout=timedelta(seconds=10),
             )
