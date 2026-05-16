@@ -21,7 +21,8 @@ import re
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from crashwise.agents.harness_synth.analyzer import detect_language, find_entry_points
-from crashwise.agents.harness_synth.compiler import compile_harness
+from crashwise.agents.harness_synth.compiler import compile_harness, sanity_check
+from crashwise.agents.harness_synth.debug_engine import debug_crash
 from crashwise.agents.harness_synth.llm import ChatModelLike, get_chat_model
 from crashwise.agents.harness_synth.prompts import (
     FEEDBACK_SECTION_TEMPLATE,
@@ -61,18 +62,44 @@ async def analyze_code(state: HarnessState) -> HarnessState:
 
     selected: EntryPoint | None = entry_points[0] if entry_points else None
 
+    # Operation Hydra Phase 3: Extract type definitions for the selected entry point.
+    type_defs = ""
+    if selected:
+        from crashwise.agents.harness_synth.type_extractor import extract_types_for_signature
+        target_root = state.source_path.parent
+        for parent in state.source_path.parents:
+            if (parent / "include").is_dir() or (parent / "CMakeLists.txt").is_file():
+                target_root = parent
+                break
+        type_defs = extract_types_for_signature(target_root, selected.signature)
+    elif source_code:
+        # No entry point selected — extract types from all function signatures in the file.
+        from crashwise.agents.harness_synth.type_extractor import extract_types_for_signature
+        import re as _re
+        target_root = state.source_path.parent
+        for parent in state.source_path.parents:
+            if (parent / "include").is_dir() or (parent / "CMakeLists.txt").is_file():
+                target_root = parent
+                break
+        # Find all function signatures in the source.
+        func_sigs = _re.findall(r"^\w[\w\s\*]*\s+\w+\s*\([^)]+\)", source_code[:8000], _re.MULTILINE)
+        combined_sig = " ".join(func_sigs[:5])
+        type_defs = extract_types_for_signature(target_root, combined_sig)
+
     log.info(
         "harness_synth.node.analyze.complete",
         source_chars=len(source_code),
         entry_points=len(entry_points),
         selected=selected.name if selected else None,
         selected_score=selected.score if selected else None,
+        type_defs_chars=len(type_defs),
     )
 
     state.source_code = source_code
     state.language = language
     state.entry_points = entry_points
     state.selected_entry_point = selected
+    state.type_definitions = type_defs
     return state
 
 
@@ -119,6 +146,24 @@ async def generate_harness(state: HarnessState) -> HarnessState:
             state,
             reason=f"LLM code blocked by validator: {safety_result.summary()}",
         )
+
+    # Operation Hydra Fix 4: Anti-hallucination guardrail.
+    # The harness must NOT redefine or modify target source functions.
+    # It may only: #include headers, call target APIs, define LLVMFuzzerTestOneInput.
+    hallucination = _check_target_redefinition(code, state.source_path)
+    if hallucination:
+        log.warning(
+            "harness_synth.node.generate.hallucination_blocked",
+            reason=hallucination,
+        )
+        state.error_history.append(
+            f"BLOCKED: {hallucination}. "
+            "Do NOT redefine target functions. Only #include headers and call the API."
+        )
+        state.retry_count += 1
+        if state.retry_count > state.max_retries:
+            return await _apply_fallback(state, reason=hallucination)
+        return state
 
     harness_path = state.workdir / "harness.cpp"
     harness_path.parent.mkdir(parents=True, exist_ok=True)
@@ -173,6 +218,66 @@ async def validate_harness(state: HarnessState) -> HarnessState:
     state.last_compile = result
 
     if result.success:
+        # Operation Hydra: 5-second sanity gate.
+        # Verify the harness actually hits target code before accepting it.
+        if result.binary_path:
+            sanity = await sanity_check(result.binary_path)
+            if not sanity.passed:
+                # Phase 2 ReAct: If it crashed, run GDB to get precise diagnosis.
+                diagnosis_text = ""
+                if sanity.crashed_immediately and result.binary_path:
+                    try:
+                        diag = await debug_crash(result.binary_path)
+                        diagnosis_text = diag.to_prompt()
+                        state.crash_diagnosis = diagnosis_text
+                        log.info(
+                            "harness_synth.node.validate.gdb_diagnosis",
+                            signal=diag.signal,
+                            function=diag.crash_function,
+                            location=diag.crash_location,
+                            summary=diag.summary[:100],
+                        )
+                    except Exception as exc:
+                        log.warning("harness_synth.node.validate.gdb_failed", error=str(exc)[:100])
+
+                # Build a detailed error message for the LLM.
+                if diagnosis_text:
+                    reason = (
+                        f"CRASH DETECTED during sanity check.\n"
+                        f"{diagnosis_text}\n"
+                        f"FIX: Properly initialize all buffers, structs, and pointers "
+                        f"before calling the target function."
+                    )
+                else:
+                    reason = (
+                        f"Sanity check FAILED: {sanity.edges_hit} edges hit in 5s. "
+                        f"The harness does not exercise target code. "
+                        f"Ensure the harness calls the target's API functions with valid arguments."
+                    )
+
+                state.error_history.append(reason)
+                state.retry_count += 1
+                log.warning(
+                    "harness_synth.node.validate.sanity_failed",
+                    attempt=state.retry_count,
+                    edges_hit=sanity.edges_hit,
+                    crashed=sanity.crashed_immediately,
+                    has_gdb=bool(diagnosis_text),
+                )
+                if state.retry_count > state.max_retries:
+                    await _apply_fallback(state, reason="sanity check failed after max retries")
+                    if state.harness_path is not None:
+                        final_result = await compile_harness(
+                            harness_path=state.harness_path,
+                            workdir=state.workdir,
+                            language=state.language,
+                            extra_includes=extra_includes,
+                            extra_args=extra_link_args,
+                        )
+                        state.last_compile = final_result
+                    state.done = True
+                return state
+
         state.done = True
         log.info(
             "harness_synth.node.validate.success",
@@ -182,6 +287,29 @@ async def validate_harness(state: HarnessState) -> HarnessState:
         return state
 
     # Failure path.
+    # Operation Hydra Phase 3: The Linker Hand — auto-fix compilation errors.
+    from crashwise.agents.harness_synth.build_resolver import diagnose_compile_error
+    auto_fixes = diagnose_compile_error(result.stderr, target_root)
+    if auto_fixes:
+        log.info("harness_synth.node.validate.auto_fix", fixes=len(auto_fixes))
+        # Retry compilation with discovered paths.
+        retry_result = await compile_harness(
+            harness_path=state.harness_path,
+            workdir=state.workdir,
+            language=state.language,
+            extra_includes=extra_includes,
+            extra_args=extra_link_args + auto_fixes,
+        )
+        if retry_result.success:
+            state.last_compile = retry_result
+            # Still need to pass sanity gate.
+            if retry_result.binary_path:
+                sanity = await sanity_check(retry_result.binary_path)
+                if sanity.passed:
+                    state.done = True
+                    log.info("harness_synth.node.validate.auto_fix_success")
+                    return state
+
     summary = _summarise_stderr(result.stderr)
     state.error_history.append(summary)
     state.retry_count += 1
@@ -219,6 +347,46 @@ def should_retry(state: HarnessState) -> str:
 
 
 # ── Internals ────────────────────────────────────────────────────────────────
+
+def _check_target_redefinition(harness_code: str, source_path: Path) -> str | None:
+    """Detect if the LLM redefined target functions (anti-hallucination).
+
+    Returns a reason string if hallucination detected, None if clean.
+    The harness is ONLY allowed to:
+    - #include header files
+    - Define LLVMFuzzerTestOneInput
+    - Define helper wrappers that call target APIs
+    It must NOT redefine functions that exist in the target source.
+    """
+    import re as _re
+
+    # Read target source to find its function names.
+    try:
+        target_content = source_path.read_text(encoding="utf-8", errors="replace")[:16000]
+    except OSError:
+        return None  # Can't check — allow.
+
+    # Find function definitions in the target.
+    target_funcs: set[str] = set()
+    for m in _re.finditer(r"^\w[\w\s\*]*\s+(\w+)\s*\([^)]*\)\s*\{", target_content, _re.MULTILINE):
+        name = m.group(1)
+        if name not in ("main", "if", "for", "while", "switch"):
+            target_funcs.add(name)
+
+    if not target_funcs:
+        return None
+
+    # Check if the harness redefines any target function.
+    for m in _re.finditer(r"^\w[\w\s\*]*\s+(\w+)\s*\([^)]*\)\s*\{", harness_code, _re.MULTILINE):
+        name = m.group(1)
+        if name == "LLVMFuzzerTestOneInput":
+            continue  # This is expected.
+        if name in target_funcs:
+            return f"Harness redefines target function '{name}' — target source is read-only"
+
+    return None
+
+
 def _message_text(message: AIMessage) -> str:
     content = message.content
     if isinstance(content, str):
@@ -288,6 +456,43 @@ def _build_user_prompt(state: HarnessState) -> str:
             feedback=state.feedback,
         )
 
+    # Operation Hydra Phase 2: Crash diagnosis from GDB.
+    crash_section = ""
+    if state.crash_diagnosis.strip():
+        crash_section = (
+            "\n## GDB CRASH DIAGNOSIS (from your previous harness)\n"
+            "Your previous harness CRASHED. Here is the GDB backtrace:\n"
+            "```\n"
+            f"{state.crash_diagnosis}\n"
+            "```\n"
+            "YOU MUST fix the initialization that caused this crash. "
+            "Allocate buffers with sufficient size, initialize all struct fields, "
+            "and ensure pointers are valid before calling the target function.\n"
+        )
+
+    # Operation Hydra Phase 2: Usage example from tests/examples.
+    usage_section = ""
+    if state.usage_example.strip():
+        usage_section = (
+            "\n## REFERENCE: How this API is used in the project's own tests\n"
+            "```c\n"
+            f"{state.usage_example}\n"
+            "```\n"
+            "Use this as a reference for proper initialization and calling convention.\n"
+        )
+
+    # Operation Hydra Phase 3: Type definitions for custom types.
+    types_section = ""
+    if state.type_definitions.strip():
+        types_section = (
+            "\n## TYPE DEFINITIONS (from project headers)\n"
+            "These are the exact types used in the target function's signature:\n"
+            "```c\n"
+            f"{state.type_definitions}\n"
+            "```\n"
+            "Use these definitions to correctly allocate and initialize variables.\n"
+        )
+
     retry_section = ""
     if state.retry_count > 0 and state.last_compile is not None:
         # Show the *previous* (not current) errors so the LLM sees a trend.
@@ -311,7 +516,7 @@ def _build_user_prompt(state: HarnessState) -> str:
             profile_section=profile_section,
             source_code=_truncate_source(state.source_code),
             feedback_section=feedback_section,
-            retry_section=retry_section,
+            retry_section=types_section + crash_section + usage_section + retry_section,
         ).rstrip()
         + "\n"
     )

@@ -137,4 +137,116 @@ async def compile_harness(
     )
 
 
-__all__ = ["compile_harness"]
+# ── 5-Second Sanity Gate (Operation Hydra Phase 1) ───────────────────────────
+
+class SanityResult:
+    """Result of the fast-fail sanity check."""
+
+    __slots__ = ("passed", "edges_hit", "crashed_immediately", "output")
+
+    def __init__(self, *, passed: bool, edges_hit: int = 0,
+                 crashed_immediately: bool = False, output: str = ""):
+        self.passed = passed
+        self.edges_hit = edges_hit
+        self.crashed_immediately = crashed_immediately
+        self.output = output
+
+
+async def sanity_check(
+    binary_path: Path,
+    *,
+    timeout: float = 5.0,
+    corpus_dir: Path | None = None,
+) -> SanityResult:
+    """Run the compiled harness for a few seconds to verify it hits target code.
+
+    This is a fast-fail gate: if the harness compiles but doesn't actually
+    exercise the target (0 edges), we reject it before wasting a full
+    fuzzing iteration.
+
+    The binary is run directly (not in Docker) since it was compiled in
+    the same environment. We parse libFuzzer's stdout for coverage info.
+    """
+    if not binary_path.exists():
+        return SanityResult(passed=False, output="Binary not found")
+
+    # Create a minimal seed if no corpus provided.
+    import tempfile
+    tmp_corpus = None
+    if corpus_dir is None or not corpus_dir.exists():
+        tmp_corpus = Path(tempfile.mkdtemp(prefix="sanity_corpus_"))
+        (tmp_corpus / "seed0").write_bytes(b"A" * 64)
+        corpus_dir = tmp_corpus
+
+    cmd = [
+        str(binary_path),
+        str(corpus_dir),
+        f"-max_total_time={int(timeout)}",
+        "-max_len=4096",
+        "-print_final_stats=1",
+        "-detect_leaks=0",
+        "-handle_segv=0",
+        "-handle_abrt=0",
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env={"ASAN_OPTIONS": "abort_on_error=0:detect_leaks=0"},
+        )
+        try:
+            stdout_bytes, _ = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout + 5.0
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            stdout_bytes = b""
+    except OSError as exc:
+        return SanityResult(passed=False, output=f"Failed to run: {exc}")
+    finally:
+        # Cleanup temp corpus.
+        if tmp_corpus and tmp_corpus.exists():
+            import shutil as _shutil
+            _shutil.rmtree(tmp_corpus, ignore_errors=True)
+
+    output = stdout_bytes.decode("utf-8", errors="replace")
+
+    # Parse libFuzzer output for coverage.
+    edges_hit = 0
+    import re as _re
+    # libFuzzer prints: "#N INITED cov: X ft: Y" or "#N pulse cov: X"
+    cov_matches = _re.findall(r"cov:\s*(\d+)", output)
+    if cov_matches:
+        edges_hit = max(int(m) for m in cov_matches)
+
+    # Detect immediate crash (exit code != 0 within first second, or ASAN error).
+    crashed_immediately = (
+        proc.returncode != 0
+        and "ERROR: AddressSanitizer" not in output  # Real crash = good, not a harness bug
+        and edges_hit == 0
+    )
+
+    # Pass if we hit at least 1 meaningful edge (beyond the harness entry itself).
+    passed = edges_hit >= 2 and not crashed_immediately
+
+    log.info(
+        "harness_synth.sanity_check",
+        binary=str(binary_path),
+        edges_hit=edges_hit,
+        passed=passed,
+        crashed_immediately=crashed_immediately,
+        returncode=proc.returncode,
+    )
+
+    return SanityResult(
+        passed=passed,
+        edges_hit=edges_hit,
+        crashed_immediately=crashed_immediately,
+        output=output[:2000],
+    )
+
+
+__all__ = ["compile_harness", "sanity_check", "SanityResult"]

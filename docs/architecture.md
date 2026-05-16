@@ -19,14 +19,14 @@ Copyright (c) 2026 CrashWise Contributors
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         Temporal Worker(s)                                   │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                     22 Registered Activities                         │    │
+│  │                     23 Registered Activities                         │    │
 │  │  setup_target      execute_fuzzing     triage_results               │    │
 │  │  seed_corpus       analyze_progress    analyze_crash                │    │
 │  │  pivot_strategy    analyze_coverage    evolve_harness               │    │
 │  │  hot_swap_harness  mutate_harness      inject_seeds                 │    │
 │  │  verify_patch      verify_poc          notify_stakeholders          │    │
 │  │  kernel_monitor    profile_target      execute_job                  │    │
-│  │  read_coverage_data                                                 │    │
+│  │  read_coverage_data update_campaign_status                          │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         Agent Layer (LangGraph + LangChain)                  │
@@ -186,12 +186,15 @@ crashwise/
 ├── agents/
 │   ├── harness_synth/              # LangGraph harness generation agent
 │   │   ├── graph.py                #   State machine: analyze → generate → validate
-│   │   ├── nodes.py                #   LLM node implementations
+│   │   ├── nodes.py                #   LLM node implementations + ReAct self-correction
 │   │   ├── llm.py                  #   LangChain model factory (Anthropic/OpenAI)
-│   │   ├── analyzer.py             #   Entry point detection (signature scoring)
-│   │   ├── compiler.py             #   clang++ compilation with sanitizers
-│   │   ├── validator.py            #   Safety checks + clang -fsyntax-only gate
+│   │   ├── analyzer.py             #   Entry point detection + header-aware API discovery
+│   │   ├── compiler.py             #   clang++ compilation + 5-second sanity gate
+│   │   ├── validator.py            #   Safety checks + anti-hallucination guard
 │   │   ├── evolution.py            #   Coverage-guided harness rewriting
+│   │   ├── debug_engine.py         #   GDB-based crash diagnosis (ReAct loop)
+│   │   ├── type_extractor.py       #   Static type extraction from headers
+│   │   ├── build_resolver.py       #   Automated library/include path discovery
 │   │   ├── prompts.py              #   LLM prompt templates
 │   │   ├── state.py                #   LangGraph state schema
 │   │   └── synth.py                #   Public API (synthesize_harness)
@@ -241,6 +244,85 @@ crashwise/
 5. **Database as source of truth.** Redis is a fast-read cache; all persistent state (campaign, MAB, crashes) is written to PostgreSQL/SQLite first. Long-running campaigns never lose state.
 
 6. **Shell-free execution.** All subprocess calls use `shlex` + `subprocess_exec` against an allowlist. No `shell=True` anywhere in the codebase.
+
+7. **Truthful telemetry.** Coverage data is never fabricated. If line-level data is unavailable (AFL++/libFuzzer aggregate-only), the system reports UNKNOWN and falls back to static analysis rather than hallucinating line numbers.
+
+8. **Immutability doctrine.** The agent may only edit harness code and build configuration. Target source files are strictly read-only — the agent cannot "fix" the target to make fuzzing work.
+
+---
+
+## Operation Hydra — Intelligence Layer
+
+The intelligence layer transforms CrashWise from a linear automated fuzzer into an agentic security research suite. It operates in three phases:
+
+### Phase 1: THE SENSES (API Discovery + Truthful Coverage)
+
+```
+┌─── Header-Aware API Discovery ─────────────────────────────────────────────┐
+│  find_public_api(workdir) → scans .h files for real API surface            │
+│  • Resolves typedefs (Bytef→unsigned char, z_streamp→struct*)              │
+│  • Scores struct-pointer APIs at 0.85 (needs init but high-value)          │
+│  • Detects init/cleanup lifecycle (inflateInit/inflateEnd)                 │
+│  • Falls back to .c file scanning only if no headers found                 │
+│  Result: compress(0.95) instead of z_error(0.3)                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─── Truthful Coverage Analysis ─────────────────────────────────────────────┐
+│  • AFL++/libFuzzer parsers return empty sets (no fake line numbers)         │
+│  • Real llvm-cov/sancov/lcov paths unchanged (they have real data)         │
+│  • Blocker detection uses static analysis when no line-level data          │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─── 5-Second Sanity Gate ───────────────────────────────────────────────────┐
+│  After compilation: run harness for 5s with -handle_segv=0                 │
+│  • If edges_hit < 2 → REJECT (harness doesn't exercise target)            │
+│  • If crashed_immediately → trigger GDB diagnosis                          │
+│  • Prevents wasting full fuzzing iterations on dead harnesses              │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 2: THE BRAIN (Self-Correction ReAct Loop)
+
+```
+ValidateHarness → sanity_check() → CRASH?
+                                      │ YES
+                                      ▼
+                              debug_crash(binary)  ← GDB batch mode
+                                      │
+                                      ▼
+                    state.crash_diagnosis = "SIGSEGV in compress,
+                                             NULL pointer at line 42"
+                                      │
+                                      ▼
+                    GenerateHarness (LLM sees crash diagnosis)
+                                      │
+                    "Your harness crashed because strm->next_in was NULL.
+                     FIX the initialization."
+```
+
+- **GDB Debug Engine:** Runs crashing binary under `gdb --batch` with `-handle_segv=0`
+- **Usage Mining:** Scans `test/`, `tests/`, `examples/` for code calling the target function
+- **Context Enrichment:** LLM prompt includes crash diagnosis + usage example + type definitions
+
+### Phase 3: THE HANDS (Type Extraction + Build Resolution)
+
+```
+┌─── The Navigator Hand (type_extractor.py) ─────────────────────────────────┐
+│  extract_types_for_signature(workdir, "compress(Bytef*, uLongf*, ...)")     │
+│  → "typedef Byte FAR Bytef;"                                               │
+│  → "typedef uLong FAR uLongf;"                                             │
+│  → "typedef unsigned long uLong;"                                           │
+│  Injected into LLM prompt as ## TYPE DEFINITIONS                           │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─── The Linker Hand (build_resolver.py) ────────────────────────────────────┐
+│  On compile failure:                                                        │
+│  • diagnose_compile_error(stderr) → parse "file not found" / "undefined"   │
+│  • resolve_build_paths(workdir) → discover .a/.so + include dirs           │
+│  • Auto-retry compilation with discovered -I/-L flags                      │
+│  • Only count as failure if auto-fix also fails                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
