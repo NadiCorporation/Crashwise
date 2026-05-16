@@ -601,4 +601,46 @@ async def verify_crash_patch(
     return VerifyPatchResponse(workflow_id=workflow_id)
 
 
+# ── God-Mode Signal Dispatch ─────────────────────────────────────────────────
+
+class SignalRequest(BaseModel):
+    """Payload to send a God-Mode signal to a running workflow."""
+
+    workflow_id: str = Field(..., min_length=1)
+    signal: str = Field(..., pattern=r"^(pause_hunt|force_pivot|inject_seed)$")
+    payload: Any = Field(default=None)
+
+
+class SignalResponse(BaseModel):
+    """Response after dispatching a signal."""
+
+    ok: bool
+    message: str
+
+
+@app.post(
+    "/campaigns/signal",
+    response_model=SignalResponse,
+    tags=["campaigns"],
+)
+async def send_campaign_signal(req: SignalRequest) -> SignalResponse:
+    """Dispatch a God-Mode signal to a running Temporal workflow."""
+    try:
+        client = await connect()
+        handle = client.get_workflow_handle(req.workflow_id)
+        await handle.signal(req.signal, req.payload)
+        log.info(
+            "api.signal_sent",
+            workflow_id=req.workflow_id,
+            signal=req.signal,
+        )
+        return SignalResponse(ok=True, message=f"{req.signal} sent to {req.workflow_id}")
+    except Exception as exc:
+        log.warning("api.signal_failed", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Signal dispatch failed: {exc}",
+        ) from exc
+
+
 __all__ = ["app"]
