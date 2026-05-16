@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] — 2026-05-16
+
+### Operation Hydra — Agentic Intelligence Layer
+
+#### Phase 1: THE SENSES
+- **Header-Aware API Discovery** (`analyzer.py`): `find_public_api()` scans `.h` files, resolves typedefs (Bytef→unsigned char, z_streamp→struct*), scores struct-pointer APIs. Finds `compress`/`uncompress` at 0.95 instead of `z_error` at 0.3.
+- **Truthful Coverage Analysis** (`coverage_analyzer.py`): Removed synthetic line number generation from AFL++/libFuzzer parsers. Returns empty sets (honest UNKNOWN) when no real line-level data available. Real llvm-cov/sancov paths unchanged.
+- **5-Second Sanity Gate** (`compiler.py`): `sanity_check()` runs compiled harness for 5s before accepting. Rejects harnesses with <2 edges. Prevents wasting full fuzzing iterations on dead harnesses.
+- **Anti-Hallucination Guard** (`nodes.py`): `_check_target_redefinition()` blocks LLM from redefining target functions. Target source is read-only.
+
+#### Phase 2: THE BRAIN
+- **GDB Debug Engine** (`debug_engine.py`): Runs crashing harness under `gdb --batch`, extracts backtrace, crash function, location, registers. Generates structured `CrashDiagnosis`.
+- **Self-Correction ReAct Loop**: Sanity fail → `debug_crash()` → GDB backtrace fed to LLM → retry with crash context. Up to `max_retries` attempts with progressively richer diagnostics.
+- **Usage Example Mining** (`setup_target.py`): `_find_usage_example()` scans test/examples dirs for code calling the target function. Extracts 25-line snippet as reference pattern.
+- **Context Enrichment**: LLM prompt includes `## GDB CRASH DIAGNOSIS` + `## REFERENCE` sections.
+
+#### Phase 3: THE HANDS
+- **Type Extractor** (`type_extractor.py`): `extract_types_for_signature()` finds struct/typedef definitions from headers. Handles nested braces, typedef aliases. Tested: finds Bytef, uLongf, z_stream for zlib.
+- **Build Resolver** (`build_resolver.py`): `diagnose_compile_error()` parses stderr for missing headers/libs, `resolve_build_paths()` discovers .a/.so + include dirs. Auto-retry compilation with discovered flags.
+- **libFuzzer Signal Fix**: Added `-handle_segv=0 -handle_abrt=0` to sanity check and GDB commands. Enables pristine GDB backtraces (libFuzzer no longer intercepts signals).
+
+#### Infrastructure Fixes (Operation NadiBugy)
+- Fixed critical `-max_total_time=0` bug (libFuzzer exited immediately)
+- Fixed glibc mismatch between build/run containers (use crashwise-worker as runner)
+- Added `libclang-rt-14-dev` for sanitizer runtime support
+- Shared `/tmp` volume between worker and sibling containers
+- Fixed heartbeat timeout (15s → 5min) so docker pull doesn't get cancelled
+- Enabled harness synthesis by default when no harness provided
+- Fixed `mutate_harness` returning .cpp source instead of .out binary
+- Fixed workflow logger kwargs crash
+- Fixed task queue default (crashwise-default → crashwise)
+- Added `update_campaign_status` activity for dashboard status tracking
+- Added campaign delete endpoints + dashboard cleanup UI
+- Campaign detail view in dashboard
+
+---
+
 ## [1.0.0-rc2] — 2026-05-09
 
 ### Phase 21 + S6 Hardening + Linux Native + Intelligence Loop

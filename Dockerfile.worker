@@ -95,6 +95,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     clang \
     clang-tools \
+    gdb \
     lld \
     llvm \
     llvm-dev \

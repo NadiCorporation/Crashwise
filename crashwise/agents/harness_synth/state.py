@@ -128,6 +128,20 @@ class HarnessState(_StrictModel):
     """Structured feedback from the coverage analyzer; injected into the
     LLM prompt so the next harness iteration addresses stall conditions."""
 
+    # ── Operation Hydra Phase 2: ReAct loop state ────────────────────────────
+    crash_diagnosis: str = ""
+    """GDB backtrace and crash analysis from debug_engine when sanity gate
+    detects a crash. Fed back to the LLM for self-correction."""
+
+    usage_example: str = ""
+    """Code snippet from tests/examples showing how the target API is
+    properly called. Provides the LLM with a reference pattern."""
+
+    # ── Operation Hydra Phase 3: Type definitions ────────────────────────────
+    type_definitions: str = ""
+    """Extracted struct/typedef definitions for custom types used in the
+    selected entry point's signature. Gives the LLM exact field layouts."""
+
     # ── Terminal ─────────────────────────────────────────────────────────────
     done: bool = False
 
