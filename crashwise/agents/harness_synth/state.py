@@ -137,6 +137,11 @@ class HarnessState(_StrictModel):
     """Code snippet from tests/examples showing how the target API is
     properly called. Provides the LLM with a reference pattern."""
 
+    # ── Operation Hydra Phase 3: Type definitions ────────────────────────────
+    type_definitions: str = ""
+    """Extracted struct/typedef definitions for custom types used in the
+    selected entry point's signature. Gives the LLM exact field layouts."""
+
     # ── Terminal ─────────────────────────────────────────────────────────────
     done: bool = False
 

@@ -185,6 +185,8 @@ async def sanity_check(
         "-max_len=4096",
         "-print_final_stats=1",
         "-detect_leaks=0",
+        "-handle_segv=0",
+        "-handle_abrt=0",
     ]
 
     try:
