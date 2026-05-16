@@ -64,7 +64,7 @@ async def debug_crash(binary_path: Path, *, timeout: float = 10.0) -> CrashDiagn
     gdb_commands.write_text(
         f"set disable-randomization off\n"
         f"set pagination off\n"
-        f"run {seed_file} -max_total_time=2 -detect_leaks=0\n"
+        f"run {seed_file} -max_total_time=2 -detect_leaks=0 -handle_segv=0 -handle_abrt=0\n"
         f"backtrace 20\n"
         f"info registers\n"
         f"quit\n",

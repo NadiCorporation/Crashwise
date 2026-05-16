@@ -62,18 +62,32 @@ async def analyze_code(state: HarnessState) -> HarnessState:
 
     selected: EntryPoint | None = entry_points[0] if entry_points else None
 
+    # Operation Hydra Phase 3: Extract type definitions for the selected entry point.
+    type_defs = ""
+    if selected:
+        from crashwise.agents.harness_synth.type_extractor import extract_types_for_signature
+        # Walk up to find project root.
+        target_root = state.source_path.parent
+        for parent in state.source_path.parents:
+            if (parent / "include").is_dir() or (parent / "CMakeLists.txt").is_file():
+                target_root = parent
+                break
+        type_defs = extract_types_for_signature(target_root, selected.signature)
+
     log.info(
         "harness_synth.node.analyze.complete",
         source_chars=len(source_code),
         entry_points=len(entry_points),
         selected=selected.name if selected else None,
         selected_score=selected.score if selected else None,
+        type_defs_chars=len(type_defs),
     )
 
     state.source_code = source_code
     state.language = language
     state.entry_points = entry_points
     state.selected_entry_point = selected
+    state.type_definitions = type_defs
     return state
 
 
@@ -261,6 +275,29 @@ async def validate_harness(state: HarnessState) -> HarnessState:
         return state
 
     # Failure path.
+    # Operation Hydra Phase 3: The Linker Hand — auto-fix compilation errors.
+    from crashwise.agents.harness_synth.build_resolver import diagnose_compile_error
+    auto_fixes = diagnose_compile_error(result.stderr, target_root)
+    if auto_fixes:
+        log.info("harness_synth.node.validate.auto_fix", fixes=len(auto_fixes))
+        # Retry compilation with discovered paths.
+        retry_result = await compile_harness(
+            harness_path=state.harness_path,
+            workdir=state.workdir,
+            language=state.language,
+            extra_includes=extra_includes,
+            extra_args=extra_link_args + auto_fixes,
+        )
+        if retry_result.success:
+            state.last_compile = retry_result
+            # Still need to pass sanity gate.
+            if retry_result.binary_path:
+                sanity = await sanity_check(retry_result.binary_path)
+                if sanity.passed:
+                    state.done = True
+                    log.info("harness_synth.node.validate.auto_fix_success")
+                    return state
+
     summary = _summarise_stderr(result.stderr)
     state.error_history.append(summary)
     state.retry_count += 1
@@ -432,6 +469,18 @@ def _build_user_prompt(state: HarnessState) -> str:
             "Use this as a reference for proper initialization and calling convention.\n"
         )
 
+    # Operation Hydra Phase 3: Type definitions for custom types.
+    types_section = ""
+    if state.type_definitions.strip():
+        types_section = (
+            "\n## TYPE DEFINITIONS (from project headers)\n"
+            "These are the exact types used in the target function's signature:\n"
+            "```c\n"
+            f"{state.type_definitions}\n"
+            "```\n"
+            "Use these definitions to correctly allocate and initialize variables.\n"
+        )
+
     retry_section = ""
     if state.retry_count > 0 and state.last_compile is not None:
         # Show the *previous* (not current) errors so the LLM sees a trend.
@@ -455,7 +504,7 @@ def _build_user_prompt(state: HarnessState) -> str:
             profile_section=profile_section,
             source_code=_truncate_source(state.source_code),
             feedback_section=feedback_section,
-            retry_section=crash_section + usage_section + retry_section,
+            retry_section=types_section + crash_section + usage_section + retry_section,
         ).rstrip()
         + "\n"
     )
