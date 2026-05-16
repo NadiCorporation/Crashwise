@@ -2,10 +2,17 @@
 # Copyright (c) 2026 CrashWise Contributors
 """LLM client factory for the harness-synthesis agent.
 
-Resolves a chat model based on the ``CRASHWISE_LLM_MODEL`` setting.
-Supports Anthropic (``claude-*``) and OpenAI (``gpt-*``) out of the box.
-The factory is also a hook point for tests, which can override the chat
-model via :func:`set_chat_model_override`.
+Operation Hydra — Frontier Upgrade: Resilient Router.
+
+Supports:
+- Anthropic: claude-3-5-sonnet, claude-sonnet-4-5, claude-* (via ANTHROPIC_API_KEY)
+- OpenAI: gpt-4o, gpt-4o-mini, o1-*, gpt-* (via OPENAI_API_KEY)
+- NVIDIA NIM: any model via OPENAI_API_BASE=https://integrate.api.nvidia.com/v1
+- Custom OpenAI-compatible: vLLM, Together, Groq, Fireworks, Ollama (via OPENAI_API_BASE)
+
+Rate-limit resilience is handled at the call site (nodes.py) via
+exponential backoff. This module only constructs the client with
+appropriate timeouts and retry configuration.
 """
 
 from __future__ import annotations
@@ -22,13 +29,9 @@ log = get_logger(__name__)
 
 @runtime_checkable
 class ChatModelLike(Protocol):
-    """Subset of the LangChain chat-model API the agent actually uses.
+    """Subset of the LangChain chat-model API the agent actually uses."""
 
-    The signature is permissive (``*args, **kwargs``) so any real
-    LangChain ``BaseChatModel`` and any narrow test stub both satisfy it.
-    """
-
-    async def ainvoke(self, *args: Any, **kwargs: Any) -> AIMessage:  # pragma: no cover
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> AIMessage:
         ...
 
 
@@ -42,16 +45,18 @@ def set_chat_model_override(model: ChatModelLike | None) -> None:
 
 
 def get_chat_model() -> ChatModelLike:
-    """Return the configured chat model.
+    """Return the configured chat model with provider-specific optimizations.
 
     Resolution order:
-        1. :func:`set_chat_model_override` value (tests).
-        2. Anthropic if model name starts with ``claude``.
-        3. OpenAI otherwise.
+        1. Test override (set_chat_model_override).
+        2. Anthropic if model starts with 'claude'.
+        3. OpenAI/compatible for everything else.
 
-    The provider's API key MUST be set in ``.env`` (or env vars) for live
-    usage. We do not crash here on missing keys — the LLM call itself will
-    surface a clear error, which the agent's retry loop catches.
+    Provider detection:
+        - 'claude-*' → Anthropic (needs ANTHROPIC_API_KEY)
+        - 'gpt-*', 'o1-*' → OpenAI native (needs OPENAI_API_KEY)
+        - Anything else + OPENAI_API_BASE set → OpenAI-compatible endpoint
+        - Anything else without base → OpenAI (assumes custom model name)
     """
     if _OVERRIDE is not None:
         return _OVERRIDE
@@ -60,37 +65,84 @@ def get_chat_model() -> ChatModelLike:
     model_name = settings.crashwise_llm_model
     temperature = settings.crashwise_llm_temperature
 
+    provider = _detect_provider(model_name, settings)
+
     log.info(
         "harness_synth.llm.resolve",
         model=model_name,
         temperature=temperature,
+        provider=provider,
     )
 
-    if model_name.lower().startswith("claude"):
-        from langchain_anthropic import ChatAnthropic
+    if provider == "anthropic":
+        return _build_anthropic(model_name, temperature, settings)
+    else:
+        return _build_openai(model_name, temperature, settings, provider)
 
-        anthropic_key = (
-            settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
-        )
-        return ChatAnthropic(
-            model=model_name,
-            temperature=temperature,
-            api_key=anthropic_key,
-            timeout=120,
-            stop=None,
-        )
 
+def _detect_provider(model_name: str, settings: Any) -> str:
+    """Detect which provider to use based on model name and config."""
+    lower = model_name.lower()
+
+    if lower.startswith("claude"):
+        return "anthropic"
+
+    if lower.startswith(("gpt-", "o1-", "o3-")):
+        if settings.openai_api_base:
+            return "openai_custom"
+        return "openai"
+
+    # Non-standard model name — must be a custom endpoint.
+    if settings.openai_api_base:
+        return "openai_compatible"
+
+    # Fallback: try OpenAI native.
+    return "openai"
+
+
+def _build_anthropic(model_name: str, temperature: float, settings: Any) -> ChatModelLike:
+    """Build Anthropic client with frontier-model settings."""
+    from langchain_anthropic import ChatAnthropic
+
+    api_key = (
+        settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
+    )
+
+    return ChatAnthropic(
+        model=model_name,
+        temperature=temperature,
+        api_key=api_key,
+        timeout=180,
+        max_retries=2,
+        stop=None,
+        max_tokens=4096,
+    )
+
+
+def _build_openai(
+    model_name: str, temperature: float, settings: Any, provider: str
+) -> ChatModelLike:
+    """Build OpenAI/compatible client with appropriate settings."""
     from langchain_openai import ChatOpenAI
 
-    openai_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
+    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
+
     kwargs: dict[str, Any] = {
         "model": model_name,
         "temperature": temperature,
-        "api_key": openai_key,
-        "timeout": 120,
+        "api_key": api_key,
+        "timeout": 180,
+        "max_retries": 2,
     }
+
+    # Custom base URL for NVIDIA NIM, Together, Groq, vLLM, etc.
     if settings.openai_api_base:
         kwargs["base_url"] = settings.openai_api_base
+
+    # Frontier models support larger context.
+    if model_name.startswith(("gpt-4o", "gpt-4-turbo")):
+        kwargs["max_tokens"] = 4096
+
     return ChatOpenAI(**kwargs)
 
 
