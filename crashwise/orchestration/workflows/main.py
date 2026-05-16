@@ -660,7 +660,6 @@ class MainFuzzingWorkflow:
                 {
                     "campaign_id": payload.campaign_id,
                     "status": final_status,
-                    "run_count": campaign.iteration,
                 },
                 start_to_close_timeout=timedelta(seconds=10),
             )

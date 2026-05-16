@@ -19,12 +19,9 @@ async def update_campaign_status(payload: dict) -> None:
 
     campaign_id = payload["campaign_id"]
     status = payload["status"]
-    run_count = payload.get("run_count")
 
     async with get_session() as session:
         stmt = update(Campaign).where(Campaign.id == UUID(campaign_id)).values(status=status)
-        if run_count is not None:
-            stmt = stmt.values(run_count=run_count)
         await session.execute(stmt)
         await session.commit()
 
