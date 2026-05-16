@@ -42,6 +42,7 @@ async def compile_harness(
     extra_args: Sequence[str] = (),
     extra_includes: Sequence[Path] = (),
     timeout_seconds: float = 60.0,
+    engine: str = "libfuzzer",
 ) -> CompileResult:
     """Compile ``harness_path`` to ``<workdir>/harness.out``.
 
@@ -49,20 +50,33 @@ async def compile_harness(
     structured data, not exceptions, so the LangGraph retry loop can act on
     them.
     """
-    compiler = _resolve_compiler(language)
+    # Engine-aware compiler and sanitizer selection.
+    if engine == "aflpp":
+        # AFL++ mode: use afl-clang-fast, no -fsanitize=fuzzer, static link.
+        compiler = shutil.which("afl-clang-fast") or _resolve_compiler(language)
+        san_list = [s for s in sanitizers if s != "fuzzer"]
+        sanitizer_flag = f"-fsanitize={','.join(san_list)}" if san_list else ""
+    else:
+        compiler = _resolve_compiler(language)
+        sanitizer_flag = "-fsanitize=" + ",".join(sanitizers)
+
     output = workdir / "harness.out"
     workdir.mkdir(parents=True, exist_ok=True)
-
-    sanitizer_flag = "-fsanitize=" + ",".join(sanitizers)
     cmd: list[str] = [
         compiler,
         "-O1",
         "-g",
-        sanitizer_flag,
+    ]
+    if sanitizer_flag:
+        cmd.append(sanitizer_flag)
+    # AFL++ mode: static link for cross-container portability.
+    if engine == "aflpp":
+        cmd.append("-static")
+    cmd.extend([
         str(harness_path),
         "-o",
         str(output),
-    ]
+    ])
     for inc in extra_includes:
         cmd.extend(["-I", str(inc)])
     cmd.extend(extra_args)

@@ -30,6 +30,7 @@ from crashwise.agents.harness_synth.prompts import (
     RETRY_SECTION_TEMPLATE,
     SIMPLIFY_NOTE,
     SYSTEM_PROMPT,
+    SYSTEM_PROMPT_AFLPP,
     USER_PROMPT_TEMPLATE,
 )
 from crashwise.agents.harness_synth.state import EntryPoint, HarnessState
@@ -115,7 +116,7 @@ async def generate_harness(state: HarnessState) -> HarnessState:
     chat: ChatModelLike = get_chat_model()
     user_prompt = _build_user_prompt(state)
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=SYSTEM_PROMPT_AFLPP if state.engine == "aflpp" else SYSTEM_PROMPT),
         HumanMessage(content=user_prompt),
     ]
 
@@ -207,7 +208,8 @@ async def validate_harness(state: HarnessState) -> HarnessState:
             extra_includes.append(inc)
 
     result = await compile_harness(
-        harness_path=state.harness_path,
+        engine=state.engine,
+            harness_path=state.harness_path,
         workdir=state.workdir,
         language=state.language,
         extra_includes=extra_includes,
@@ -266,7 +268,8 @@ async def validate_harness(state: HarnessState) -> HarnessState:
                     await _apply_fallback(state, reason="sanity check failed after max retries")
                     if state.harness_path is not None:
                         final_result = await compile_harness(
-                            harness_path=state.harness_path,
+                            engine=state.engine,
+            harness_path=state.harness_path,
                             workdir=state.workdir,
                             language=state.language,
                             extra_includes=extra_includes,
@@ -292,6 +295,7 @@ async def validate_harness(state: HarnessState) -> HarnessState:
         log.info("harness_synth.node.validate.auto_fix", fixes=len(auto_fixes))
         # Retry compilation with discovered paths.
         retry_result = await compile_harness(
+            engine=state.engine,
             harness_path=state.harness_path,
             workdir=state.workdir,
             language=state.language,
@@ -325,7 +329,8 @@ async def validate_harness(state: HarnessState) -> HarnessState:
         await _apply_fallback(state, reason="max retries exceeded")
         if state.harness_path is not None:
             final_result = await compile_harness(
-                harness_path=state.harness_path,
+                engine=state.engine,
+            harness_path=state.harness_path,
                 workdir=state.workdir,
                 language=state.language,
                 extra_includes=extra_includes,
