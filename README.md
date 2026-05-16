@@ -6,7 +6,6 @@
 <p align="center">
   <h1 align="center">CrashWise</h1>
   <p align="center"><strong>Autonomous vulnerability discovery for C/C++ targets.</strong></p>
-  <p align="center">Point it at a repo. It finds the bugs.</p>
 </p>
 
 <p align="center">
