@@ -135,6 +135,9 @@ async def _real_execute(
         timeout_seconds=payload.timeout_seconds,
         cpu_limit=2.0,
         memory_limit_mb=2048,
+        # Source-based coverage: write profraw to /tmp so extract_coverage_data
+        # can retrieve it and llvm-cov can produce line-level hit/miss data.
+        env_vars={"LLVM_PROFILE_FILE": "/tmp/default.profraw"},
     )
 
     mgr = DockerManager()

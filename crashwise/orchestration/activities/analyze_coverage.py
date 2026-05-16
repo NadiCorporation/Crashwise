@@ -21,7 +21,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 from temporalio import activity
 
-from crashwise.agents.research.coverage_analyzer import analyze_coverage
+from crashwise.agents.research.coverage_analyzer import analyze_coverage, generate_dictionary
 from crashwise.core.logging import get_logger
 from crashwise.core.models import CoverageAnalysis
 
@@ -79,10 +79,31 @@ async def analyze_coverage_activity(
                 error=str(exc),
             )
 
-    return await analyze_coverage(
+    analysis = await analyze_coverage(
         source_path=payload.source_path,
         coverage_data=coverage_text,
     )
+
+    # Generate a fuzzer dictionary from identified blockers and source literals.
+    # This feeds the MAB arm that passes -dict=custom.dict to libFuzzer/AFL++.
+    if analysis.blockers:
+        dict_content = generate_dictionary(payload.source_path, analysis.blockers)
+        if dict_content:
+            dict_path = payload.source_path.parent / "custom.dict"
+            try:
+                dict_path.write_text(dict_content, encoding="utf-8")
+                log.info(
+                    "analyze_coverage_activity.dict_written",
+                    path=str(dict_path),
+                    tokens=dict_content.count("\n") - 1,
+                )
+            except OSError as exc:
+                log.warning(
+                    "analyze_coverage_activity.dict_write_failed",
+                    error=str(exc),
+                )
+
+    return analysis
 
 
 __all__ = ["AnalyzeCoverageInput", "analyze_coverage_activity"]
