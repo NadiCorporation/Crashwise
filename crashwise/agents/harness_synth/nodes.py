@@ -30,6 +30,7 @@ from crashwise.agents.harness_synth.prompts import (
     RETRY_SECTION_TEMPLATE,
     SIMPLIFY_NOTE,
     SYSTEM_PROMPT,
+    SYSTEM_PROMPT_AFLPP,
     USER_PROMPT_TEMPLATE,
 )
 from crashwise.agents.harness_synth.state import EntryPoint, HarnessState
@@ -115,16 +116,14 @@ async def generate_harness(state: HarnessState) -> HarnessState:
     chat: ChatModelLike = get_chat_model()
     user_prompt = _build_user_prompt(state)
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=SYSTEM_PROMPT_AFLPP if state.engine == "aflpp" else SYSTEM_PROMPT),
         HumanMessage(content=user_prompt),
     ]
 
     try:
-        response = await chat.ainvoke(messages)
+        response = await _invoke_with_backoff(chat, messages)
     except Exception as exc:
         log.warning("harness_synth.node.generate.llm_error", error=str(exc))
-        # Drop straight into fallback path; ValidateHarness will see the
-        # simplified harness and either succeed or terminate the loop.
         return await _apply_fallback(state, reason=f"LLM call failed: {exc}")
 
     code = _extract_code_block(_message_text(response))
@@ -209,7 +208,8 @@ async def validate_harness(state: HarnessState) -> HarnessState:
             extra_includes.append(inc)
 
     result = await compile_harness(
-        harness_path=state.harness_path,
+        engine=state.engine,
+            harness_path=state.harness_path,
         workdir=state.workdir,
         language=state.language,
         extra_includes=extra_includes,
@@ -268,7 +268,8 @@ async def validate_harness(state: HarnessState) -> HarnessState:
                     await _apply_fallback(state, reason="sanity check failed after max retries")
                     if state.harness_path is not None:
                         final_result = await compile_harness(
-                            harness_path=state.harness_path,
+                            engine=state.engine,
+            harness_path=state.harness_path,
                             workdir=state.workdir,
                             language=state.language,
                             extra_includes=extra_includes,
@@ -294,6 +295,7 @@ async def validate_harness(state: HarnessState) -> HarnessState:
         log.info("harness_synth.node.validate.auto_fix", fixes=len(auto_fixes))
         # Retry compilation with discovered paths.
         retry_result = await compile_harness(
+            engine=state.engine,
             harness_path=state.harness_path,
             workdir=state.workdir,
             language=state.language,
@@ -327,7 +329,8 @@ async def validate_harness(state: HarnessState) -> HarnessState:
         await _apply_fallback(state, reason="max retries exceeded")
         if state.harness_path is not None:
             final_result = await compile_harness(
-                harness_path=state.harness_path,
+                engine=state.engine,
+            harness_path=state.harness_path,
                 workdir=state.workdir,
                 language=state.language,
                 extra_includes=extra_includes,
@@ -347,6 +350,67 @@ def should_retry(state: HarnessState) -> str:
 
 
 # ── Internals ────────────────────────────────────────────────────────────────
+
+# ── Rate-Limit Resilient LLM Invocation (Operation Hydra Frontier Upgrade) ──
+
+_RATE_LIMIT_MAX_RETRIES = 5
+_RATE_LIMIT_BASE_DELAY = 2.0  # seconds
+_RATE_LIMIT_MAX_DELAY = 60.0  # seconds
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Detect rate-limit / quota errors from any provider."""
+    msg = str(exc).lower()
+    # HTTP 429 (Too Many Requests)
+    if "429" in msg or "rate" in msg or "quota" in msg:
+        return True
+    # Anthropic-specific
+    if "overloaded" in msg or "rate_limit" in msg:
+        return True
+    # OpenAI-specific
+    if "tokens per min" in msg or "requests per min" in msg:
+        return True
+    # Timeout (treat as transient — API may be overloaded)
+    if "timed out" in msg or "timeout" in msg:
+        return True
+    return False
+
+
+async def _invoke_with_backoff(chat: "ChatModelLike", messages: list) -> "AIMessage":
+    """Invoke the LLM with exponential backoff on rate-limit errors.
+
+    This ensures transient API blocks (429, quota, timeout) don't consume
+    the harness synthesis retry budget. The LangGraph loop's 3-life budget
+    is reserved for actual code-quality failures, not API throttling.
+    """
+    import asyncio
+    import random
+
+    last_exc: Exception | None = None
+
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES):
+        try:
+            return await chat.ainvoke(messages)
+        except Exception as exc:
+            if not _is_rate_limit_error(exc):
+                raise  # Not a rate limit — propagate immediately.
+
+            last_exc = exc
+            delay = min(
+                _RATE_LIMIT_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1),
+                _RATE_LIMIT_MAX_DELAY,
+            )
+            log.warning(
+                "harness_synth.llm.rate_limited",
+                attempt=attempt + 1,
+                max_retries=_RATE_LIMIT_MAX_RETRIES,
+                delay_seconds=round(delay, 1),
+                error=str(exc)[:100],
+            )
+            await asyncio.sleep(delay)
+
+    # All retries exhausted — raise the last error.
+    raise last_exc or RuntimeError("LLM invocation failed after rate-limit retries")
 
 def _check_target_redefinition(harness_code: str, source_path: Path) -> str | None:
     """Detect if the LLM redefined target functions (anti-hallucination).

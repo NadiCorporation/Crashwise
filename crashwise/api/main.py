@@ -138,6 +138,9 @@ async def lifespan(app: FastAPI) -> Any:
     configure_logging()
     log.info("api.startup")
     await init_db()
+    # Initialize web control plane DB (Operation Hydra).
+    from crashwise.web.app import _startup as web_startup
+    await web_startup()
     yield
     await close_db()
     log.info("api.shutdown")
@@ -146,9 +149,13 @@ async def lifespan(app: FastAPI) -> Any:
 app = FastAPI(
     title="CrashWise API",
     description="Management interface for autonomous fuzzing campaigns",
-    version="0.1.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
+
+# Mount the web control plane (Operation Hydra Phase 5/6).
+from crashwise.web.app import app as web_app
+app.mount("/api/v1", web_app)
 
 
 # ── Dependency ───────────────────────────────────────────────────────────────
@@ -241,6 +248,47 @@ async def get_campaign(campaign_id: UUID) -> dict[str, Any]:
                 for s in campaign.seeds
             ],
         }
+
+
+@app.delete(
+    "/campaigns/{campaign_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["campaigns"],
+)
+async def delete_campaign(campaign_id: UUID) -> Response:
+    """Delete a single campaign and all its runs/seeds/crashes."""
+    from sqlalchemy import delete as sa_delete
+
+    async with get_session() as session:
+        campaign = await get_campaign_by_id(session, campaign_id)
+        if campaign is None:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        await session.delete(campaign)
+        await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.delete(
+    "/campaigns",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["campaigns"],
+)
+async def delete_all_campaigns(status_filter: str | None = None) -> Response:
+    """Delete campaigns. Optional filter: ?status_filter=pending,failed"""
+    from sqlalchemy import delete as sa_delete, select
+
+    async with get_session() as session:
+        if status_filter:
+            statuses = [s.strip() for s in status_filter.split(",")]
+            campaigns = (await session.execute(
+                select(Campaign).where(Campaign.status.in_(statuses))
+            )).scalars().all()
+        else:
+            campaigns = (await session.execute(select(Campaign))).scalars().all()
+        for c in campaigns:
+            await session.delete(c)
+        await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get(

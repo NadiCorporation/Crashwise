@@ -102,6 +102,8 @@ class HarnessState(_StrictModel):
     source_code: str = ""
     language: str = "cpp"
     workdir: Path
+    engine: str = "libfuzzer"
+    """Fuzzer engine: 'libfuzzer' or 'aflpp'. Determines harness format."""
 
     # ── Analysis ─────────────────────────────────────────────────────────────
     entry_points: list[EntryPoint] = Field(default_factory=list)

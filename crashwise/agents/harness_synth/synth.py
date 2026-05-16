@@ -47,6 +47,7 @@ async def synthesize_harness(
     max_retries: int = 4,
     feedback: str = "",
     usage_example: str = "",
+    engine: str = "libfuzzer",
 ) -> HarnessSynthesisResult:
     """Run the LangGraph harness-synthesis agent against ``source_path``.
 
@@ -67,6 +68,8 @@ async def synthesize_harness(
     usage_example:
         Code snippet from tests/examples showing how the target API is
         properly called. Provides the LLM with a reference pattern.
+    engine:
+        Fuzzer engine: 'libfuzzer' or 'aflpp'. Determines harness format.
     """
     if not source_path.is_absolute():
         source_path = source_path.resolve()
@@ -79,6 +82,7 @@ async def synthesize_harness(
         max_retries=max_retries,
         feedback=feedback,
         usage_example=usage_example,
+        engine=engine,
     )
     log.info(
         "harness_synth.synthesize.start",

@@ -264,6 +264,21 @@ async def _persist_crashes(
                 session.add(crash)
                 persisted += 1
 
+                # Operation Hydra Phase 5: Persist to web control plane.
+                try:
+                    from crashwise.web.hooks import persist_crash_to_web
+                    await persist_crash_to_web(
+                        campaign_id=campaign_id,
+                        crash_type=result.bug_type.value,
+                        crash_state=f"{report.crash_file}:{report.stack_frames[0] if report.stack_frames else 'unknown'}",
+                        severity=result.severity.value,
+                        sanitizer_log="\n".join(str(f) for f in report.stack_frames),
+                        gdb_backtrace="",
+                        reproducer_path=str(report.crash_file) if report.crash_file else "",
+                    )
+                except Exception:
+                    pass  # Non-fatal — web DB may not be available.
+
             await session.commit()
             if persisted > 0:
                 await incr_crash_counter(campaign_id, count=persisted)
