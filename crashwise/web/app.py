@@ -37,7 +37,6 @@ _session_factory: async_sessionmaker | None = None
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
-@app.on_event("startup")
 async def _startup():
     global _engine, _session_factory
     settings = get_settings()
@@ -48,14 +47,14 @@ async def _startup():
     log.info("web.startup", database=settings.database_url)
 
 
-@app.on_event("shutdown")
 async def _shutdown():
     if _engine:
         await _engine.dispose()
 
 
 def _get_session() -> AsyncSession:
-    assert _session_factory is not None
+    if _session_factory is None:
+        raise RuntimeError("Web DB not initialized. Call _startup() first.")
     return _session_factory()
 
 
@@ -91,7 +90,7 @@ class CrashResponse(BaseModel):
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@app.post("/api/v1/campaigns/start", response_model=CampaignResponse)
+@app.post("/campaigns/start", response_model=CampaignResponse)
 async def start_campaign(req: CampaignStartRequest):
     """Launch a new fuzzing campaign."""
     async with _get_session() as session:
@@ -119,7 +118,7 @@ async def start_campaign(req: CampaignStartRequest):
         )
 
 
-@app.get("/api/v1/campaigns", response_model=list[CampaignResponse])
+@app.get("/campaigns", response_model=list[CampaignResponse])
 async def list_campaigns():
     """List all campaigns ordered by most recent."""
     async with _get_session() as session:
@@ -142,7 +141,7 @@ async def list_campaigns():
         ]
 
 
-@app.get("/api/v1/crashes", response_model=list[CrashResponse])
+@app.get("/crashes", response_model=list[CrashResponse])
 async def list_crashes(campaign_id: str | None = None):
     """Return deduplicated crash groups sorted by severity and recency."""
     async with _get_session() as session:
@@ -189,7 +188,7 @@ def update_telemetry(data: dict[str, Any]) -> None:
     _telemetry["timestamp"] = datetime.utcnow().isoformat()
 
 
-@app.get("/api/v1/telemetry/stream")
+@app.get("/telemetry/stream")
 async def telemetry_stream():
     """Server-Sent Events stream of real-time fuzzing statistics."""
 
