@@ -35,7 +35,7 @@ export default function DashboardPage() {
   const sendSignal = async (workflowId: string, signal: string, payload?: unknown) => {
     setSignalResult("Sending...");
     try {
-      const resp = await fetch(`/api/v1/campaigns/signal`, {
+      const resp = await fetch(`/campaigns/signal`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workflow_id: workflowId, signal, payload }),

@@ -313,24 +313,26 @@ with tabs[3]:
         p1, p2 = st.columns(2)
         with p1:
             if st.button("⏸️ PAUSE CAMPAIGN", use_container_width=True, type="primary"):
-                from crashwise.orchestration.client import connect as temporal_connect
-                try:
-                    client = asyncio.run(temporal_connect())
-                    handle = client.get_workflow_handle(workflow_id)
-                    asyncio.run(handle.signal("pause_hunt", True))
+                result = api_post("/campaigns/signal", {
+                    "workflow_id": workflow_id,
+                    "signal": "pause_hunt",
+                    "payload": True,
+                })
+                if result and result.get("ok"):
                     st.success(f"Signal sent: pause_hunt → {workflow_id[:30]}…")
-                except Exception as e:
-                    st.error(f"Signal failed: {e}")
+                else:
+                    st.error(f"Signal failed: {result}")
         with p2:
             if st.button("▶️ RESUME CAMPAIGN", use_container_width=True):
-                from crashwise.orchestration.client import connect as temporal_connect
-                try:
-                    client = asyncio.run(temporal_connect())
-                    handle = client.get_workflow_handle(workflow_id)
-                    asyncio.run(handle.signal("pause_hunt", False))
+                result = api_post("/campaigns/signal", {
+                    "workflow_id": workflow_id,
+                    "signal": "pause_hunt",
+                    "payload": False,
+                })
+                if result and result.get("ok"):
                     st.success(f"Signal sent: resume → {workflow_id[:30]}…")
-                except Exception as e:
-                    st.error(f"Signal failed: {e}")
+                else:
+                    st.error(f"Signal failed: {result}")
 
         st.markdown("---")
 
@@ -338,14 +340,15 @@ with tabs[3]:
         st.markdown("### 🔀 Force Strategy Pivot")
         pivot_reason = st.text_input("Reason", value="operator override", key="pivot_reason")
         if st.button("🔀 FORCE PIVOT", use_container_width=True):
-            from crashwise.orchestration.client import connect as temporal_connect
-            try:
-                client = asyncio.run(temporal_connect())
-                handle = client.get_workflow_handle(workflow_id)
-                asyncio.run(handle.signal("force_pivot", pivot_reason))
+            result = api_post("/campaigns/signal", {
+                "workflow_id": workflow_id,
+                "signal": "force_pivot",
+                "payload": pivot_reason,
+            })
+            if result and result.get("ok"):
                 st.success(f"Signal sent: force_pivot ({pivot_reason})")
-            except Exception as e:
-                st.error(f"Signal failed: {e}")
+            else:
+                st.error(f"Signal failed: {result}")
 
         st.markdown("---")
 
@@ -357,30 +360,34 @@ with tabs[3]:
             key="seed_upload",
         )
         if uploaded and st.button("💉 INJECT INTO CORPUS", use_container_width=True):
-            from crashwise.orchestration.client import connect as temporal_connect
             raw_b64 = base64.b64encode(uploaded.read()).decode("ascii")
-            try:
-                client = asyncio.run(temporal_connect())
-                handle = client.get_workflow_handle(workflow_id)
-                asyncio.run(handle.signal("inject_seed", {
-                    "filename": uploaded.name,
-                    "data_b64": raw_b64,
-                }))
+            result = api_post("/campaigns/signal", {
+                "workflow_id": workflow_id,
+                "signal": "inject_seed",
+                "payload": {"filename": uploaded.name, "data_b64": raw_b64},
+            })
+            if result and result.get("ok"):
                 st.success(f"Seed injected: {uploaded.name} ({len(raw_b64)} b64 chars)")
-            except Exception as e:
-                st.error(f"Injection failed: {e}")
+            else:
+                st.error(f"Injection failed: {result}")
 
         st.markdown("---")
 
         # ── WORKFLOW QUERY ────────────────────────────────────────────────
         st.markdown("### 📊 Workflow State Query")
         if st.button("Query signal_status", key="query_status"):
-            from crashwise.orchestration.client import connect as temporal_connect
+            # Query goes through Temporal directly since there's no REST endpoint for queries.
+            # Use nest_asyncio to handle Streamlit's event loop.
             try:
+                import nest_asyncio
+                nest_asyncio.apply()
+                from crashwise.orchestration.client import connect as temporal_connect
                 client = asyncio.run(temporal_connect())
                 handle = client.get_workflow_handle(workflow_id)
                 result = asyncio.run(handle.query("signal_status"))
                 st.json(result)
+            except ImportError:
+                st.warning("Install `nest_asyncio` for workflow queries: `pip install nest_asyncio`")
             except Exception as e:
                 st.error(f"Query failed: {e}")
 
