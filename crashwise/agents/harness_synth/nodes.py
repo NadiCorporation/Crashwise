@@ -66,13 +66,25 @@ async def analyze_code(state: HarnessState) -> HarnessState:
     type_defs = ""
     if selected:
         from crashwise.agents.harness_synth.type_extractor import extract_types_for_signature
-        # Walk up to find project root.
         target_root = state.source_path.parent
         for parent in state.source_path.parents:
             if (parent / "include").is_dir() or (parent / "CMakeLists.txt").is_file():
                 target_root = parent
                 break
         type_defs = extract_types_for_signature(target_root, selected.signature)
+    elif source_code:
+        # No entry point selected — extract types from all function signatures in the file.
+        from crashwise.agents.harness_synth.type_extractor import extract_types_for_signature
+        import re as _re
+        target_root = state.source_path.parent
+        for parent in state.source_path.parents:
+            if (parent / "include").is_dir() or (parent / "CMakeLists.txt").is_file():
+                target_root = parent
+                break
+        # Find all function signatures in the source.
+        func_sigs = _re.findall(r"^\w[\w\s\*]*\s+\w+\s*\([^)]+\)", source_code[:8000], _re.MULTILINE)
+        combined_sig = " ".join(func_sigs[:5])
+        type_defs = extract_types_for_signature(target_root, combined_sig)
 
     log.info(
         "harness_synth.node.analyze.complete",
