@@ -233,7 +233,12 @@ async def _build_target(workdir: Path, sanitizers: str) -> None:
     # Construct sanitizer flags.
     san_flags = f"-fsanitize={sanitizers}" if sanitizers else ""
     cov_flags = "-fsanitize-coverage=trace-pc-guard,trace-cmp"
-    common_flags = f"-g -O1 {san_flags} {cov_flags} -fno-omit-frame-pointer"
+    # Source-based coverage: produces default.profraw at runtime so llvm-cov
+    # can generate line-level hit/miss data for ALL fuzzer types (including
+    # AFL++). This closes the gap where AFL++ campaigns were permanently
+    # stuck using the low-confidence static regex fallback.
+    source_cov_flags = "-fprofile-instr-generate -fcoverage-mapping"
+    common_flags = f"-g -O1 {san_flags} {cov_flags} {source_cov_flags} -fno-omit-frame-pointer"
 
     # Environment: inject instrumentation into whatever build system runs.
     env = {
@@ -245,6 +250,8 @@ async def _build_target(workdir: Path, sanitizers: str) -> None:
         # AFL++ compatibility.
         "AFL_CC": "clang",
         "AFL_CXX": "clang++",
+        # Source-based coverage output path (consumed by _collect_coverage_data).
+        "LLVM_PROFILE_FILE": "default.profraw",
     }
 
     build_cmd = profile.build_command
