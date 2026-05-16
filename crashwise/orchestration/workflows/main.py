@@ -351,6 +351,7 @@ class MainFuzzingWorkflow:
                 target_branch=payload.target_branch,
                 sanitizers=payload.sanitizers,
                 synthesize_harness=payload.harness_path is None,
+                fuzzer_type=payload.fuzzer_type.value,
             ),
             result_type=SetupTargetOutput,
             start_to_close_timeout=timedelta(minutes=10),
