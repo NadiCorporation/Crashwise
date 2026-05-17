@@ -102,6 +102,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libclang-rt-14-dev \
     gcc \
     g++ \
+    # Common target build dependencies
+    zlib1g-dev \
+    liblzma-dev \
+    libbz2-dev \
+    libssl-dev \
+    libxml2-dev \
     # Version control
     git \
     # Python runtime
