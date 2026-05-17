@@ -125,6 +125,15 @@ async def _real_execute(
     corpus_dir = payload.corpus_dir or (payload.workdir / "corpus")
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
+    # Guard: if harness_path doesn't exist or is a directory, we can't fuzz.
+    if not harness_path.is_file():
+        from temporalio.exceptions import ApplicationError
+
+        raise ApplicationError(
+            f"NoHarnessBinary: harness not found or not a file: {harness_path}",
+            non_retryable=True,
+        )
+
     job = FuzzJob(
         job_id=job_id,
         backend=ExecutionBackend.DOCKER,

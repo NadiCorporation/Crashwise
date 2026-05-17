@@ -202,10 +202,18 @@ async def validate_harness(state: HarnessState) -> HarnessState:
         if "CMakeFiles" not in str(lib) and "test" not in str(lib).lower():
             extra_link_args.append(str(lib))
     # Add common include dirs.
-    for subdir in ("include", "src", "build"):
+    for subdir in ("include", "src", "build", "lib", "libarchive"):
         inc = target_root / subdir
         if inc.is_dir():
             extra_includes.append(inc)
+    # Auto-discover directories containing public headers.
+    for h in target_root.glob("*/*.h"):
+        hdir = h.parent
+        if hdir not in extra_includes and "CMakeFiles" not in str(hdir):
+            extra_includes.append(hdir)
+    # Define HAVE_CONFIG_H if config.h exists (common for autotools/cmake projects).
+    if any((target_root / d / "config.h").exists() for d in ("build", ".")):
+        extra_link_args.append("-DHAVE_CONFIG_H")
 
     result = await compile_harness(
         engine=state.engine,

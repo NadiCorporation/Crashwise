@@ -238,7 +238,7 @@ async def _build_target(workdir: Path, sanitizers: str) -> None:
     # AFL++). This closes the gap where AFL++ campaigns were permanently
     # stuck using the low-confidence static regex fallback.
     source_cov_flags = "-fprofile-instr-generate -fcoverage-mapping"
-    common_flags = f"-g -O1 {san_flags} {cov_flags} {source_cov_flags} -fno-omit-frame-pointer"
+    common_flags = f"-g -O1 {san_flags} {cov_flags} {source_cov_flags} -fno-omit-frame-pointer -Wno-error"
 
     # Environment: inject instrumentation into whatever build system runs.
     env = {
@@ -255,6 +255,18 @@ async def _build_target(workdir: Path, sanitizers: str) -> None:
     }
 
     build_cmd = profile.build_command
+
+    # For CMake projects, disable -Werror and inject our instrumentation flags.
+    if profile.build_system == "cmake":
+        cmake_flags = common_flags.replace('"', '\\"')
+        build_cmd = (
+            # Strip -Werror from CMakeLists.txt to prevent warnings-as-errors.
+            "find . -name CMakeLists.txt -exec sed -i 's/-Werror//g' {} + && "
+            + build_cmd.replace(
+                "cmake -B",
+                f'cmake -DCMAKE_C_FLAGS="{cmake_flags}" -DCMAKE_CXX_FLAGS="{cmake_flags}" -B',
+            )
+        )
     log.info(
         "setup_target.build.start",
         system=profile.build_system,
@@ -452,6 +464,11 @@ async def _compile_harness(
         candidate = workdir / subdir
         if candidate.is_dir():
             include_dirs.add(candidate)
+    # Auto-discover directories containing headers.
+    for h in workdir.glob("*/*.h"):
+        hdir = h.parent
+        if "CMakeFiles" not in str(hdir):
+            include_dirs.add(hdir)
 
     # Discover static libraries (.a) and object files to link against.
     link_libs: list[str] = []
