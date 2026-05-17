@@ -94,11 +94,7 @@ export default function DashboardPage() {
                 Execution State
               </h2>
               {running.map((c) => (
-                <div key={c.id} className="border border-border rounded-lg p-4 bg-muted font-mono text-xs space-y-1">
-                  <div><span className="text-accent-green">●</span> Workflow: crashwise-campaign-{c.id.slice(0, 8)}…</div>
-                  <div><span className="text-accent-orange">●</span> Stage: EXECUTING (iteration {c.run_count})</div>
-                  <div><span className="text-accent-blue">●</span> Target: {c.target_name}</div>
-                </div>
+                <ExecutionState key={c.id} campaign={c} />
               ))}
             </section>
           )}
@@ -160,6 +156,68 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+function ExecutionState({ campaign }: { campaign: Campaign }) {
+  const [state, setState] = useState<any>(null);
+
+  useEffect(() => {
+    const poll = () => {
+      fetch(`/campaigns/${campaign.id}/state`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then(setState)
+        .catch(() => setState(null));
+    };
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
+  }, [campaign.id]);
+
+  const STAGE_DESC: Record<string, string> = {
+    pending: "Initializing workflow…",
+    seeding: "seed_corpus → harvesting test vectors",
+    setup: "setup_target → clone + build + harness synthesis",
+    executing: "execute_fuzzing → Docker container running",
+    triage: "triage_results → crash classification + dedup",
+    completed: "Workflow complete",
+    failed: "Workflow failed",
+  };
+
+  const STAGE_COLOR: Record<string, string> = {
+    pending: "text-muted-foreground",
+    seeding: "text-accent-orange",
+    setup: "text-accent-orange",
+    executing: "text-accent-green",
+    triage: "text-accent-orange",
+    completed: "text-accent-green",
+    failed: "text-accent-red",
+  };
+
+  const stage = state?.stage ?? "pending";
+
+  return (
+    <div className="border border-border rounded-lg p-4 bg-muted font-mono text-[11px] space-y-1 mb-2">
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`w-2 h-2 rounded-full ${stage === "executing" ? "bg-accent-green animate-pulse" : "bg-accent-orange"}`} />
+        <span className={`font-bold ${STAGE_COLOR[stage] ?? "text-foreground"}`}>
+          {STAGE_DESC[stage] ?? stage}
+        </span>
+      </div>
+      <div className="text-muted-foreground">Workflow: crashwise-campaign-{campaign.id.slice(0, 8)}…</div>
+      <div className="text-muted-foreground">Target: {campaign.target_name}</div>
+      {state && (
+        <div className="grid grid-cols-4 gap-x-4 mt-2 pt-2 border-t border-border">
+          <div>Iteration: <span className="text-foreground font-bold">{state.iteration ?? 0}</span></div>
+          <div>Pivots: <span className="text-accent-blue">{state.pivot_count ?? 0}</span></div>
+          <div>Evolutions: <span className="text-accent-orange">{state.evolution_count ?? 0}</span></div>
+          <div>Paused: <span className={state.paused ? "text-accent-red" : "text-accent-green"}>{state.paused ? "YES" : "NO"}</span></div>
+        </div>
+      )}
+      {state?.last_note && (
+        <div className="mt-1 text-muted-foreground truncate">Note: {state.last_note}</div>
       )}
     </div>
   );
