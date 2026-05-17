@@ -674,7 +674,9 @@ def run(
 
             result = asyncio.run(_await_result())
             console.print("[bold green]✓ Workflow complete![/]")
-            console.print(JSON(result.model_dump_json(indent=2)))
+            import json as _json
+            data = result.model_dump_json(indent=2) if hasattr(result, "model_dump_json") else _json.dumps(result, indent=2, default=str)
+            console.print(JSON(data))
         except TemporalConnectionError as exc:
             console.print(f"[bold red]Temporal connection failed:[/] {exc}")
             raise typer.Exit(code=1) from exc
