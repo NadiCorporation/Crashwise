@@ -21,11 +21,18 @@ from crashwise.orchestration.activities.evolve_harness import (
 )
 from crashwise.orchestration.activities.execute_fuzzing import execute_fuzzing
 from crashwise.orchestration.activities.execute_job import execute_job
+from crashwise.orchestration.activities.healing_activities import (
+    run_adaptive_build_activity,
+    run_autonomous_repair_activity,
+)
+from crashwise.orchestration.activities.hot_swap_harness import hot_swap_harness
 from crashwise.orchestration.activities.inject_seeds import inject_seeds
 from crashwise.orchestration.activities.kernel_monitor import kernel_monitor
 from crashwise.orchestration.activities.mutate_harness import mutate_harness
 from crashwise.orchestration.activities.notify_stakeholders import notify_stakeholders
-from crashwise.orchestration.activities.hot_swap_harness import hot_swap_harness
+from crashwise.orchestration.activities.persist_triaged_crash import (
+    persist_triaged_crash,
+)
 from crashwise.orchestration.activities.pivot_strategy import pivot_strategy
 from crashwise.orchestration.activities.profile_target import profile_target
 from crashwise.orchestration.activities.read_coverage_data import read_coverage_data
@@ -52,6 +59,7 @@ ALL_ACTIVITIES: list[Callable[..., Any]] = [
     analyze_crash,
     mutate_harness,
     triage_results,
+    persist_triaged_crash,
     kernel_monitor,
     apply_patch,
     build_patched,
@@ -66,6 +74,9 @@ ALL_ACTIVITIES: list[Callable[..., Any]] = [
     evolve_harness_activity,
     verify_poc,
     update_campaign_status,
+    # Phase 22 — CrashWise Healing Engine.
+    run_adaptive_build_activity,
+    run_autonomous_repair_activity,
 ]
 
 __all__ = [
@@ -78,15 +89,18 @@ __all__ = [
     "evolve_harness_activity",
     "execute_fuzzing",
     "execute_job",
+    "hot_swap_harness",
     "inject_seeds",
     "kernel_monitor",
     "mutate_harness",
-    "hot_swap_harness",
     "notify_stakeholders",
+    "persist_triaged_crash",
     "pivot_strategy",
     "profile_target",
     "read_coverage_data",
+    "run_adaptive_build_activity",
+    "run_autonomous_repair_activity",
     "update_verification_status",
-    "verify_with_seed",
     "verify_poc",
+    "verify_with_seed",
 ]
