@@ -56,10 +56,13 @@ class WorkflowStage(StrEnum):
     PENDING = "pending"
     SEEDING = "seeding"
     SETUP = "setup"
+    HEALING_BUILD = "healing_build"
     EXECUTING = "executing"
     TRIAGE = "triage"
+    HEALING_REPAIR = "healing_repair"
     COMPLETED = "completed"
     FAILED = "failed"
+    FAILED_COMPILATION = "failed_compilation"
 
 
 # ── Base ─────────────────────────────────────────────────────────────────────
@@ -136,6 +139,29 @@ class FuzzingInput(_StrictModel):
         ),
     )
 
+    # Phase 22 — CrashWise Healing Engine (openhands-sdk + LangGraph).
+    # When enabled, the workflow drives the adaptive build loop in place
+    # of the legacy ``setup_target`` activity and routes every unique
+    # crash through the autonomous repair agent before persistence.
+    enable_self_healing: bool = Field(
+        default=False,
+        description=(
+            "Phase 22 self-healing toggle — when True the workflow uses "
+            "``run_autonomous_repair_activity`` to attempt an automated "
+            "patch for each unique crash before persisting it."
+        ),
+    )
+    healing_max_attempts: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description=(
+            "Per-mission cap on LangGraph agent iterations inside the "
+            "healing engine. Mirrors ``DEFAULT_MAX_ATTEMPTS`` and bounds "
+            "API spend on stuck repairs."
+        ),
+    )
+
 
 class FuzzingOutput(_StrictModel):
     """Final output payload of :class:`MainFuzzingWorkflow`.
@@ -164,6 +190,40 @@ class FuzzingOutput(_StrictModel):
     started_at: datetime
     finished_at: datetime
     summary: str = Field(default="")
+
+    # Phase 22 — CrashWise Healing Engine telemetry.
+    total_patches_generated: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Number of unique crashes for which the autonomous repair "
+            "agent produced a verified patch during this campaign."
+        ),
+    )
+    build_attempts: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "LangGraph agent iterations consumed by the adaptive build "
+            "stage. Useful for tracking LLM spend across campaigns."
+        ),
+    )
+    build_succeeded: bool = Field(
+        default=True,
+        description=(
+            "False when the adaptive build activity returned "
+            "``is_successful=False`` and the campaign exited via "
+            "``WorkflowStage.FAILED_COMPILATION``."
+        ),
+    )
+    healing_workspace_path: str = Field(
+        default="",
+        description=(
+            "Absolute path of the openhands-sdk workspace that hosted "
+            "the build (and any subsequent repair) for this campaign. "
+            "Empty string when self-healing was disabled."
+        ),
+    )
 
     @classmethod
     def now(cls) -> datetime:
@@ -213,7 +273,9 @@ class ExecuteFuzzingOutput(_StrictModel):
     crash_count: int = Field(default=0, ge=0)
     executions: int = Field(default=0, ge=0, description="Total fuzzer iterations")
     duration_seconds: float = Field(default=0.0, ge=0.0)
-    coverage_edges: int = Field(default=0, ge=0, description="Edges discovered during this iteration")
+    coverage_edges: int = Field(
+        default=0, ge=0, description="Edges discovered during this iteration"
+    )
     coverage_data_path: Path | None = Field(
         default=None,
         description="Path to raw coverage data file (AFL plot_data or sancov output)",
@@ -243,6 +305,62 @@ class TriageInput(_StrictModel):
     crashes_dir: Path
     crash_count: int = Field(default=0, ge=0)
     campaign_id: str | None = Field(default=None, max_length=36)
+    defer_persistence: bool = Field(
+        default=False,
+        description=(
+            "When True the activity classifies + deduplicates crashes "
+            "but skips its inline DB write. The workflow takes over "
+            "persistence so it can interleave the autonomous repair "
+            "step (Phase 22 healing engine) on each unique crash."
+        ),
+    )
+
+
+class TriagedCrashRef(_StrictModel):
+    """Workflow-visible reference for a unique, triaged crash.
+
+    Returned by ``triage_results`` (in :attr:`TriageOutput.unique_crashes`)
+    so the workflow can iterate over each net-new crash and call the
+    autonomous repair activity *before* persistence. Carries everything
+    the repair agent and the persistence activity need — there is no
+    second activity round-trip required to fetch the ASAN log or stack
+    trace.
+    """
+
+    crash_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=512,
+        description="Stable identifier (typically the fuzzer's crash filename).",
+    )
+    stack_hash: str = Field(
+        default="",
+        max_length=128,
+        description="Truncated SHA256 over the normalised stack-frame names.",
+    )
+    asan_log: str = Field(
+        default="",
+        max_length=65_536,
+        description=(
+            "Full ASAN/KASAN block (or raw fuzzer stderr when ASAN is "
+            "absent). Fed to ``run_autonomous_repair_activity`` as the "
+            "crash_context."
+        ),
+    )
+    crash_file_path: str = Field(
+        default="",
+        max_length=512,
+        description="Absolute path to the on-disk crasher seed.",
+    )
+    bug_type: str = Field(
+        default="unknown",
+        max_length=64,
+        description="Classified bug class (heap-buffer-overflow, UAF, ...).",
+    )
+    severity: CrashSeverity = Field(default=CrashSeverity.UNKNOWN)
+    signal: str = Field(default="", max_length=32)
+    stack_trace: str = Field(default="", max_length=8_192)
+    root_cause: str = Field(default="", max_length=4_096)
 
 
 class TriageOutput(_StrictModel):
@@ -251,6 +369,49 @@ class TriageOutput(_StrictModel):
     severity: CrashSeverity = CrashSeverity.UNKNOWN
     summary: str = ""
     triaged_crash_count: int = Field(default=0, ge=0)
+    unique_crashes: list[TriagedCrashRef] = Field(
+        default_factory=list,
+        description=(
+            "Deduplicated, ready-for-repair crash references. Populated "
+            "regardless of ``defer_persistence`` so callers can always "
+            "see what the activity decided was unique."
+        ),
+    )
+
+
+class PersistTriagedCrashInput(_StrictModel):
+    """Input to the ``persist_triaged_crash`` activity (Phase 22).
+
+    Carries a single triaged crash plus the optional verified patch the
+    healing engine produced, so the activity can perform Redis dedup
+    and the SQL write in one atomic call.
+    """
+
+    campaign_id: str = Field(..., min_length=1, max_length=36)
+    crash: TriagedCrashRef
+    patch: str = Field(default="", max_length=16_384)
+    patch_summary: str = Field(default="", max_length=4_096)
+    healing_attempts: int = Field(default=0, ge=0)
+
+
+class PersistTriagedCrashOutput(_StrictModel):
+    """Result of a single :func:`persist_triaged_crash` invocation."""
+
+    persisted: bool = Field(
+        default=False,
+        description=(
+            "True when a new Crash row was committed. False when the "
+            "stack hash was already known to Redis (duplicate skip)."
+        ),
+    )
+    crash_uuid: str | None = Field(
+        default=None,
+        description="DB-assigned UUID of the new Crash row (None when skipped).",
+    )
+    duplicate: bool = Field(
+        default=False,
+        description="True when Redis fast-path dedup short-circuited the write.",
+    )
 
 
 class ExecutionBackend(StrEnum):
@@ -423,7 +584,8 @@ class FuzzingCampaignState(_StrictModel):
     mutation_hint: str = ""
     crash_count: int = Field(default=0, ge=0)
     consecutive_plateau_count: int = Field(
-        default=0, ge=0,
+        default=0,
+        ge=0,
         description="Consecutive iterations with < 1% edge growth. Stall triggers at threshold.",
     )
     last_coverage_data_path: Path | None = Field(
@@ -820,9 +982,7 @@ class MabState(_StrictModel):
         growth = (last_cov - first_cov) / first_cov
         global_plateau = growth < threshold
         # Also check: every arm must have at least one trial in this window.
-        total_trials_recent = sum(
-            self.trials.get(a.arm_id, 0) for a in self.arms
-        )
+        total_trials_recent = sum(self.trials.get(a.arm_id, 0) for a in self.arms)
         return global_plateau and total_trials_recent > 0
 
 

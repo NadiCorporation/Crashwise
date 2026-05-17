@@ -27,6 +27,7 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from pathlib import Path
+    from typing import Any
 
     from crashwise.agents.execution.strategist import initialise_mab
     from crashwise.core.models import (
@@ -35,6 +36,7 @@ with workflow.unsafe.imports_passed_through():
         CampaignStatus,
         CoverageAnalysis,
         CoverageBlocker,
+        CrashSeverity,
         EvolveHarnessInput,
         EvolveHarnessOutput,
         ExecuteFuzzingInput,
@@ -46,17 +48,23 @@ with workflow.unsafe.imports_passed_through():
         HotSwapInput,
         HotSwapOutput,
         MabState,
+        PersistTriagedCrashInput,
+        PersistTriagedCrashOutput,
         PivotStrategyInput,
         PivotStrategyOutput,
         SeedCorpusInput,
-        SetupTargetInput,
         SetupTargetOutput,
+        TriagedCrashRef,
         TriageInput,
         TriageOutput,
         WorkflowStage,
     )
     from crashwise.orchestration.activities.analyze_coverage import (
         AnalyzeCoverageInput,
+    )
+    from crashwise.orchestration.activities.healing_activities import (
+        run_adaptive_build_activity,
+        run_autonomous_repair_activity,
     )
 
 
@@ -68,12 +76,54 @@ _SEED_RETRY = RetryPolicy(
     maximum_attempts=3,
 )
 
-_SETUP_RETRY = RetryPolicy(
+# ── Phase 22 — CrashWise Healing Engine retry policies ──────────────────────
+#
+# The healing activities drive a LangGraph agent that compiles code,
+# runs GDB and edits source via openhands-sdk. Each invocation can
+# easily take 10+ minutes and cost real money in LLM tokens, so:
+#
+# * ``start_to_close_timeout`` is generous (15 minutes) — enough for
+#   a full multi-turn build/repair conversation.
+# * ``heartbeat_timeout`` is 2 minutes — the activities heartbeat every
+#   15 s, so any silence beyond two minutes is a genuine hang.
+# * ``maximum_attempts`` is intentionally low (1-2). The LangGraph
+#   agent already retries up to ``healing_max_attempts`` *internally*;
+#   adding Temporal-level retries on top would only inflate API spend.
+# * Non-retryable types match the ``ApplicationError.type`` strings
+#   raised by the healing activities (HealingBuildBadInput,
+#   HealingBuildError, HealingRepairBadInput, HealingRepairError) so
+#   permanent agent failures abort the campaign immediately.
+_HEALING_BUILD_RETRY = RetryPolicy(
+    initial_interval=timedelta(seconds=30),
+    backoff_coefficient=2.0,
+    maximum_interval=timedelta(minutes=5),
+    maximum_attempts=2,
+    non_retryable_error_types=[
+        "HealingBuildBadInput",
+        "HealingBuildError",
+    ],
+)
+
+_HEALING_REPAIR_RETRY = RetryPolicy(
+    initial_interval=timedelta(seconds=15),
+    backoff_coefficient=2.0,
+    maximum_interval=timedelta(minutes=2),
+    maximum_attempts=1,
+    non_retryable_error_types=[
+        "HealingRepairBadInput",
+        "HealingRepairError",
+    ],
+)
+
+_HEALING_BUILD_TIMEOUT = timedelta(minutes=15)
+_HEALING_REPAIR_TIMEOUT = timedelta(minutes=15)
+_HEALING_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
+
+_PERSIST_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     backoff_coefficient=2.0,
-    maximum_interval=timedelta(seconds=30),
+    maximum_interval=timedelta(seconds=10),
     maximum_attempts=3,
-    non_retryable_error_types=["WorkdirMissing"],
 )
 
 _FUZZ_RETRY = RetryPolicy(
@@ -163,6 +213,11 @@ class MainFuzzingWorkflow:
         self._force_pivot_requested: bool = False
         self._pending_seeds: list[tuple[str, str]] = []  # (filename, b64data)
         self._operator_notes: list[str] = []
+        # ── Phase 22 — CrashWise Healing Engine telemetry ─────────────────
+        self._build_attempts: int = 0
+        self._build_succeeded: bool = True
+        self._healing_workspace_path: str = ""
+        self._total_patches_generated: int = 0
 
     @workflow.query(name="current_stage")
     def current_stage(self) -> str:
@@ -179,6 +234,26 @@ class MainFuzzingWorkflow:
     @workflow.query(name="evolution_count")
     def evolution_count(self) -> int:
         return self._evolution_count
+
+    # ── Phase 22 healing telemetry queries ──────────────────────────────
+    @workflow.query(name="build_attempts")
+    def build_attempts(self) -> int:
+        return self._build_attempts
+
+    @workflow.query(name="total_patches_generated")
+    def total_patches_generated(self) -> int:
+        return self._total_patches_generated
+
+    @workflow.query(name="healing_status")
+    def healing_status(self) -> dict[str, object]:
+        """Snapshot of the healing engine's progress for live dashboards."""
+        return {
+            "build_attempts": self._build_attempts,
+            "build_succeeded": self._build_succeeded,
+            "healing_workspace_path": self._healing_workspace_path,
+            "total_patches_generated": self._total_patches_generated,
+            "stage": self._stage.value,
+        }
 
     # ── God-Mode queries ────────────────────────────────────────────────
     @workflow.query(name="is_paused")
@@ -234,8 +309,7 @@ class MainFuzzingWorkflow:
             f"[ACK] force_pivot received at iteration {self._iteration}: {reason[:120]}"
         )
         workflow.logger.warning(
-            "main_workflow.force_pivot_signal "
-            f"reason={reason[:80]} iteration={self._iteration}"
+            f"main_workflow.force_pivot_signal reason={reason[:80]} iteration={self._iteration}"
         )
 
     @workflow.signal(name="inject_seed")
@@ -264,9 +338,7 @@ class MainFuzzingWorkflow:
             return
         # Sanitise filename — must be a basename, no path separators.
         if "/" in filename or "\\" in filename or ".." in filename:
-            self._operator_notes.append(
-                f"[REJECTED] inject_seed: unsafe filename {filename!r}"
-            )
+            self._operator_notes.append(f"[REJECTED] inject_seed: unsafe filename {filename!r}")
             workflow.logger.warning(
                 f"main_workflow.inject_seed_signal_rejected filename={filename!r}"
             )
@@ -294,12 +366,9 @@ class MainFuzzingWorkflow:
         """
         self._paused = bool(paused)
         action = "paused" if paused else "resumed"
-        self._operator_notes.append(
-            f"[ACK] pause_hunt: {action} at iteration {self._iteration}"
-        )
+        self._operator_notes.append(f"[ACK] pause_hunt: {action} at iteration {self._iteration}")
         workflow.logger.warning(
-            "main_workflow.pause_hunt_signal "
-            f"paused={self._paused} iteration={self._iteration}"
+            f"main_workflow.pause_hunt_signal paused={self._paused} iteration={self._iteration}"
         )
 
     @workflow.run
@@ -342,26 +411,101 @@ class MainFuzzingWorkflow:
         )
         corpus_dir = seed_workdir / "corpus" if seed_paths else None
 
-        # ── 2. Setup target ─────────────────────────────────────────────────
-        self._stage = WorkflowStage.SETUP
-        setup_out: SetupTargetOutput = await workflow.execute_activity(
-            "setup_target",
-            SetupTargetInput(
-                target_repo=payload.target_repo,
-                target_branch=payload.target_branch,
-                sanitizers=payload.sanitizers,
-                synthesize_harness=payload.harness_path is None,
-                fuzzer_type=payload.fuzzer_type.value,
-            ),
-            result_type=SetupTargetOutput,
-            start_to_close_timeout=timedelta(minutes=10),
-            retry_policy=_SETUP_RETRY,
+        # ── 2. Adaptive build via the CrashWise Healing Engine ──────────────
+        #
+        # Replaces the legacy ``setup_target`` activity. The healing
+        # engine clones the repo, installs missing system dependencies,
+        # injects ASAN+UBSan+coverage flags and produces a clean
+        # instrumented build inside a sandboxed openhands-sdk runtime.
+        # On agent failure (``is_successful == False``) we update the
+        # campaign to ``failed_compilation`` and exit gracefully — no
+        # fuzzing iterations are attempted, since there's nothing to
+        # fuzz against.
+        self._stage = WorkflowStage.HEALING_BUILD
+        # The healing activity validates campaign_id and refuses empty
+        # strings; substitute the deterministic Temporal run_id when the
+        # caller didn't pre-create a campaign row.
+        healing_campaign_id = payload.campaign_id or workflow.info().run_id
+        build_result: dict[str, Any] = await workflow.execute_activity(
+            run_adaptive_build_activity,
+            args=[
+                healing_campaign_id,
+                str(payload.target_repo),
+                payload.healing_max_attempts,
+            ],
+            start_to_close_timeout=_HEALING_BUILD_TIMEOUT,
+            heartbeat_timeout=_HEALING_HEARTBEAT_TIMEOUT,
+            retry_policy=_HEALING_BUILD_RETRY,
         )
 
-        harness_path = (
-            setup_out.workdir / payload.harness_path
-            if payload.harness_path
-            else setup_out.harness_path
+        self._build_attempts = int(build_result.get("attempt_count", 0) or 0)
+        workspace_str = str(build_result.get("workspace_path", "") or "")
+        self._healing_workspace_path = workspace_str
+        target_workdir: Path = Path(workspace_str) if workspace_str else Path("/tmp")
+
+        if not bool(build_result.get("success", False)):
+            # ── Compilation failed: short-circuit the campaign. ─────────
+            self._build_succeeded = False
+            self._stage = WorkflowStage.FAILED_COMPILATION
+            failure_summary = str(build_result.get("summary", "") or "").strip() or (
+                "adaptive build agent reported is_successful=False"
+            )
+            log.error(
+                "main_workflow.healing.build_failed "
+                f"campaign_id={healing_campaign_id} "
+                f"attempts={self._build_attempts} "
+                f"summary={failure_summary[:200]}"
+            )
+            if payload.campaign_id:
+                await workflow.execute_activity(
+                    "update_campaign_status",
+                    {
+                        "campaign_id": payload.campaign_id,
+                        "status": WorkflowStage.FAILED_COMPILATION.value,
+                    },
+                    start_to_close_timeout=timedelta(seconds=10),
+                )
+            finished_at = workflow.now()
+            return FuzzingOutput(
+                crash_found=False,
+                logs_path=target_workdir / "fuzz.log",
+                crash_count=0,
+                severity=CrashSeverity.UNKNOWN,
+                started_at=started_at,
+                finished_at=finished_at,
+                summary=(
+                    f"Adaptive build failed after {self._build_attempts} "
+                    f"attempt(s): {failure_summary[:300]}"
+                ),
+                total_patches_generated=0,
+                build_attempts=self._build_attempts,
+                build_succeeded=False,
+                healing_workspace_path=self._healing_workspace_path,
+            )
+
+        self._build_succeeded = True
+        log.info(
+            "main_workflow.healing.build_succeeded "
+            f"campaign_id={healing_campaign_id} "
+            f"attempts={self._build_attempts} "
+            f"workspace={target_workdir}"
+        )
+
+        # Resolve the harness path inside the healing workspace. We use
+        # plain ``Path`` concatenation (no ``resolve()``) so the workflow
+        # body remains free of filesystem I/O.
+        harness_path: Path | None = (
+            target_workdir / payload.harness_path if payload.harness_path else None
+        )
+
+        # Synthesize a SetupTargetOutput-shaped object for the existing
+        # evolution helpers (which were written against the legacy
+        # ``setup_target`` contract). The fabricated commit_sha satisfies
+        # the model's min_length constraint without doing any I/O.
+        setup_out = SetupTargetOutput(
+            workdir=target_workdir,
+            commit_sha="healing-build",
+            harness_path=harness_path,
         )
 
         # ── 2. Initialise campaign state ────────────────────────────────────
@@ -377,14 +521,9 @@ class MainFuzzingWorkflow:
         if payload.enable_mab and self._mab_state is None:
             self._mab_state = initialise_mab()
             self._mab_state.current_arm_id = (
-                "afl_default"
-                if payload.fuzzer_type == FuzzerType.AFLPP
-                else "libfuzzer_custom"
+                "afl_default" if payload.fuzzer_type == FuzzerType.AFLPP else "libfuzzer_custom"
             )
-            log.info(
-                "main_workflow.mab_initialised "
-                f"arm={self._mab_state.current_arm_id}"
-            )
+            log.info(f"main_workflow.mab_initialised arm={self._mab_state.current_arm_id}")
 
         # ── 3. Feedback loop ────────────────────────────────────────────────
         while campaign.should_continue:
@@ -397,15 +536,10 @@ class MainFuzzingWorkflow:
             # forced sleeps that count against activity timeouts.
             if self._paused:
                 log.warning(
-                    "main_workflow.paused "
-                    f"iteration={campaign.iteration} "
-                    f"reason=operator_signal"
+                    f"main_workflow.paused iteration={campaign.iteration} reason=operator_signal"
                 )
                 await workflow.wait_condition(lambda: not self._paused)
-                log.warning(
-                    "main_workflow.resumed "
-                    f"iteration={campaign.iteration}"
-                )
+                log.warning(f"main_workflow.resumed iteration={campaign.iteration}")
 
             # ── God-Mode: drain pending injected seeds ────────────────
             if self._pending_seeds and corpus_dir is not None:
@@ -417,18 +551,14 @@ class MainFuzzingWorkflow:
                         {
                             "corpus_dir": str(corpus_dir),
                             "seeds": [
-                                {"filename": fn, "data_b64": db}
-                                for fn, db in seeds_to_inject
+                                {"filename": fn, "data_b64": db} for fn, db in seeds_to_inject
                             ],
                             "campaign_id": payload.campaign_id,
                         },
                         start_to_close_timeout=timedelta(seconds=30),
                         retry_policy=_SEED_RETRY,
                     )
-                    log.info(
-                        "main_workflow.seeds_injected "
-                        f"count={len(seeds_to_inject)}"
-                    )
+                    log.info(f"main_workflow.seeds_injected count={len(seeds_to_inject)}")
                 except Exception as exc:  # broad-except
                     log.warning(
                         "main_workflow.seed_inject_failed "
@@ -480,9 +610,7 @@ class MainFuzzingWorkflow:
             # iteration-interval gate and evaluates the bandit immediately.
             interval_due = (
                 campaign.iteration > 0
-                and campaign.iteration
-                % payload.pivot_check_interval_iterations
-                == 0
+                and campaign.iteration % payload.pivot_check_interval_iterations == 0
             )
             should_evaluate_pivot = (
                 payload.enable_mab
@@ -500,9 +628,7 @@ class MainFuzzingWorkflow:
                     mab_state=self._mab_state,
                     current_coverage=campaign.last_coverage.edges_hit,
                     current_exec_rate=campaign.last_coverage.exec_per_sec,
-                    elapsed_seconds=float(
-                        campaign.iteration * payload.timeout_seconds
-                    ),
+                    elapsed_seconds=float(campaign.iteration * payload.timeout_seconds),
                 )
                 pivot_out: PivotStrategyOutput = await workflow.execute_activity(
                     "pivot_strategy",
@@ -530,10 +656,7 @@ class MainFuzzingWorkflow:
                         f"reason={pivot_out.reason[:80]}"
                     )
                     # Track whether the previous pivot grew coverage.
-                    if (
-                        campaign.last_coverage.edges_hit
-                        <= self._last_coverage_at_pivot
-                    ):
+                    if campaign.last_coverage.edges_hit <= self._last_coverage_at_pivot:
                         self._consecutive_pivots_no_growth += 1
                     else:
                         self._consecutive_pivots_no_growth = 0
@@ -588,23 +711,38 @@ class MainFuzzingWorkflow:
 
             campaign.iteration += 1
 
-        # ── 4. Final triage ─────────────────────────────────────────────────
+        # ── 4. Final triage (defer persistence so we can stitch in patches) ─
         self._stage = WorkflowStage.TRIAGE
-        # Re-scan the final output directory for crashes.
+        # Re-scan the final output directory for crashes. ``defer_persistence``
+        # tells the activity to compute + dedup + return the unique crashes
+        # without writing them. The workflow then drives the per-crash
+        # autonomous repair step (Phase 22) and persists each crash with
+        # its verified patch (when available).
         triage_out: TriageOutput = await workflow.execute_activity(
             "triage_results",
             TriageInput(
-                logs_path=setup_out.workdir / "fuzz.log",
-                crashes_dir=setup_out.workdir / "crashes",
+                logs_path=target_workdir / "fuzz.log",
+                crashes_dir=target_workdir / "crashes",
                 crash_count=campaign.crash_count,
                 campaign_id=payload.campaign_id,
+                defer_persistence=payload.campaign_id is not None,
             ),
             result_type=TriageOutput,
             start_to_close_timeout=timedelta(minutes=10),
             retry_policy=_TRIAGE_RETRY,
         )
 
-        # ── 5. Deep crash analysis (Phase 10) ───────────────────────────────
+        # ── 5. Per-crash autonomous repair + persistence (Phase 22) ─────────
+        # The loop is a no-op when ``campaign_id`` is None (anonymous
+        # smoke runs); persistence requires a campaign to attach to.
+        if payload.campaign_id is not None and triage_out.unique_crashes:
+            await self._heal_and_persist_crashes(
+                payload=payload,
+                target_workdir=target_workdir,
+                unique_crashes=triage_out.unique_crashes,
+            )
+
+        # ── 6. Deep crash analysis (Phase 10) ───────────────────────────────
         # Only run AI triage when unique crashes were found — saves API costs.
         if campaign.crash_count > 0 and payload.campaign_id is not None:
             self._stage = WorkflowStage.TRIAGE
@@ -632,24 +770,30 @@ class MainFuzzingWorkflow:
                 retry_policy=_AI_RETRY,
             )
 
-        # ── 6. Compose final result ─────────────────────────────────────────
+        # ── 7. Compose final result ─────────────────────────────────────────
         self._stage = WorkflowStage.COMPLETED
         finished_at = workflow.now()
         result = FuzzingOutput(
             crash_found=campaign.crash_count > 0,
-            logs_path=setup_out.workdir / "fuzz.log",
+            logs_path=target_workdir / "fuzz.log",
             crash_count=campaign.crash_count,
             severity=triage_out.severity,
             started_at=started_at,
             finished_at=finished_at,
             summary=triage_out.summary,
+            total_patches_generated=self._total_patches_generated,
+            build_attempts=self._build_attempts,
+            build_succeeded=self._build_succeeded,
+            healing_workspace_path=self._healing_workspace_path,
         )
         log.info(
             "main_workflow.complete "
             f"iterations={campaign.iteration} "
             f"crash_found={result.crash_found} "
             f"severity={result.severity.value} "
-            f"crash_count={result.crash_count}"
+            f"crash_count={result.crash_count} "
+            f"patches_generated={self._total_patches_generated} "
+            f"build_attempts={self._build_attempts}"
         )
 
         # Update campaign status to completed/failed.
@@ -666,6 +810,140 @@ class MainFuzzingWorkflow:
 
         return result
 
+    # ── Phase 22 — CrashWise Healing Engine: per-crash repair loop ─────
+    async def _heal_and_persist_crashes(
+        self,
+        *,
+        payload: FuzzingInput,
+        target_workdir: Path,
+        unique_crashes: list[TriagedCrashRef],
+    ) -> None:
+        """Drive autonomous repair (when enabled) and persist each crash.
+
+        For every unique, net-new crash returned by ``triage_results``
+        with ``defer_persistence=True`` we:
+
+        1. (Optional, when ``payload.enable_self_healing == True``) call
+           :func:`run_autonomous_repair_activity` with the ASAN log,
+           reusing the workspace established by the adaptive build so
+           the agent already has the source + instrumented binary on
+           hand. The repair activity is bounded by the LangGraph
+           agent's own ``healing_max_attempts`` and a 15-minute
+           ``start_to_close_timeout`` so it cannot stall the workflow
+           indefinitely.
+        2. Persist the crash via :func:`persist_triaged_crash`, passing
+           the verified ``.patch`` text (or empty string) and the
+           number of agent attempts. The activity performs the Redis
+           fast-path dedup check and the SQL write atomically.
+
+        The method is total — it never raises. Per-crash failures are
+        logged and the workflow continues so a single repair-blowup
+        does not cost the entire campaign.
+        """
+        log = workflow.logger
+        campaign_id = payload.campaign_id
+        if campaign_id is None:
+            return
+
+        for crash_ref in unique_crashes:
+            patch_text: str = ""
+            patch_summary: str = ""
+            healing_attempts: int = 0
+
+            if payload.enable_self_healing:
+                self._stage = WorkflowStage.HEALING_REPAIR
+                log.info(
+                    "main_workflow.healing.repair_start "
+                    f"crash_id={crash_ref.crash_id} "
+                    f"stack_hash={crash_ref.stack_hash} "
+                    f"bug_type={crash_ref.bug_type} "
+                    f"asan_chars={len(crash_ref.asan_log)}"
+                )
+                try:
+                    repair_result: dict[str, Any] = await workflow.execute_activity(
+                        run_autonomous_repair_activity,
+                        args=[
+                            crash_ref.crash_id,
+                            crash_ref.asan_log,
+                            str(target_workdir),
+                            campaign_id,
+                            payload.healing_max_attempts,
+                        ],
+                        start_to_close_timeout=_HEALING_REPAIR_TIMEOUT,
+                        heartbeat_timeout=_HEALING_HEARTBEAT_TIMEOUT,
+                        retry_policy=_HEALING_REPAIR_RETRY,
+                    )
+                    healing_attempts = int(repair_result.get("attempt_count", 0) or 0)
+                    if bool(repair_result.get("success", False)):
+                        patch_text = str(repair_result.get("patch", "") or "")
+                        patch_summary = str(repair_result.get("summary", "") or "")
+                        if patch_text:
+                            self._total_patches_generated += 1
+                            log.info(
+                                "main_workflow.healing.repair_succeeded "
+                                f"crash_id={crash_ref.crash_id} "
+                                f"attempts={healing_attempts} "
+                                f"patch_chars={len(patch_text)}"
+                            )
+                        else:
+                            log.warning(
+                                "main_workflow.healing.repair_no_patch "
+                                f"crash_id={crash_ref.crash_id}"
+                            )
+                    else:
+                        log.warning(
+                            "main_workflow.healing.repair_failed "
+                            f"crash_id={crash_ref.crash_id} "
+                            f"attempts={healing_attempts} "
+                            f"summary={str(repair_result.get('summary', ''))[:120]}"
+                        )
+                except Exception as exc:  # broad-except: never break loop
+                    log.warning(
+                        "main_workflow.healing.repair_error "
+                        f"crash_id={crash_ref.crash_id} "
+                        f"error={exc!s:.160}"
+                    )
+
+            # Always persist — with the verified patch when we got one,
+            # without otherwise. The persistence activity itself does
+            # the Redis dedup check, so duplicates are cheap.
+            try:
+                persist_out: PersistTriagedCrashOutput = await workflow.execute_activity(
+                    "persist_triaged_crash",
+                    PersistTriagedCrashInput(
+                        campaign_id=campaign_id,
+                        crash=crash_ref,
+                        patch=patch_text,
+                        patch_summary=patch_summary,
+                        healing_attempts=healing_attempts,
+                    ),
+                    result_type=PersistTriagedCrashOutput,
+                    start_to_close_timeout=timedelta(seconds=60),
+                    retry_policy=_PERSIST_RETRY,
+                )
+                if persist_out.persisted:
+                    log.info(
+                        "main_workflow.healing.crash_persisted "
+                        f"crash_id={crash_ref.crash_id} "
+                        f"crash_uuid={persist_out.crash_uuid} "
+                        f"with_patch={bool(patch_text)}"
+                    )
+                elif persist_out.duplicate:
+                    log.debug(
+                        "main_workflow.healing.crash_duplicate_skipped "
+                        f"crash_id={crash_ref.crash_id}"
+                    )
+                else:
+                    log.warning(
+                        "main_workflow.healing.crash_persist_softfail "
+                        f"crash_id={crash_ref.crash_id}"
+                    )
+            except Exception as exc:  # broad-except: never break loop
+                log.warning(
+                    "main_workflow.healing.crash_persist_error "
+                    f"crash_id={crash_ref.crash_id} "
+                    f"error={exc!s:.160}"
+                )
 
     async def _run_evolution(
         self,
@@ -729,7 +1007,7 @@ class MainFuzzingWorkflow:
             current_harness_code=(
                 "// placeholder; the evolution agent will re-read the\n"
                 "// real harness source from the workdir.\n"
-                "extern \"C\" int LLVMFuzzerTestOneInput("
+                'extern "C" int LLVMFuzzerTestOneInput('
                 "const uint8_t *data, size_t size) { return 0; }\n"
             ),
             blocker=blocker,
@@ -761,9 +1039,7 @@ class MainFuzzingWorkflow:
         swap: HotSwapOutput = await workflow.execute_activity(
             "hot_swap_harness",
             HotSwapInput(
-                job_id=(
-                    f"{payload.campaign_id or 'anon'}-iter{campaign.iteration}"
-                ),
+                job_id=(f"{payload.campaign_id or 'anon'}-iter{campaign.iteration}"),
                 new_harness_code=evolved.evolved_harness_code,
                 compilation_command=evolved.compilation_command,
                 preserve_corpus=True,
@@ -775,15 +1051,9 @@ class MainFuzzingWorkflow:
 
         if swap.swapped and swap.binary_path is not None:
             self._evolution_count += 1
-            log.info(
-                "main_workflow.evolution.success "
-                f"binary={swap.binary_path}"
-            )
+            log.info(f"main_workflow.evolution.success binary={swap.binary_path}")
         else:
-            log.warning(
-                "main_workflow.evolution.failed "
-                f"notes={swap.notes[:80]}"
-            )
+            log.warning(f"main_workflow.evolution.failed notes={swap.notes[:80]}")
 
     async def _identify_blocker(
         self,
@@ -823,10 +1093,7 @@ class MainFuzzingWorkflow:
                     retry_policy=_COVERAGE_RETRY,
                 )
             except Exception as exc:
-                log.warning(
-                    "main_workflow.evolution.coverage_data_read_failed "
-                    f"error={exc!s:.120}"
-                )
+                log.warning(f"main_workflow.evolution.coverage_data_read_failed error={exc!s:.120}")
                 # Fall through — static analysis is still useful.
 
         try:
@@ -841,10 +1108,7 @@ class MainFuzzingWorkflow:
                 retry_policy=_COVERAGE_RETRY,
             )
         except Exception as exc:  # broad-except — never break the loop
-            log.warning(
-                "main_workflow.evolution.analyze_coverage_failed "
-                f"error={exc!s:.120}"
-            )
+            log.warning(f"main_workflow.evolution.analyze_coverage_failed error={exc!s:.120}")
             return (
                 CoverageBlocker(
                     blocker_type=BlockerType.UNKNOWN,
