@@ -492,12 +492,15 @@ async def _compile_harness(
         "-g", "-O1",
         "-fno-omit-frame-pointer",
     ]
+    # Define HAVE_CONFIG_H if config.h exists (needed by libarchive, etc).
+    if (workdir / "build" / "config.h").exists() or (workdir / "config.h").exists():
+        cmd.append("-DHAVE_CONFIG_H")
     for inc in include_dirs:
         cmd.append(f"-I{inc}")
     cmd.extend(["-o", str(binary_path), str(harness_source)])
     cmd.extend(link_libs)
-    # Common system libs that targets often need.
-    cmd.extend(["-lm", "-lz", "-lpthread"])
+    # Common system libs that targets often need (after .a files for link order).
+    cmd.extend(["-lm", "-lz", "-lbz2", "-llzma", "-lssl", "-lcrypto", "-lxml2", "-lpthread"])
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
