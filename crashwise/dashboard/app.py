@@ -146,14 +146,62 @@ with tabs[0]:
                 rc3.metric("Coverage Edges", latest_run.get("coverage_edges", "—"))
                 rc4.metric("Duration", f"{latest_run.get('duration_seconds', 0):.0f}s")
 
-            # Activity state indicator
-            st.markdown(f"""
-            <div class="terminal-pane">
-            <span class="status-green">●</span> Workflow: crashwise-campaign-{cid[:8]}…
-            <span class="status-amber">●</span> Current Stage: EXECUTING
-            <span class="status-green">●</span> Container: crashwise-{cid[:8]}-iter{detail['runs'][-1]['iteration'] if detail and detail.get('runs') else 0}
-            </div>
-            """, unsafe_allow_html=True)
+            # Verbose execution state from Temporal workflow queries
+            live_state = api_get(f"/campaigns/{cid}/state")
+            if live_state and not live_state.get("error"):
+                stage = live_state.get("stage", "unknown")
+                iteration = live_state.get("iteration", 0)
+                pivot_count = live_state.get("pivot_count", 0)
+                evolution_count = live_state.get("evolution_count", 0)
+                paused = live_state.get("paused", False)
+                pending_seeds = live_state.get("pending_seeds", 0)
+                last_note = live_state.get("last_note", "")
+
+                # Map stage to human-readable activity description
+                stage_desc = {
+                    "pending": "Initializing workflow…",
+                    "seeding": "Activity: seed_corpus → harvesting test vectors",
+                    "setup": "Activity: setup_target → clone + build + harness synthesis",
+                    "executing": "Activity: execute_fuzzing → Docker container running",
+                    "triage": "Activity: triage_results → crash classification + dedup",
+                    "completed": "Workflow complete",
+                    "failed": "Workflow failed",
+                }.get(stage, f"Stage: {stage}")
+
+                stage_color = {
+                    "pending": "status-amber",
+                    "seeding": "status-amber",
+                    "setup": "status-amber",
+                    "executing": "status-green",
+                    "triage": "status-amber",
+                    "completed": "status-green",
+                    "failed": "status-red",
+                }.get(stage, "status-amber")
+
+                st.markdown(f"""
+<div class="terminal-pane">
+<span class="{stage_color}">●</span> <b>{stage_desc}</b>
+<span class="status-green">●</span> Workflow: crashwise-campaign-{cid[:8]}…
+<span class="status-green">●</span> Container: crashwise-{cid[:8]}-iter{iteration}
+─────────────────────────────────────────────────
+  Stage:          {stage.upper()}
+  Iteration:      {iteration}
+  Pivot Count:    {pivot_count} (MAB strategy switches)
+  Evolution Count: {evolution_count} (harness rewrites)
+  Paused:         {'YES ⏸' if paused else 'NO'}
+  Pending Seeds:  {pending_seeds}
+{f'  Last Note:      {last_note}' if last_note else ''}
+</div>
+""", unsafe_allow_html=True)
+            else:
+                # Fallback when Temporal query fails (workflow may have just started)
+                st.markdown(f"""
+<div class="terminal-pane">
+<span class="status-green">●</span> Workflow: crashwise-campaign-{cid[:8]}…
+<span class="status-amber">●</span> Stage: INITIALIZING (waiting for first heartbeat)
+<span class="status-green">●</span> Container: crashwise-{cid[:8]}-iter0
+</div>
+""", unsafe_allow_html=True)
             st.markdown("")
     else:
         st.info("No active campaigns. Submit one via CLI or the Campaigns tab.")
@@ -175,6 +223,18 @@ with tabs[1]:
     if not campaigns:
         st.info("No campaigns. Run `crashwise run <repo-url>` to start.")
     else:
+        # Bulk actions
+        del_col1, del_col2, del_col3 = st.columns([2, 2, 6])
+        with del_col1:
+            if st.button("🗑️ Delete All", type="secondary", key="del_all"):
+                api_delete("/campaigns")
+                st.rerun()
+        with del_col2:
+            if st.button("🗑️ Delete Failed", key="del_failed"):
+                api_delete("/campaigns?status_filter=failed,stalled")
+                st.rerun()
+
+        st.markdown("---")
         for c in campaigns:
             col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
             col1.markdown(

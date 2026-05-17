@@ -643,4 +643,32 @@ async def send_campaign_signal(req: SignalRequest) -> SignalResponse:
         ) from exc
 
 
+@app.get(
+    "/campaigns/{campaign_id}/state",
+    tags=["campaigns"],
+)
+async def get_campaign_live_state(campaign_id: UUID) -> dict[str, Any]:
+    """Query the live Temporal workflow state for a running campaign.
+
+    Returns current_stage, iteration, pivot_count, evolution_count,
+    paused status, and pending seeds from the workflow queries.
+    """
+    workflow_id = f"crashwise-campaign-{campaign_id}"
+    try:
+        client = await connect()
+        handle = client.get_workflow_handle(workflow_id)
+        stage = await handle.query("current_stage")
+        status_data = await handle.query("signal_status")
+        return {
+            "workflow_id": workflow_id,
+            "stage": stage,
+            **status_data,
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workflow not reachable: {exc}",
+        ) from exc
+
+
 __all__ = ["app"]
