@@ -97,6 +97,7 @@ export function CampaignsTable() {
 
 function CampaignDetail({ campaign }: { campaign: Campaign }) {
   const [detail, setDetail] = useState<any>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     fetch(`/campaigns/${campaign.id}`)
@@ -104,6 +105,19 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
       .then(setDetail)
       .catch(() => {});
   }, [campaign.id]);
+
+  const handleDelete = async () => {
+    if (!confirm(`Delete campaign "${campaign.target_name}" (${campaign.id.slice(0, 8)}…)?`)) return;
+    setDeleting(true);
+    try {
+      const resp = await fetch(`/campaigns/${campaign.id}`, { method: "DELETE" });
+      if (resp.ok) window.location.reload();
+      else alert(`Delete failed: ${resp.status}`);
+    } catch (e) {
+      alert(`Delete failed: ${e}`);
+    }
+    setDeleting(false);
+  };
 
   if (!detail) return <p className="text-muted-foreground text-xs">Loading…</p>;
 
@@ -139,6 +153,16 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
           <div className="mt-1 text-muted-foreground">→ Check Temporal UI at :8233 for activity-level error traces.</div>
         </div>
       )}
+
+      <div className="flex justify-end pt-2">
+        <button
+          onClick={handleDelete}
+          disabled={deleting || campaign.status === "running"}
+          className="px-3 py-1.5 text-[10px] font-bold uppercase rounded bg-accent-red/20 text-accent-red hover:bg-accent-red/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {deleting ? "Deleting…" : "🗑 Delete Campaign"}
+        </button>
+      </div>
     </div>
   );
 }
