@@ -555,7 +555,7 @@ async def _run_harness_synthesis(
         retries=result.retry_count,
         binary=str(result.binary_path) if result.binary_path else None,
     )
-    return result.binary_path or result.harness_path
+    return result.binary_path
 
 
 def _find_usage_example(workdir: Path, source_path: Path) -> str:

@@ -411,6 +411,7 @@ async def _persist_run(
                 finished_at=datetime.utcnow(),
                 executions=output.executions,
                 duration_seconds=output.duration_seconds,
+                coverage_edges=output.coverage_edges,
                 status="completed",
             )
             session.add(run)

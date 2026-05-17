@@ -171,32 +171,69 @@ async def list_crashes(campaign_id: str | None = None):
 
 # ── SSE Telemetry Stream ─────────────────────────────────────────────────────
 
-# In-memory telemetry buffer (updated by worker hooks).
-_telemetry: dict[str, Any] = {
-    "global_execs_per_sec": 0,
-    "total_executions": 0,
-    "unique_edges": 0,
-    "crashes_found": 0,
-    "active_campaigns": 0,
-    "timestamp": "",
-}
-
-
-def update_telemetry(data: dict[str, Any]) -> None:
-    """Called by the worker to push fresh stats into the SSE buffer."""
-    _telemetry.update(data)
-    _telemetry["timestamp"] = datetime.utcnow().isoformat()
-
 
 @app.get("/telemetry/stream")
 async def telemetry_stream():
     """Server-Sent Events stream of real-time fuzzing statistics."""
+    from sqlalchemy import func, text
+
+    from crashwise.core.database import Campaign, Crash, FuzzingRun, get_session
+
+    async def _compute_telemetry() -> dict[str, Any]:
+        try:
+            async with get_session() as session:
+                # Total executions and max edges across all runs
+                row = (await session.execute(
+                    select(
+                        func.coalesce(func.sum(FuzzingRun.executions), 0),
+                        func.coalesce(func.max(FuzzingRun.coverage_edges), 0),
+                    )
+                )).one()
+                total_execs = int(row[0])
+                unique_edges = int(row[1])
+
+                # Active campaigns
+                active = (await session.execute(
+                    select(func.count()).where(Campaign.status == "running")
+                )).scalar() or 0
+
+                # Crashes
+                crash_count = (await session.execute(
+                    select(func.count()).select_from(Crash)
+                )).scalar() or 0
+
+                # Exec/s: sum executions / sum duration for recent runs
+                recent = (await session.execute(
+                    select(
+                        func.coalesce(func.sum(FuzzingRun.executions), 0),
+                        func.coalesce(func.sum(FuzzingRun.duration_seconds), 0),
+                    ).where(FuzzingRun.duration_seconds > 0)
+                )).one()
+                execs_per_sec = int(int(recent[0]) / float(recent[1])) if recent[1] and float(recent[1]) > 0 else 0
+
+                return {
+                    "global_execs_per_sec": execs_per_sec,
+                    "total_executions": total_execs,
+                    "unique_edges": unique_edges,
+                    "crashes_found": crash_count,
+                    "active_campaigns": active,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+        except Exception:
+            return {
+                "global_execs_per_sec": 0,
+                "total_executions": 0,
+                "unique_edges": 0,
+                "crashes_found": 0,
+                "active_campaigns": 0,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
 
     async def _generate():
         while True:
-            payload = json.dumps(_telemetry)
-            yield f"data: {payload}\n\n"
-            await asyncio.sleep(1.0)
+            data = await _compute_telemetry()
+            yield f"data: {json.dumps(data)}\n\n"
+            await asyncio.sleep(2.0)
 
     return StreamingResponse(
         _generate(),
