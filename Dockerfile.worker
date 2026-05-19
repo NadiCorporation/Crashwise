@@ -46,7 +46,7 @@ RUN git clone --depth 1 --branch v4.21c https://github.com/AFLplusplus/AFLpluspl
 # ═══════════════════════════════════════════════════════════════════════════════
 # Stage 2 — Python Builder (uv)
 # ═══════════════════════════════════════════════════════════════════════════════
-FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS py-builder
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS py-builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -121,6 +121,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # embeddable shared library — so afl-fuzz fails at startup with
     # "cannot open shared object file" without this line.
     libpython3.11 \
+    python3.11 \
     python3 \
     python3-pip \
     python3-venv \
@@ -152,12 +153,15 @@ COPY --from=afl-builder /usr/local/lib/afl /usr/local/lib/afl/
 COPY --from=afl-builder /usr/local/share/afl /usr/local/share/afl/
 
 # Copy Python environment from builder.
+COPY --from=py-builder /usr/local/bin/python3.12 /usr/local/bin/python3.12
+COPY --from=py-builder /usr/local/lib/libpython3.12.so.1.0 /usr/local/lib/libpython3.12.so.1.0
+COPY --from=py-builder /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=py-builder /app/.venv /app/.venv
 COPY --from=py-builder /app/crashwise /app/crashwise
-
-# Fix venv python symlink: py-builder uses /usr/local/bin/python3 (uv image)
-# but runtime has python3 at /usr/bin/python3 (debian bookworm-slim).
-RUN ln -sf /usr/bin/python3 /app/.venv/bin/python
+# Fix venv symlink to point to Python 3.12 (packages were built for 3.12).
+RUN ln -sf /usr/local/bin/python3.12 /app/.venv/bin/python && \
+    ln -sf /usr/local/bin/python3.12 /app/.venv/bin/python3 && \
+    ldconfig
 
 # Verify key tools are present.
 #
@@ -170,7 +174,7 @@ RUN afl-fuzz -h 2>&1 | head -1 \
     && afl-cc --version 2>&1 | head -1 \
     && clang --version | head -1 \
     && cmake --version | head -1 \
-    && python3 --version \
+    && /app/.venv/bin/python --version \
     && docker --version
 
 # Health check.
