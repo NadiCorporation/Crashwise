@@ -59,21 +59,19 @@ from crashwise.core.logging import get_logger
 # will refuse to start without it. The ``unused-ignore`` meta-code keeps the
 # annotations valid both when the SDK is present (real classes) and when
 # it is absent (treated as :data:`Any` placeholders).
-try:  # pragma: no cover - exercised only when SDK is installed
-    from openhands_sdk import (  # type: ignore[import-not-found,unused-ignore]
-        FileEditorTool,
-        TerminalTool,
-    )
-except ImportError:  # pragma: no cover - test/CI hosts without SDK
-    TerminalTool = None  # type: ignore[assignment,misc,unused-ignore]
-    FileEditorTool = None  # type: ignore[assignment,misc,unused-ignore]
+#
+# NOTE: openhands-sdk 1.22+ changed its API. TerminalTool/FileEditorTool are
+# server-side tools, not standalone classes. We implement the sandbox
+# primitives directly using Docker exec instead.
+TerminalTool = None
+FileEditorTool = None
 
 
 log = get_logger(__name__)
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 _DEFAULT_COMMAND_TIMEOUT_SECONDS: Final[float] = 600.0
-_DEFAULT_IMAGE: Final[str] = "ghcr.io/all-hands-ai/runtime:0.39-nikolaik"
+_DEFAULT_IMAGE: Final[str] = "crashwise-worker:latest"
 _OUTPUT_TRUNCATION_BUDGET: Final[int] = 16_384
 
 
@@ -136,46 +134,31 @@ class OpenHandsSandbox:
         editor: Any = None,
         llm_config: dict[str, Any] | None = None,
     ) -> OpenHandsSandbox:
-        """Provision a fresh openhands-sdk runtime.
+        """Provision a Docker-based sandbox for the healing engine.
 
-        ``terminal`` / ``editor`` may be supplied for tests; production
-        callers leave them ``None`` and the SDK builds the real instances
-        bound to a Docker container.
-
-        ``llm_config`` is the openhands-sdk LLM configuration dict
-        produced by :attr:`LLMProviderConfig.openhands_llm_config`. When
-        supplied, the SDK tools use the same model/key/endpoint as the
-        LangGraph orchestration layer. When ``None``, the SDK falls back
-        to its own environment-variable resolution.
+        Spins up a container with the workspace mounted and uses
+        ``docker exec`` for shell commands and Python file I/O for editing.
         """
         if container_id is None:
             container_id = f"crashwise-heal-{uuid.uuid4().hex[:12]}"
         workspace_path.mkdir(parents=True, exist_ok=True)
 
-        # Build kwargs that may include llm_config for the SDK.
-        sdk_kwargs: dict[str, Any] = {
-            "workspace_path": str(workspace_path),
-            "container_id": container_id,
-        }
-        if llm_config is not None:
-            sdk_kwargs["llm_config"] = llm_config
-
-        if terminal is None:
-            if TerminalTool is None:  # pragma: no cover - SDK absent
-                raise RuntimeError(
-                    "openhands-sdk is not installed. Add `openhands-sdk` to "
-                    "your dependency manifest before invoking the healing engine."
-                )
-            terminal_kwargs = {**sdk_kwargs, "image": image}
-            terminal = await _maybe_await(TerminalTool.create(**terminal_kwargs))
-
-        if editor is None:
-            if FileEditorTool is None:  # pragma: no cover - SDK absent
-                raise RuntimeError(
-                    "openhands-sdk is not installed. Add `openhands-sdk` to "
-                    "your dependency manifest before invoking the healing engine."
-                )
-            editor = await _maybe_await(FileEditorTool.create(**sdk_kwargs))
+        # Start a long-running container with the workspace mounted.
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "run", "-d",
+            "--name", container_id,
+            "--network", "host",
+            "-v", f"{workspace_path}:/workspace:rw",
+            "-w", "/workspace",
+            image,
+            "sleep", "infinity",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err = stderr.decode("utf-8", errors="replace")
+            raise RuntimeError(f"Failed to start healing sandbox: {err}")
 
         log.info(
             "healing.sandbox.allocated",
@@ -186,35 +169,31 @@ class OpenHandsSandbox:
             llm_model=llm_config.get("model", "default") if llm_config else "default",
         )
 
-        return cls(
+        sandbox = cls(
             container_id=container_id,
             workspace_path=workspace_path,
             image=image,
-            terminal=terminal,
-            editor=editor,
+            terminal="docker",  # Marker: using docker exec
+            editor="docker",    # Marker: using docker exec
         )
+        return sandbox
 
     async def shutdown(self) -> None:
         """Tear the runtime down. Idempotent."""
-        for handle, name in ((self.terminal, "terminal"), (self.editor, "editor")):
-            if handle is None:
-                continue
-            closer = getattr(handle, "close", None) or getattr(handle, "shutdown", None)
-            if closer is None:
-                continue
-            try:
-                await _maybe_await(closer())
-            except Exception as exc:  # pragma: no cover - best-effort teardown
-                log.warning(
-                    "healing.sandbox.shutdown_partial",
-                    container_id=self.container_id,
-                    component=name,
-                    error=str(exc)[:200],
-                )
-        log.info(
-            "healing.sandbox.shutdown",
-            container_id=self.container_id,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "rm", "-f", self.container_id,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+        except Exception as exc:
+            log.warning(
+                "healing.sandbox.shutdown_partial",
+                container_id=self.container_id,
+                error=str(exc)[:200],
+            )
+        log.info("healing.sandbox.shutdown", container_id=self.container_id)
 
     # ── Tool primitives ──────────────────────────────────────────────────
     async def execute(
@@ -223,9 +202,7 @@ class OpenHandsSandbox:
         *,
         timeout_seconds: float = _DEFAULT_COMMAND_TIMEOUT_SECONDS,
     ) -> _ToolResult:
-        """Run ``command`` inside the persistent shell and return its result."""
-        if self.terminal is None:
-            raise RuntimeError("OpenHandsSandbox is not initialised (terminal is None)")
+        """Run ``command`` inside the container via docker exec."""
         if not command or not command.strip():
             return _ToolResult(output="", exit_code=0)
 
@@ -236,26 +213,28 @@ class OpenHandsSandbox:
         )
 
         try:
-            raw = await asyncio.wait_for(
-                _invoke_tool_method(
-                    self.terminal,
-                    method_names=("execute", "run", "invoke", "call", "__call__"),
-                    payload={"command": command},
-                ),
-                timeout=timeout_seconds,
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "exec", self.container_id,
+                "bash", "-c", command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
             )
-        except TimeoutError:
+            stdout, _ = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout_seconds
+            )
+            output = stdout.decode("utf-8", errors="replace")
+            # Truncate to budget
+            if len(output) > _OUTPUT_TRUNCATION_BUDGET:
+                output = output[:_OUTPUT_TRUNCATION_BUDGET] + "\n... [truncated]"
+            return _ToolResult(output=output, exit_code=proc.returncode or 0)
+        except asyncio.TimeoutError:
             log.warning(
                 "healing.sandbox.execute.timeout",
                 container_id=self.container_id,
                 timeout=timeout_seconds,
                 command=command[:120],
             )
-            return _ToolResult(
-                output="",
-                exit_code=124,
-                error=f"command timed out after {timeout_seconds}s",
-            )
+            return _ToolResult(output="", exit_code=124, error=f"command timed out after {timeout_seconds}s")
         except Exception as exc:
             log.warning(
                 "healing.sandbox.execute.error",
@@ -265,18 +244,10 @@ class OpenHandsSandbox:
             )
             return _ToolResult(output="", exit_code=1, error=str(exc))
 
-        return _normalise_tool_result(raw)
-
     async def str_replace(self, path: str, old_str: str, new_str: str) -> _ToolResult:
         """Apply a precise block replacement to a file inside the sandbox."""
-        if self.editor is None:
-            raise RuntimeError("OpenHandsSandbox is not initialised (editor is None)")
         if not old_str:
-            return _ToolResult(
-                output="",
-                exit_code=2,
-                error="old_str must be non-empty for safe block replacement",
-            )
+            return _ToolResult(output="", exit_code=2, error="old_str must be non-empty for safe block replacement")
 
         log.info(
             "healing.sandbox.str_replace",
@@ -286,27 +257,25 @@ class OpenHandsSandbox:
             new_chars=len(new_str),
         )
 
-        try:
-            raw = await _invoke_tool_method(
-                self.editor,
-                method_names=("str_replace", "replace", "edit", "invoke", "call", "__call__"),
-                payload={
-                    "command": "str_replace",
-                    "path": path,
-                    "old_str": old_str,
-                    "new_str": new_str,
-                },
-            )
-        except Exception as exc:
-            log.warning(
-                "healing.sandbox.str_replace.error",
-                container_id=self.container_id,
-                path=path,
-                error=str(exc)[:200],
-            )
-            return _ToolResult(output="", exit_code=1, error=str(exc))
+        # The workspace is mounted at /workspace in the container and at
+        # self.workspace_path on the host. Resolve the host path.
+        if path.startswith("/workspace"):
+            host_path = self.workspace_path / path[len("/workspace/"):]
+        else:
+            host_path = Path(path)
 
-        return _normalise_tool_result(raw)
+        try:
+            content = host_path.read_text(encoding="utf-8", errors="replace")
+            if old_str not in content:
+                return _ToolResult(output=f"old_str not found in {path}", exit_code=1, error="old_str not found")
+            count = content.count(old_str)
+            if count > 1:
+                return _ToolResult(output=f"old_str found {count} times (ambiguous)", exit_code=1, error="ambiguous match")
+            content = content.replace(old_str, new_str, 1)
+            host_path.write_text(content, encoding="utf-8")
+            return _ToolResult(output=f"Successfully replaced in {path}", exit_code=0)
+        except Exception as exc:
+            return _ToolResult(output="", exit_code=1, error=str(exc))
 
 
 # ── Active-sandbox context plumbing ─────────────────────────────────────────
