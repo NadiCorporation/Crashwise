@@ -225,6 +225,8 @@ class DockerManager:
         )
         for key, val in job.env_vars.items():
             cmd.extend(["-e", f"{key}={val}"])
+        # Ensure dynamically linked harness can find libs from the build tree.
+        cmd.extend(["-e", "LD_LIBRARY_PATH=/work/build:/work/build/lib:/work/lib:/usr/local/lib"])
 
         # Entrypoint: run the harness.
         harness_in_container = f"/work/{job.harness_path.name}"

@@ -232,7 +232,10 @@ async def _build_target(workdir: Path, sanitizers: str) -> None:
 
     # Construct sanitizer flags.
     san_flags = f"-fsanitize={sanitizers}" if sanitizers else ""
-    cov_flags = "-fsanitize-coverage=trace-pc-guard,trace-cmp"
+    # Use -fsanitize=fuzzer-no-link for coverage instrumentation during build.
+    # The actual fuzzer runtime (-fsanitize=fuzzer) is linked only in the harness.
+    # Note: -fsanitize-coverage=trace-pc-guard is deprecated by modern libFuzzer.
+    cov_flags = "-fsanitize=fuzzer-no-link"
     # Source-based coverage: produces default.profraw at runtime so llvm-cov
     # can generate line-level hit/miss data for ALL fuzzer types (including
     # AFL++). This closes the gap where AFL++ campaigns were permanently
