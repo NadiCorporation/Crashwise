@@ -10,7 +10,7 @@ version = "0.1.0"
 description = "Autonomous AI-powered platform for zero-day fuzzing, vulnerability discovery, and automated crash triage."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
     { name = "Yahya Toubali" },
     { name = "CrashWise Contributors" },
@@ -86,6 +86,9 @@ dependencies = [
 
     # Distributed storage (Cloudflare R2 / S3-compatible)
     "aioboto3>=13.0.0",
+
+    # Healing Engine (openhands-sdk)
+    "openhands-sdk>=0.39",
 
     # Distributed state (Redis)
     "redis>=5.0.0",

@@ -137,10 +137,12 @@ async def run_adaptive_build_activity(
             campaign_id=campaign_id,
             error=str(exc)[:300],
         )
+        # SDK not installed is a permanent failure — don't retry.
+        is_sdk_missing = "openhands" in str(exc).lower() and "not installed" in str(exc).lower()
         raise ApplicationError(
             f"Adaptive build failed: {exc}",
             type="HealingBuildError",
-            non_retryable=False,
+            non_retryable=is_sdk_missing,
         ) from exc
     finally:
         if heartbeat_task is not None:

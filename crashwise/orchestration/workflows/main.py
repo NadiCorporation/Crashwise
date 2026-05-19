@@ -24,6 +24,7 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from pathlib import Path
@@ -53,6 +54,7 @@ with workflow.unsafe.imports_passed_through():
         PivotStrategyInput,
         PivotStrategyOutput,
         SeedCorpusInput,
+        SetupTargetInput,
         SetupTargetOutput,
         TriagedCrashRef,
         TriageInput,
@@ -73,6 +75,13 @@ _SEED_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     backoff_coefficient=2.0,
     maximum_interval=timedelta(seconds=30),
+    maximum_attempts=3,
+)
+
+_SETUP_RETRY = RetryPolicy(
+    initial_interval=timedelta(seconds=2),
+    backoff_coefficient=2.0,
+    maximum_interval=timedelta(seconds=60),
     maximum_attempts=3,
 )
 
@@ -421,92 +430,119 @@ class MainFuzzingWorkflow:
         # campaign to ``failed_compilation`` and exit gracefully — no
         # fuzzing iterations are attempted, since there's nothing to
         # fuzz against.
+        #
+        # Fallback: if the healing engine is unavailable (SDK not installed
+        # or incompatible), fall back to the legacy setup_target activity.
         self._stage = WorkflowStage.HEALING_BUILD
-        # The healing activity validates campaign_id and refuses empty
-        # strings; substitute the deterministic Temporal run_id when the
-        # caller didn't pre-create a campaign row.
         healing_campaign_id = payload.campaign_id or workflow.info().run_id
-        build_result: dict[str, Any] = await workflow.execute_activity(
-            run_adaptive_build_activity,
-            args=[
-                healing_campaign_id,
-                str(payload.target_repo),
-                payload.healing_max_attempts,
-            ],
-            start_to_close_timeout=_HEALING_BUILD_TIMEOUT,
-            heartbeat_timeout=_HEALING_HEARTBEAT_TIMEOUT,
-            retry_policy=_HEALING_BUILD_RETRY,
-        )
 
-        self._build_attempts = int(build_result.get("attempt_count", 0) or 0)
-        workspace_str = str(build_result.get("workspace_path", "") or "")
-        self._healing_workspace_path = workspace_str
-        target_workdir: Path = Path(workspace_str) if workspace_str else Path("/tmp")
-
-        if not bool(build_result.get("success", False)):
-            # ── Compilation failed: short-circuit the campaign. ─────────
-            self._build_succeeded = False
-            self._stage = WorkflowStage.FAILED_COMPILATION
-            failure_summary = str(build_result.get("summary", "") or "").strip() or (
-                "adaptive build agent reported is_successful=False"
+        use_legacy_setup = False
+        try:
+            build_result: dict[str, Any] = await workflow.execute_activity(
+                run_adaptive_build_activity,
+                args=[
+                    healing_campaign_id,
+                    str(payload.target_repo),
+                    payload.healing_max_attempts,
+                ],
+                start_to_close_timeout=_HEALING_BUILD_TIMEOUT,
+                heartbeat_timeout=_HEALING_HEARTBEAT_TIMEOUT,
+                retry_policy=RetryPolicy(maximum_attempts=1, non_retryable_error_types=["HealingBuildError"]),
             )
-            log.error(
-                "main_workflow.healing.build_failed "
+        except Exception as heal_exc:
+            log.warning(
+                "main_workflow.healing.fallback_to_setup_target "
+                f"reason={str(heal_exc)[:200]}"
+            )
+            use_legacy_setup = True
+
+        if use_legacy_setup:
+            # Legacy path: use setup_target activity.
+            setup_out = await workflow.execute_activity(
+                "setup_target",
+                SetupTargetInput(
+                    target_repo=str(payload.target_repo),
+                    target_branch=payload.target_branch,
+                    sanitizers=payload.sanitizers,
+                    synthesize_harness=payload.harness_path is None,
+                ),
+                result_type=SetupTargetOutput,
+                start_to_close_timeout=timedelta(minutes=10),
+                retry_policy=_SETUP_RETRY,
+            )
+            harness_path = (
+                setup_out.workdir / payload.harness_path
+                if payload.harness_path
+                else setup_out.harness_path
+            )
+            target_workdir = setup_out.workdir
+            self._build_succeeded = True
+        else:
+            self._build_attempts = int(build_result.get("attempt_count", 0) or 0)
+            workspace_str = str(build_result.get("workspace_path", "") or "")
+            self._healing_workspace_path = workspace_str
+            target_workdir: Path = Path(workspace_str) if workspace_str else Path("/tmp")
+
+            if not bool(build_result.get("success", False)):
+                # ── Compilation failed: short-circuit the campaign. ─────────
+                self._build_succeeded = False
+                self._stage = WorkflowStage.FAILED_COMPILATION
+                failure_summary = str(build_result.get("summary", "") or "").strip() or (
+                    "adaptive build agent reported is_successful=False"
+                )
+                log.error(
+                    "main_workflow.healing.build_failed "
+                    f"campaign_id={healing_campaign_id} "
+                    f"attempts={self._build_attempts} "
+                    f"summary={failure_summary[:200]}"
+                )
+                if payload.campaign_id:
+                    await workflow.execute_activity(
+                        "update_campaign_status",
+                        {
+                            "campaign_id": payload.campaign_id,
+                            "status": WorkflowStage.FAILED_COMPILATION.value,
+                        },
+                        start_to_close_timeout=timedelta(seconds=10),
+                    )
+                finished_at = workflow.now()
+                return FuzzingOutput(
+                    crash_found=False,
+                    logs_path=target_workdir / "fuzz.log",
+                    crash_count=0,
+                    severity=CrashSeverity.UNKNOWN,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    summary=(
+                        f"Adaptive build failed after {self._build_attempts} "
+                        f"attempt(s): {failure_summary[:300]}"
+                    ),
+                    total_patches_generated=0,
+                    build_attempts=self._build_attempts,
+                    build_succeeded=False,
+                    healing_workspace_path=self._healing_workspace_path,
+                )
+
+            self._build_succeeded = True
+            log.info(
+                "main_workflow.healing.build_succeeded "
                 f"campaign_id={healing_campaign_id} "
                 f"attempts={self._build_attempts} "
-                f"summary={failure_summary[:200]}"
-            )
-            if payload.campaign_id:
-                await workflow.execute_activity(
-                    "update_campaign_status",
-                    {
-                        "campaign_id": payload.campaign_id,
-                        "status": WorkflowStage.FAILED_COMPILATION.value,
-                    },
-                    start_to_close_timeout=timedelta(seconds=10),
-                )
-            finished_at = workflow.now()
-            return FuzzingOutput(
-                crash_found=False,
-                logs_path=target_workdir / "fuzz.log",
-                crash_count=0,
-                severity=CrashSeverity.UNKNOWN,
-                started_at=started_at,
-                finished_at=finished_at,
-                summary=(
-                    f"Adaptive build failed after {self._build_attempts} "
-                    f"attempt(s): {failure_summary[:300]}"
-                ),
-                total_patches_generated=0,
-                build_attempts=self._build_attempts,
-                build_succeeded=False,
-                healing_workspace_path=self._healing_workspace_path,
+                f"workspace={target_workdir}"
             )
 
-        self._build_succeeded = True
-        log.info(
-            "main_workflow.healing.build_succeeded "
-            f"campaign_id={healing_campaign_id} "
-            f"attempts={self._build_attempts} "
-            f"workspace={target_workdir}"
-        )
+            # Resolve the harness path inside the healing workspace.
+            harness_path: Path | None = (
+                target_workdir / payload.harness_path if payload.harness_path else None
+            )
 
-        # Resolve the harness path inside the healing workspace. We use
-        # plain ``Path`` concatenation (no ``resolve()``) so the workflow
-        # body remains free of filesystem I/O.
-        harness_path: Path | None = (
-            target_workdir / payload.harness_path if payload.harness_path else None
-        )
-
-        # Synthesize a SetupTargetOutput-shaped object for the existing
-        # evolution helpers (which were written against the legacy
-        # ``setup_target`` contract). The fabricated commit_sha satisfies
-        # the model's min_length constraint without doing any I/O.
-        setup_out = SetupTargetOutput(
-            workdir=target_workdir,
-            commit_sha="healing-build",
-            harness_path=harness_path,
-        )
+            # Synthesize a SetupTargetOutput-shaped object for the existing
+            # evolution helpers.
+            setup_out = SetupTargetOutput(
+                workdir=target_workdir,
+                commit_sha="healing-build",
+                harness_path=harness_path,
+            )
 
         # ── 2. Initialise campaign state ────────────────────────────────────
         campaign = FuzzingCampaignState(
