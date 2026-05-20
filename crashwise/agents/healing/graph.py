@@ -122,6 +122,18 @@ class HealingState(BaseModel):
         default=None,
         description="Database identifier for the crash being repaired (Repair only).",
     )
+    crash_file_path: str | None = Field(
+        default=None,
+        description="Absolute path to the crash-triggering input file (Repair only).",
+    )
+    bug_type: str | None = Field(
+        default=None,
+        description="Classified bug type from triage (e.g. heap-buffer-overflow).",
+    )
+    root_cause: str | None = Field(
+        default=None,
+        description="LLM-generated root cause analysis from triage.",
+    )
 
     # ── Loop control ────────────────────────────────────────────────────
     attempt_count: int = Field(
@@ -340,6 +352,10 @@ async def agent_node(state: HealingState) -> dict[str, Any]:
         content_chars=len(_text_of(response)),
     )
 
+    # Strip reasoning_content from DeepSeek responses to prevent the
+    # "reasoning_content must be passed back" error on subsequent turns.
+    response = _strip_reasoning_content(response)
+
     # The state-update dict is merged by LangGraph; ``messages`` uses the
     # ``add_messages`` reducer so we only return the *new* messages.
     return {
@@ -515,13 +531,22 @@ def _seed_conversation(state: HealingState) -> list[AnyMessage]:
         )
     elif state.mode == HealingMode.REPAIR:
         log_blob = state.crash_context or "(no crash log was supplied)"
+        # Build enriched context from triage data.
+        extra_context = ""
+        if state.crash_file_path:
+            extra_context += f"\nCRASHER SEED PATH: {state.crash_file_path}"
+        if state.bug_type:
+            extra_context += f"\nBUG TYPE: {state.bug_type}"
+        if state.root_cause:
+            extra_context += f"\nROOT CAUSE (from triage): {state.root_cause}"
         seed.append(
             HumanMessage(
                 content=(
                     "Diagnose and repair the following crash. The instrumented "
                     "binary already exists in the workspace. After applying your "
                     "patch, recompile and verify the original crasher seed no "
-                    "longer triggers ASAN.\n\n"
+                    "longer triggers ASAN.\n"
+                    f"{extra_context}\n\n"
                     "----- ASAN/KASAN LOG -----\n"
                     f"{log_blob}\n"
                     "--------------------------"
@@ -529,6 +554,28 @@ def _seed_conversation(state: HealingState) -> list[AnyMessage]:
             )
         )
     return seed
+
+
+def _strip_reasoning_content(message: AIMessage) -> AIMessage:
+    """Remove ``reasoning_content`` from an AIMessage's additional_kwargs.
+
+    DeepSeek models in "thinking mode" return a ``reasoning_content`` field
+    alongside the normal ``content``. If this field is present in the message
+    history on subsequent turns, the API requires it to be passed back
+    verbatim — but LangChain's serialization doesn't guarantee this. The
+    simplest fix is to strip it before storing, so the next turn never
+    triggers the "reasoning_content must be passed back" validation error.
+    """
+    kwargs = message.additional_kwargs
+    if not kwargs or "reasoning_content" not in kwargs:
+        return message
+    cleaned = {k: v for k, v in kwargs.items() if k != "reasoning_content"}
+    return AIMessage(
+        content=message.content,
+        additional_kwargs=cleaned,
+        tool_calls=message.tool_calls,
+        id=message.id,
+    )
 
 
 def _text_of(message: AnyMessage) -> str:

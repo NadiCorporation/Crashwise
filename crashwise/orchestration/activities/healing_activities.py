@@ -188,6 +188,9 @@ async def run_autonomous_repair_activity(
     workspace_path: str | None = None,
     campaign_id: str | None = None,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    crash_file_path: str | None = None,
+    bug_type: str | None = None,
+    root_cause: str | None = None,
 ) -> dict[str, Any]:
     """Drive the healing graph in REPAIR mode for a single crash.
 
@@ -252,6 +255,9 @@ async def run_autonomous_repair_activity(
             mode=HealingMode.REPAIR,
             crash_context=asan_log,
             crash_id=crash_id,
+            crash_file_path=crash_file_path,
+            bug_type=bug_type,
+            root_cause=root_cause,
             max_attempts=max_attempts,
         )
 
