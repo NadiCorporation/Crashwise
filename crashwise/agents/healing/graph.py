@@ -327,7 +327,19 @@ async def agent_node(state: HealingState) -> dict[str, Any]:
     invocation.extend(m for m in history if not isinstance(m, SystemMessage))
 
     # ── Call the LLM ───────────────────────────────────────────────────
-    chat = get_llm_provider().chat_model
+    # Use a non-thinking model for multi-turn healing conversations.
+    # DeepSeek's reasoning_content breaks multi-turn LangChain calls.
+    provider = get_llm_provider()
+    from langchain_openai import ChatOpenAI
+
+    chat = ChatOpenAI(
+        model="kimi-k2.5",
+        temperature=provider.temperature,
+        api_key=provider.api_key,
+        base_url=provider.base_url,
+        timeout=provider.timeout_seconds,
+        max_retries=provider.max_retries,
+    )
     chat_with_tools = chat.bind_tools(_GRAPH_TOOLS)
 
     try:
