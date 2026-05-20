@@ -232,3 +232,63 @@ The worker image is a 3-stage build:
 1. AFL++ v4.21c compiled from source
 2. Python dependencies via uv
 3. Runtime: Debian bookworm-slim + clang + cmake + gcc + Docker CLI
+
+
+---
+
+## Healing Engine (Phase 22)
+
+The Healing Engine is a LangGraph state machine that drives two autonomous loops
+inside a Docker-based sandbox:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Healing Engine                             │
+├─────────────────────────────────────────────────────────────┤
+│  Mode: BUILD                    Mode: REPAIR                 │
+│  ┌───────────────────┐         ┌───────────────────┐        │
+│  │ Clone repo        │         │ Load ASAN log     │        │
+│  │ Discover build    │         │ + crash seed path │        │
+│  │ Install deps      │         │ + bug_type        │        │
+│  │ Inject sanitizers │         │ + root_cause      │        │
+│  │ Compile (iterate) │         │ Run GDB           │        │
+│  │ signal_completion │         │ Patch source      │        │
+│  └───────────────────┘         │ Recompile         │        │
+│                                │ Verify fix        │        │
+│                                │ signal_completion │        │
+│                                └───────────────────┘        │
+├─────────────────────────────────────────────────────────────┤
+│  Sandbox: Docker container (crashwise-worker:latest)         │
+│  Tools: execute_sandbox_command (docker exec)                │
+│         edit_sandbox_file (host file I/O on mounted volume)  │
+│  LLM: Configurable via llm_factory (DeepSeek/Qwen/Kimi)     │
+│  Fallback: If healing fails → legacy setup_target activity   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow: Triage → Repair
+
+```
+TriagedCrashRef {
+  crash_id, stack_hash, asan_log, crash_file_path,
+  bug_type, severity, signal, stack_trace, root_cause
+}
+    │
+    ▼
+run_autonomous_repair_activity(
+  crash_id, asan_log, workspace_path, campaign_id,
+  max_attempts, crash_file_path, bug_type, root_cause
+)
+    │
+    ▼
+HealingState {
+  mode=REPAIR, crash_context=asan_log,
+  crash_file_path, bug_type, root_cause
+}
+```
+
+### Fallback Strategy
+
+The workflow always attempts the Healing Engine first. On failure (SDK error,
+LLM error, or `success=False`), it falls back to the deterministic
+`setup_target` activity which uses scripted build logic.
