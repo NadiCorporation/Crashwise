@@ -22,7 +22,6 @@ Usage::
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -54,7 +53,7 @@ class NotificationConfig:
     min_cvss_threshold: float = 7.0
 
     @classmethod
-    def from_settings(cls) -> "NotificationConfig":
+    def from_settings(cls) -> NotificationConfig:
         """Build config from environment / settings."""
         settings = get_settings()
         return cls(
@@ -226,8 +225,9 @@ class NotificationRouter:
 
         # Build MIME message.
         try:
-            import aiosmtplib
             from email.message import EmailMessage
+
+            import aiosmtplib
 
             msg = EmailMessage()
             msg["From"] = self.config.smtp_from
@@ -337,4 +337,4 @@ def _pgp_encrypt(plaintext: str, public_key_armor: str) -> str:
     return str(encrypted)
 
 
-__all__ = ["NotificationRouter", "NotificationConfig"]
+__all__ = ["NotificationConfig", "NotificationRouter"]

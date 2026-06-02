@@ -8,10 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from crashwise.agents.reporting.cvss import calculate_cvss, _compute_base_score, _heuristic_vector
+from crashwise.agents.reporting.cvss import _compute_base_score, _heuristic_vector, calculate_cvss
 from crashwise.agents.reporting.generator import generate_report
 from crashwise.core.notifications import NotificationConfig, NotificationRouter
-
 
 # ── CVSS Calculator ────────────────────────────────────────────────────────────
 
@@ -223,7 +222,6 @@ async def test_router_skips_below_threshold() -> None:
 @pytest.mark.asyncio
 async def test_router_sends_webhook() -> None:
     """Webhook is called when configured and CVSS is above threshold."""
-    import httpx
 
     mock_response = MagicMock()
     mock_response.status_code = 200

@@ -21,7 +21,6 @@ Resilience:
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any
 
@@ -418,8 +417,9 @@ async def clear_mab_state(campaign_id: str) -> None:
 async def _save_campaign_state_to_db(campaign_id: str, state_json: str) -> None:
     """Persist campaign state to the database (primary source of truth)."""
     try:
-        from crashwise.core.database import get_session
         from sqlalchemy import text
+
+        from crashwise.core.database import get_session
 
         async with get_session() as session:
             await session.execute(
@@ -444,8 +444,9 @@ async def _load_campaign_state_from_db(campaign_id: str) -> dict[str, Any] | Non
     try:
         import json
 
-        from crashwise.core.database import get_session
         from sqlalchemy import text
+
+        from crashwise.core.database import get_session
 
         async with get_session() as session:
             result = await session.execute(
@@ -466,8 +467,9 @@ async def _load_campaign_state_from_db(campaign_id: str) -> dict[str, Any] | Non
 async def _save_mab_state_to_db(campaign_id: str, mab_state_json: str) -> None:
     """Persist MAB state to the database as a fallback when Redis is down."""
     try:
-        from crashwise.core.database import get_session
         from sqlalchemy import text
+
+        from crashwise.core.database import get_session
 
         async with get_session() as session:
             # Use a simple key-value approach via raw SQL to avoid new models.
@@ -493,8 +495,9 @@ async def _save_mab_state_to_db(campaign_id: str, mab_state_json: str) -> None:
 async def _load_mab_state_from_db(campaign_id: str) -> str | None:
     """Load MAB state from the database fallback."""
     try:
-        from crashwise.core.database import get_session
         from sqlalchemy import text
+
+        from crashwise.core.database import get_session
 
         async with get_session() as session:
             result = await session.execute(
@@ -514,17 +517,17 @@ async def _load_mab_state_from_db(campaign_id: str) -> str | None:
 
 
 __all__ = [
-    "incr_exec_counter",
-    "get_exec_counter",
-    "incr_crash_counter",
-    "get_crash_counter",
-    "is_stack_hash_known",
     "clear_dedup_cache",
-    "heartbeat",
-    "list_active_workers",
-    "set_campaign_state",
-    "get_campaign_state",
-    "save_mab_state",
-    "load_mab_state",
     "clear_mab_state",
+    "get_campaign_state",
+    "get_crash_counter",
+    "get_exec_counter",
+    "heartbeat",
+    "incr_crash_counter",
+    "incr_exec_counter",
+    "is_stack_hash_known",
+    "list_active_workers",
+    "load_mab_state",
+    "save_mab_state",
+    "set_campaign_state",
 ]

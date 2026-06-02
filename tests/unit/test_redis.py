@@ -7,7 +7,7 @@ Uses mocks so the suite stays fast and requires no Redis server.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -23,7 +23,6 @@ from crashwise.core.redis import (
     list_active_workers,
     set_campaign_state,
 )
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 

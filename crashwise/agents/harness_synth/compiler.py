@@ -156,7 +156,7 @@ async def compile_harness(
 class SanityResult:
     """Result of the fast-fail sanity check."""
 
-    __slots__ = ("passed", "edges_hit", "crashed_immediately", "output")
+    __slots__ = ("crashed_immediately", "edges_hit", "output", "passed")
 
     def __init__(self, *, passed: bool, edges_hit: int = 0,
                  crashed_immediately: bool = False, output: str = ""):
@@ -214,7 +214,7 @@ async def sanity_check(
             stdout_bytes, _ = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout + 5.0
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             stdout_bytes = b""
@@ -263,4 +263,4 @@ async def sanity_check(
     )
 
 
-__all__ = ["compile_harness", "sanity_check", "SanityResult"]
+__all__ = ["SanityResult", "compile_harness", "sanity_check"]

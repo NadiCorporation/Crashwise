@@ -313,9 +313,7 @@ async def test_docker_run_does_not_use_rm_flag(sample_job: FuzzJob) -> None:
         proc = MagicMock(spec=asyncio.subprocess.Process)
         proc.returncode = 0
         # First call (images query) returns empty so we proceed to pull+run.
-        if args[:2] == ("docker", "images"):
-            proc.communicate = AsyncMock(return_value=(b"", b""))
-        elif args[:2] == ("docker", "pull"):
+        if args[:2] == ("docker", "images") or args[:2] == ("docker", "pull"):
             proc.communicate = AsyncMock(return_value=(b"", b""))
         else:
             proc.communicate = AsyncMock(return_value=(b"abc123\n", b""))
@@ -341,9 +339,7 @@ async def test_docker_cleanup_invokes_rm_force(sample_job: FuzzJob) -> None:
         captured_argv.append(args)
         proc = MagicMock(spec=asyncio.subprocess.Process)
         proc.returncode = 0
-        if args[:2] == ("docker", "images"):
-            proc.communicate = AsyncMock(return_value=(b"", b""))
-        elif args[:2] == ("docker", "pull"):
+        if args[:2] == ("docker", "images") or args[:2] == ("docker", "pull"):
             proc.communicate = AsyncMock(return_value=(b"", b""))
         else:
             proc.communicate = AsyncMock(return_value=(b"abc123\n", b""))
@@ -370,9 +366,7 @@ async def test_docker_corpus_preservation_order(sample_job: FuzzJob, tmp_path: P
         order.append(op)
         proc = MagicMock(spec=asyncio.subprocess.Process)
         proc.returncode = 0
-        if op == "images":
-            proc.communicate = AsyncMock(return_value=(b"", b""))
-        elif op == "pull":
+        if op == "images" or op == "pull":
             proc.communicate = AsyncMock(return_value=(b"", b""))
         elif op == "run":
             proc.communicate = AsyncMock(return_value=(b"abc123\n", b""))

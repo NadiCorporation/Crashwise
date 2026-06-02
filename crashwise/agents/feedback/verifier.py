@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Any
 
 from crashwise.agents.harness_synth.compiler import compile_harness
-from crashwise.agents.harness_synth.state import CompileResult
 from crashwise.core.logging import get_logger
 from crashwise.core.models import FuzzerType
 
@@ -199,7 +198,7 @@ async def _clone_repo(repo_url: str) -> Path:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout_b, stderr_b = await proc.communicate()
+    _stdout_b, stderr_b = await proc.communicate()
     if proc.returncode != 0:
         stderr = stderr_b.decode("utf-8", errors="replace")
         raise RuntimeError(f"git clone failed: {stderr[:500]}")
@@ -315,4 +314,4 @@ async def _run_regression(
     return crash_reproduced, stdout, stderr
 
 
-__all__ = ["verify_patch", "VerificationResult"]
+__all__ = ["VerificationResult", "verify_patch"]

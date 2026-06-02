@@ -13,10 +13,8 @@ original fuzzer-found crash.
 from __future__ import annotations
 
 import asyncio
-import os
 import tempfile
 from pathlib import Path
-from uuid import UUID
 
 from temporalio import activity
 
@@ -81,7 +79,7 @@ async def verify_poc(payload: PocVerifyInput) -> PocVerifyOutput:
         log.info("verify_poc.compiled", crash_id=payload.crash_id, binary=str(binary_path))
 
         # 2. Execute.
-        exec_ok, exec_stdout, exec_stderr, signal_received = await _execute(
+        _exec_ok, exec_stdout, exec_stderr, signal_received = await _execute(
             binary_path,
             timeout=payload.timeout_seconds,
         )
@@ -169,7 +167,7 @@ async def _execute(
             proc.communicate(),
             timeout=timeout,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         stdout, stderr = await proc.communicate()
         return False, stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace"), "TIMEOUT"

@@ -21,7 +21,7 @@ from crashwise.core.config import get_settings
 from crashwise.core.database import Seed, get_session
 from crashwise.core.logging import get_logger
 from crashwise.core.models import SeedCorpusInput, SeedMetadata
-from crashwise.core.storage import sync_directory, upload_file
+from crashwise.core.storage import sync_directory
 
 log = get_logger(__name__)
 

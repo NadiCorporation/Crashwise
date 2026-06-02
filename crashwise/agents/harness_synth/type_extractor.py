@@ -102,12 +102,6 @@ def extract_types_for_signature(workdir: Path, signature: str) -> str:
 
 def _extract_struct(content: str, name: str) -> str | None:
     """Extract a struct definition by name, handling nested braces."""
-    # Pattern: struct <name> { ... } or typedef struct ... } <name>;
-    patterns = [
-        rf"((?:typedef\s+)?struct\s+{re.escape(name)}\s*\{{)",
-        rf"(typedef\s+struct\s*\{{[^}}]*\}}\s*{re.escape(name)}\s*;)",
-    ]
-
     # Try the typedef struct ... } name; pattern first (single regex).
     typedef_pattern = rf"typedef\s+struct\s*\w*\s*\{{[^}}]*\}}\s*{re.escape(name)}\s*;"
     m = re.search(typedef_pattern, content, re.DOTALL)

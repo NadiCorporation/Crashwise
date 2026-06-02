@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import shutil
-import subprocess
-from datetime import UTC, datetime
 from pathlib import Path
 
 from temporalio import activity
@@ -157,7 +155,7 @@ async def _clone_repo(
         _, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=_CLONE_TIMEOUT_SECONDS
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         raise ApplicationError(
             f"git clone timed out after {_CLONE_TIMEOUT_SECONDS}s for {repo_url}",
@@ -185,7 +183,7 @@ async def _clone_repo(
                 _, stderr2 = await asyncio.wait_for(
                     proc2.communicate(), timeout=_CLONE_TIMEOUT_SECONDS
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc2.kill()
                 raise ApplicationError(
                     f"git clone (full) timed out for {repo_url}",
@@ -289,10 +287,10 @@ async def _build_target(workdir: Path, sanitizers: str) -> None:
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(
+        _stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=_BUILD_TIMEOUT_SECONDS
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         log.warning(
             "setup_target.build.timeout",
@@ -395,7 +393,7 @@ def _find_best_source_for_synthesis(workdir: Path) -> str | None:
             except OSError:
                 continue
             # Match function DEFINITION (has opening brace).
-            pattern = rf"^\w[\w\s\*]*\b{re.escape(best_api.name)}\s*\([^)]*\)\s*\{{" 
+            pattern = rf"^\w[\w\s\*]*\b{re.escape(best_api.name)}\s*\([^)]*\)\s*\{{"
             if re.search(pattern, content, re.MULTILINE):
                 candidates_by_def.append(p)
         # Prefer name-matched file, then definition-matched.
@@ -513,7 +511,7 @@ async def _compile_harness(
     )
     try:
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         return None
 

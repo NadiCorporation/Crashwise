@@ -17,6 +17,7 @@ never return an empty result.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -75,8 +76,9 @@ async def analyze_code(state: HarnessState) -> HarnessState:
         type_defs = extract_types_for_signature(target_root, selected.signature)
     elif source_code:
         # No entry point selected — extract types from all function signatures in the file.
-        from crashwise.agents.harness_synth.type_extractor import extract_types_for_signature
         import re as _re
+
+        from crashwise.agents.harness_synth.type_extractor import extract_types_for_signature
         target_root = state.source_path.parent
         for parent in state.source_path.parents:
             if (parent / "include").is_dir() or (parent / "CMakeLists.txt").is_file():
@@ -384,7 +386,7 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return False
 
 
-async def _invoke_with_backoff(chat: "ChatModelLike", messages: list) -> "AIMessage":
+async def _invoke_with_backoff(chat: ChatModelLike, messages: list) -> AIMessage:
     """Invoke the LLM with exponential backoff on rate-limit errors.
 
     This ensures transient API blocks (429, quota, timeout) don't consume

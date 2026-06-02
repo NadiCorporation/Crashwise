@@ -40,24 +40,23 @@ from crashwise.core.sentinel import (
     run_all_checks,
 )
 
-
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
 def test_run_command_found() -> None:
-    rc, out, err = _run(["echo", "hello"])
+    rc, out, _err = _run(["echo", "hello"])
     assert rc == 0
     assert out == "hello"
 
 
 def test_run_command_not_found() -> None:
-    rc, out, err = _run(["nonexistent_command_xyz"])
+    rc, _out, err = _run(["nonexistent_command_xyz"])
     assert rc == 127
     assert "not found" in err.lower() or err == ""
 
 
 def test_run_command_timeout() -> None:
-    rc, out, err = _run(["sleep", "10"], timeout=0.1)
+    rc, _out, err = _run(["sleep", "10"], timeout=0.1)
     assert rc == -1
     assert "timed out" in err.lower()
 

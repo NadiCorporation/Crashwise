@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import mimetypes
 from pathlib import Path
-from typing import AsyncGenerator
 
 import aioboto3
 
@@ -303,9 +302,9 @@ async def upload_bytes(
 
 
 __all__ = [
-    "upload_file",
     "download_file",
     "list_objects",
     "sync_directory",
     "upload_bytes",
+    "upload_file",
 ]

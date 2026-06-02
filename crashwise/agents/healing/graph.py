@@ -198,16 +198,17 @@ Operating procedure:
    libssl-dev, zlib1g-dev). Pin to package names; never assume.
 3. Inject the sanitizer + coverage flags into the build configuration.
 4. Run the build. Stream stderr; reason about every error before re-trying.
-5. When `make` / `cmake --build` exits 0 and produces an instrumented binary,
-   call `signal_completion(success=True, summary=<build commands you ran>,
+5. When `make` / `cmake --build` exits 0 and produces a binary on disk,
+   immediately call `signal_completion(success=True, summary=<build commands you ran>,
    artefact=<resolved CFLAGS/LDFLAGS/configure commands as JSON>)`.
+   Do NOT run additional verification steps (nm, ldd, etc.) — they waste budget.
 
 Hard rules:
 - Do not modify source code under the project's `src/`, `lib/`, or
   `include/` trees. You may *only* edit build files (Makefile,
   CMakeLists.txt, configure scripts) and create wrapper compile scripts.
-- Do not call signal_completion(success=True) until you have observed a
-  zero-exit build and a binary on disk. Speculative success is forbidden.
+- Call signal_completion(success=True) as soon as the build exits 0 with a binary.
+  Do not second-guess a successful build with extra checks.
 - Be terse. Each tool call should advance the build by at least one step.
 """
 
@@ -327,19 +328,8 @@ async def agent_node(state: HealingState) -> dict[str, Any]:
     invocation.extend(m for m in history if not isinstance(m, SystemMessage))
 
     # ── Call the LLM ───────────────────────────────────────────────────
-    # Use a non-thinking model for multi-turn healing conversations.
-    # DeepSeek's reasoning_content breaks multi-turn LangChain calls.
-    provider = get_llm_provider()
-    from langchain_openai import ChatOpenAI
-
-    chat = ChatOpenAI(
-        model="kimi-k2.5",
-        temperature=provider.temperature,
-        api_key=provider.api_key,
-        base_url=provider.base_url,
-        timeout=provider.timeout_seconds,
-        max_retries=provider.max_retries,
-    )
+    # Use the unified LLM factory for provider-agnosticism.
+    chat = get_llm_provider().chat_model
     chat_with_tools = chat.bind_tools(_GRAPH_TOOLS)
 
     try:

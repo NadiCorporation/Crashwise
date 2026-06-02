@@ -36,12 +36,11 @@ from crashwise import __version__
 from crashwise.core.config import get_settings
 from crashwise.core.database import close_db, init_db
 from crashwise.core.logging import configure_logging, get_logger
-from crashwise.core.manifest import CrashwiseManifest, load_manifest_or_none
-from crashwise.core.models import FuzzerType, FuzzingInput
+from crashwise.core.manifest import load_manifest_or_none
+from crashwise.core.models import FuzzerType, FuzzingInput, FuzzingOutput
 from crashwise.orchestration.client import (
     TemporalConnectionError,
     connect,
-    execute_main_workflow,
     start_main_workflow,
 )
 from crashwise.orchestration.worker import run_worker
@@ -108,16 +107,15 @@ def init(
       3. Create database tables.
     """
     configure_logging()
-    from crashwise.core.database import close_db, init_db
     from crashwise.core.discovery import discover_project
-    from crashwise.core.manifest import CrashwiseManifest, MANIFEST_FILENAME
+    from crashwise.core.manifest import MANIFEST_FILENAME
 
     target_dir = target_dir.resolve()
     if not target_dir.is_dir():
         console.print(f"[bold red]Not a directory:[/] {target_dir}")
         raise typer.Exit(code=1)
 
-    console.print(f"[bold cyan]CrashWise Project Initialisation[/]")
+    console.print("[bold cyan]CrashWise Project Initialisation[/]")
     console.print(f"Target directory: {target_dir}")
     console.print()
 
@@ -183,7 +181,6 @@ def doctor(
     """Run system health diagnostics (the Sentinel)."""
     from crashwise.core.sentinel import (
         CheckStatus,
-        generate_setup_script,
         get_missing_packages,
         run_all_checks,
     )
@@ -665,8 +662,7 @@ def run(
         console.print(f"\n[bold cyan]⏳ Workflow running...[/] (timeout: {timeout_seconds}s)")
         console.print("[dim]Waiting for result. Use --detach to submit and exit immediately.[/]\n")
         try:
-            async def _await_result() -> "FuzzingOutput":
-                from crashwise.core.models import FuzzingOutput
+            async def _await_result() -> FuzzingOutput:
 
                 client = await connect(host=host, namespace=namespace)
                 handle = client.get_workflow_handle(workflow_id)
@@ -950,15 +946,15 @@ def exploit(
                 await session.commit()
 
                 if verify_result.compiled:
-                    console.print(f"[bold green]Compilation:[/] OK")
+                    console.print("[bold green]Compilation:[/] OK")
                 else:
-                    console.print(f"[bold red]Compilation:[/] FAILED")
+                    console.print("[bold red]Compilation:[/] FAILED")
                     console.print(f"  {verify_result.stderr[:500]}")
 
                 if verify_result.crash_reproduced:
                     console.print(f"[bold green]Crash reproduced:[/] YES ({verify_result.signal_received})")
                 else:
-                    console.print(f"[bold yellow]Crash reproduced:[/] NO")
+                    console.print("[bold yellow]Crash reproduced:[/] NO")
 
     try:
         asyncio.run(_generate())

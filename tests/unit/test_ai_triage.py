@@ -9,7 +9,6 @@ from uuid import uuid4
 
 import pytest
 
-from crashwise.agents.feedback.patcher import suggest_patch
 from crashwise.core.ai_provider import (
     OllamaProvider,
     VeniceProvider,
@@ -18,7 +17,6 @@ from crashwise.core.ai_provider import (
     get_provider,
 )
 from crashwise.core.config import get_settings
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -114,40 +112,6 @@ def test_safe_parse_json_invalid() -> None:
 # ── Patcher ──────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_patcher_with_null_provider() -> None:
-    """When no provider is configured, patcher returns empty patch."""
-    result = await suggest_patch("heap overflow in parser.c:42")
-    assert result["patch"] == ""
-    assert result["confidence"] == 0.0
-
-
-@pytest.mark.asyncio
-async def test_patcher_with_mock_provider() -> None:
-    """Patcher delegates to provider and returns structured result."""
-    mock_provider = AsyncMock()
-    mock_provider.suggest_patch.return_value = {
-        "patch": "+ if (len > 0) {\n+     buf = malloc(len);\n+ }",
-        "explanation": "Add bounds check",
-        "confidence": 0.9,
-    }
-
-    result = await suggest_patch("heap overflow", provider=mock_provider)
-    assert result["patch"] == "+ if (len > 0) {\n+     buf = malloc(len);\n+ }"
-    assert result["confidence"] == 0.9
-    mock_provider.suggest_patch.assert_called_once_with("heap overflow")
-
-
-@pytest.mark.asyncio
-async def test_patcher_empty_root_cause() -> None:
-    """Empty root cause returns empty result without calling provider."""
-    mock_provider = AsyncMock()
-    result = await suggest_patch("", provider=mock_provider)
-    assert result["patch"] == ""
-    assert result["confidence"] == 0.0
-    mock_provider.suggest_patch.assert_not_called()
-
-
 # ── Ollama provider (mocked HTTP) ──────────────────────────────────────────
 
 
@@ -176,7 +140,6 @@ async def test_ollama_provider_analyze() -> None:
 @pytest.mark.asyncio
 async def test_ollama_provider_health_check() -> None:
     """Health check returns True when Ollama is reachable."""
-    import httpx
 
     provider = OllamaProvider()
 
@@ -220,7 +183,6 @@ async def test_venice_provider_analyze() -> None:
 @pytest.mark.asyncio
 async def test_venice_provider_health_check() -> None:
     """Health check returns True when Venice API is reachable."""
-    import httpx
 
     provider = VeniceProvider(api_key="test-key")
 
@@ -259,3 +221,86 @@ async def test_analyze_crash_activity_null_provider(monkeypatch: pytest.MonkeyPa
     assert result["bug_type"] == "unknown"
     assert result["exploitability"] == 0.0
     assert "not configured" in result["root_cause"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_crash_skips_patch_when_self_healing_enabled() -> None:
+    """When skip_patch_generation=True, no patch is generated."""
+    from crashwise.orchestration.activities.analyze_crash import analyze_crash
+
+    mock_info = MagicMock()
+    mock_info.workflow_id = "test-workflow"
+    mock_info.attempt = 1
+
+    mock_provider = AsyncMock()
+    mock_provider.health_check.return_value = True
+    mock_provider.analyze.return_value = {
+        "bug_type": "heap-buffer-overflow",
+        "exploitability": 8.0,
+        "root_cause": "Out-of-bounds write in parser",
+        "vulnerability_type": "cwe-122",
+        "confidence": 0.9,
+    }
+
+    with (
+        patch("crashwise.orchestration.activities.analyze_crash.activity.info", return_value=mock_info),
+        patch("crashwise.orchestration.activities.analyze_crash.get_provider", return_value=mock_provider),
+        patch("crashwise.orchestration.activities.analyze_crash._update_crash_record", new_callable=AsyncMock),
+    ):
+        result = await analyze_crash(
+            crash_id=str(uuid4()),
+            crash_context="ASAN: heap-buffer-overflow",
+            campaign_id=str(uuid4()),
+            skip_patch_generation=True,
+        )
+
+    assert result["patch"] == ""
+    assert result["patch_confidence"] == 0.0
+    # Provider.analyze should only be called once (for RCA, not for patch)
+    assert mock_provider.analyze.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_analyze_crash_generates_patch_when_self_healing_disabled() -> None:
+    """When skip_patch_generation=False, intelligent patch is generated."""
+    from crashwise.orchestration.activities.analyze_crash import analyze_crash
+
+    mock_info = MagicMock()
+    mock_info.workflow_id = "test-workflow"
+    mock_info.attempt = 1
+
+    mock_provider = AsyncMock()
+    mock_provider.health_check.return_value = True
+    mock_provider.analyze.side_effect = [
+        # First call: RCA
+        {
+            "bug_type": "use-after-free",
+            "exploitability": 9.0,
+            "root_cause": "Use-after-free in cleanup",
+            "vulnerability_type": "cwe-416",
+            "confidence": 0.95,
+        },
+        # Second call: patch generation
+        {
+            "patch": "--- a/parser.c\n+++ b/parser.c\n@@ -42,6 +42,7 @@\n+ if (ptr) free(ptr);",
+            "explanation": "Add null check before free",
+            "confidence": 0.85,
+        },
+    ]
+
+    with (
+        patch("crashwise.orchestration.activities.analyze_crash.activity.info", return_value=mock_info),
+        patch("crashwise.orchestration.activities.analyze_crash.get_provider", return_value=mock_provider),
+        patch("crashwise.orchestration.activities.analyze_crash._update_crash_record", new_callable=AsyncMock),
+    ):
+        result = await analyze_crash(
+            crash_id=str(uuid4()),
+            crash_context="ASAN: use-after-free",
+            campaign_id=str(uuid4()),
+            skip_patch_generation=False,
+        )
+
+    assert "if (ptr) free(ptr)" in result["patch"]
+    assert result["patch_confidence"] == 0.85
+    # Provider.analyze should be called twice (RCA + patch)
+    assert mock_provider.analyze.call_count == 2

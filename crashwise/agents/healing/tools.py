@@ -155,7 +155,7 @@ class OpenHandsSandbox:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        _stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
             err = stderr.decode("utf-8", errors="replace")
             raise RuntimeError(f"Failed to start healing sandbox: {err}")
@@ -227,7 +227,7 @@ class OpenHandsSandbox:
             if len(output) > _OUTPUT_TRUNCATION_BUDGET:
                 output = output[:_OUTPUT_TRUNCATION_BUDGET] + "\n... [truncated]"
             return _ToolResult(output=output, exit_code=proc.returncode or 0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning(
                 "healing.sandbox.execute.timeout",
                 container_id=self.container_id,

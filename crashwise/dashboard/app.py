@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
-import time
 from typing import Any
 
 import httpx

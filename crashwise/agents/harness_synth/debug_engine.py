@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from crashwise.core.logging import get_logger
@@ -90,7 +90,7 @@ async def debug_crash(binary_path: Path, *, timeout: float = 10.0) -> CrashDiagn
             stdout_bytes, _ = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             stdout_bytes = b"(gdb timed out)"

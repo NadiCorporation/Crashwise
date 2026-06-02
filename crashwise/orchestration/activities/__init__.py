@@ -38,6 +38,9 @@ from crashwise.orchestration.activities.profile_target import profile_target
 from crashwise.orchestration.activities.read_coverage_data import read_coverage_data
 from crashwise.orchestration.activities.seed_corpus import seed_corpus
 from crashwise.orchestration.activities.setup_target import setup_target
+from crashwise.orchestration.activities.store_campaign_knowledge import (
+    store_campaign_knowledge,
+)
 from crashwise.orchestration.activities.triage_results import triage_results
 from crashwise.orchestration.activities.update_campaign import update_campaign_status
 from crashwise.orchestration.activities.verify_patch import (
@@ -77,6 +80,8 @@ ALL_ACTIVITIES: list[Callable[..., Any]] = [
     # Phase 22 — CrashWise Healing Engine.
     run_adaptive_build_activity,
     run_autonomous_repair_activity,
+    # Phase 23 — Cross-Campaign Learning.
+    store_campaign_knowledge,
 ]
 
 __all__ = [
@@ -100,6 +105,7 @@ __all__ = [
     "read_coverage_data",
     "run_adaptive_build_activity",
     "run_autonomous_repair_activity",
+    "store_campaign_knowledge",
     "update_verification_status",
     "verify_poc",
     "verify_with_seed",

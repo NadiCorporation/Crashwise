@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
 
 import pytest
 
@@ -17,8 +16,7 @@ from crashwise.agents.feedback.verifier import (
     _run_regression,
     verify_patch,
 )
-from crashwise.core.models import FuzzerType, VerificationStatus
-
+from crashwise.core.models import FuzzerType
 
 # ── Verifier unit tests ──────────────────────────────────────────────────────
 
@@ -31,15 +29,15 @@ async def test_apply_patch_git_apply(tmp_path: Path) -> None:
     target_file.write_text("int main() { return 0; }\n")
 
     # Create a unified diff patch.
-    patch_text = f"""\
+    patch_text = """\
 --- a/main.c
 +++ b/main.c
 @@ -1 +1 @@
--int main() {{ return 0; }}
-+int main() {{ return 1; }}
+-int main() { return 0; }
++int main() { return 1; }
 """
 
-    ok, stderr = await _apply_patch(tmp_path, patch_text)
+    ok, _stderr = await _apply_patch(tmp_path, patch_text)
     assert ok is True
     assert "return 1" in target_file.read_text()
 
@@ -48,7 +46,7 @@ async def test_apply_patch_git_apply(tmp_path: Path) -> None:
 async def test_apply_patch_invalid_patch(tmp_path: Path) -> None:
     """Invalid patch returns failure."""
     patch_text = "this is not a valid patch"
-    ok, stderr = await _apply_patch(tmp_path, patch_text)
+    ok, _stderr = await _apply_patch(tmp_path, patch_text)
     assert ok is False
 
 
@@ -71,7 +69,7 @@ def test_discover_harness_not_found(tmp_path: Path) -> None:
 async def test_run_regression_crash_reproduced(tmp_path: Path) -> None:
     """Regression detects ASAN error in stderr."""
     # Create a fake binary that prints ASAN error.
-    binary = tmp_path / "harness.out"
+    _binary = tmp_path / "harness.out"
     script = tmp_path / "fake_harness.sh"
     script.write_text("#!/bin/bash\necho 'ERROR: AddressSanitizer: heap-buffer-overflow' >&2\n")
     script.chmod(0o755)
@@ -79,7 +77,7 @@ async def test_run_regression_crash_reproduced(tmp_path: Path) -> None:
     seed = tmp_path / "crash.seed"
     seed.write_bytes(b"A")
 
-    crash_reproduced, stdout, stderr = await _run_regression(
+    crash_reproduced, _stdout, stderr = await _run_regression(
         binary_path=script,
         seed_path=seed,
         workdir=tmp_path,
@@ -93,7 +91,7 @@ async def test_run_regression_crash_reproduced(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_regression_no_crash(tmp_path: Path) -> None:
     """Regression passes when no ASAN error."""
-    binary = tmp_path / "harness.out"
+    _binary = tmp_path / "harness.out"
     script = tmp_path / "fake_harness.sh"
     script.write_text("#!/bin/bash\necho 'OK'\n")
     script.chmod(0o755)
@@ -101,7 +99,7 @@ async def test_run_regression_no_crash(tmp_path: Path) -> None:
     seed = tmp_path / "crash.seed"
     seed.write_bytes(b"A")
 
-    crash_reproduced, stdout, stderr = await _run_regression(
+    crash_reproduced, _stdout, _stderr = await _run_regression(
         binary_path=script,
         seed_path=seed,
         workdir=tmp_path,

@@ -302,7 +302,7 @@ async def hot_swap_harness(payload: HotSwapInput) -> HotSwapOutput:
             stdout_b, stderr_b = await asyncio.wait_for(
                 proc.communicate(), timeout=300.0  # 5-minute compile timeout.
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Kill the stuck compiler.
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()

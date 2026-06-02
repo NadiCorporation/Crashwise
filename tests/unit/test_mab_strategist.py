@@ -5,8 +5,7 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,12 +20,10 @@ from crashwise.agents.execution.strategist import (
 )
 from crashwise.core.models import (
     FuzzerType,
-    MabState,
     PivotStrategyInput,
     StrategyArm,
 )
 from crashwise.orchestration.activities.pivot_strategy import pivot_strategy
-
 
 # ── MAB Initialisation ───────────────────────────────────────────────────────
 

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from crashwise.cli import app
@@ -53,9 +52,9 @@ def test_init_creates_tables() -> None:
 
 def test_init_force_recreate() -> None:
     with patch("crashwise.cli.init_db", new_callable=AsyncMock) as mock_init, \
-         patch("crashwise.cli.close_db", new_callable=AsyncMock) as mock_close, \
+         patch("crashwise.cli.close_db", new_callable=AsyncMock) as _mock_close, \
          patch("crashwise.core.discovery.discover_project", return_value=None), \
-         patch("crashwise.core.discovery.DiscoveredProfile") as mock_profile_cls, \
+         patch("crashwise.core.discovery.DiscoveredProfile") as _mock_profile_cls, \
          patch("crashwise.cli.CrashwiseManifest") as mock_manifest_cls:
         mock_manifest_cls.return_value.to_file = MagicMock()
         result = runner.invoke(app, ["init", "--db-force"])

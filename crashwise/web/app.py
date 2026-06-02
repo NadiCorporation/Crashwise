@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -175,7 +175,7 @@ async def list_crashes(campaign_id: str | None = None):
 @app.get("/telemetry/stream")
 async def telemetry_stream():
     """Server-Sent Events stream of real-time fuzzing statistics."""
-    from sqlalchemy import func, text
+    from sqlalchemy import func
 
     from crashwise.core.database import Campaign, Crash, FuzzingRun, get_session
 
