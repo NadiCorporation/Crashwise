@@ -6,10 +6,9 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
-import yaml
-from unittest.mock import patch
 
 from crashwise.core.discovery import (
     DiscoveredProfile,
@@ -27,11 +26,9 @@ from crashwise.core.manifest import (
     CrashwiseManifest,
     FuzzingSection,
     ProjectSection,
-    ReportingSection,
     find_manifest,
     load_manifest_or_none,
 )
-
 
 # ── Manifest Model ─────────────────────────────────────────────────────────────
 
@@ -135,7 +132,7 @@ def test_load_manifest_or_none_auto_discover() -> None:
 def test_detect_build_system_cmake() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.10)")
-        system, cmd, out = _detect_build_system(Path(tmpdir))
+        system, cmd, _out = _detect_build_system(Path(tmpdir))
         assert system == "cmake"
         assert "cmake" in cmd
 
@@ -143,14 +140,14 @@ def test_detect_build_system_cmake() -> None:
 def test_detect_build_system_make() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "Makefile").write_text("all:\n\techo ok")
-        system, cmd, out = _detect_build_system(Path(tmpdir))
+        system, _cmd, _out = _detect_build_system(Path(tmpdir))
         assert system == "make"
 
 
 def test_detect_build_system_cargo() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "Cargo.toml").write_text("[package]\nname = \"foo\"")
-        system, cmd, out = _detect_build_system(Path(tmpdir))
+        system, _cmd, _out = _detect_build_system(Path(tmpdir))
         assert system == "cargo"
 
 

@@ -85,14 +85,7 @@ def _harvest_reports(crashes_dir: Path, logs_path: Path | None = None) -> list[C
     if logs_path and logs_path.exists():
         try:
             log_text = logs_path.read_text(encoding="utf-8", errors="replace")
-            # Split on ASAN error boundaries to get individual crash reports.
-            import re
-
-            asan_pattern = re.compile(
-                r"(=+\d+=+ERROR: AddressSanitizer:.*?)(?==+\d+=+ERROR:|SUMMARY: AddressSanitizer)",
-                re.DOTALL,
-            )
-            # Simpler fallback: find all ASAN blocks.
+            # Simpler approach: find all ASAN blocks.
             idx = 0
             while True:
                 start = log_text.find("ERROR: AddressSanitizer", idx)

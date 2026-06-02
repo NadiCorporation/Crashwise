@@ -404,7 +404,7 @@ async def _persist_run(
     output: ExecuteFuzzingOutput,
 ) -> None:
     """Write fuzzing run stats to the DB."""
-    from datetime import UTC, datetime
+    from datetime import datetime
     from uuid import UUID
 
     from crashwise.core.database import FuzzingRun, get_session
@@ -486,7 +486,6 @@ def _collect_coverage_data(output_dir: Path, payload: ExecuteFuzzingInput) -> Pa
         llvm_cov_path = output_dir / "coverage_llvm.json"
         profdata = output_dir / "default.profdata"
         harness = payload.harness_path or (payload.workdir / "harness")
-        import shlex
         import subprocess
         # Merge raw profile data.
         try:

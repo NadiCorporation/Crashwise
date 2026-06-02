@@ -24,7 +24,6 @@ from crashwise.agents.harness_synth.llm import get_chat_model
 from crashwise.core.logging import get_logger
 from crashwise.core.models import (
     BlockerType,
-    CoverageBlocker,
     EvolveHarnessInput,
     EvolveHarnessOutput,
 )
@@ -88,6 +87,11 @@ _USER_PROMPT_TEMPLATE = """\
 - Condition: {condition_text}
 - Expected value to pass: {expected_value}
 - Confidence: {confidence}
+
+### Source Code Around Blocker (lines {line_start}-{line_end}):
+```cpp
+{blocker_source_context}
+```
 </UNTRUSTED_TARGET_SOURCE>
 
 ## Task
@@ -95,6 +99,9 @@ _USER_PROMPT_TEMPLATE = """\
 Rewrite the harness to bypass this blocker. The fuzzer input should be
 pre-processed so the target function receives data that ALWAYS passes the
 condition at line {line_number}.
+
+Specific bypass strategies for this blocker type:
+{bypass_strategies}
 
 Output ONLY the rewritten harness code block. No explanation.
 """
@@ -228,6 +235,21 @@ async def _llm_evolve(payload: EvolveHarnessInput) -> EvolveHarnessOutput | None
         from langchain_core.messages import HumanMessage, SystemMessage
 
         chat = get_chat_model()
+
+        # Read source code around the blocker for context.
+        blocker_source_context = _read_blocker_context(
+            payload.target_source_path,
+            payload.blocker.line_number,
+        )
+
+        # Generate bypass strategies based on blocker type.
+        bypass_strategies = _generate_bypass_strategies(payload.blocker.blocker_type)
+
+        # Calculate line range for context display.
+        line_num = payload.blocker.line_number
+        line_start = max(1, line_num - 5) if line_num > 0 else 1
+        line_end = line_num + 5 if line_num > 0 else 10
+
         user_prompt = _USER_PROMPT_TEMPLATE.format(
             harness_code=payload.current_harness_code,
             blocker_type=payload.blocker.blocker_type.value,
@@ -236,6 +258,10 @@ async def _llm_evolve(payload: EvolveHarnessInput) -> EvolveHarnessOutput | None
             condition_text=payload.blocker.condition_text,
             expected_value=payload.blocker.expected_value or "(unknown)",
             confidence=payload.blocker.confidence,
+            line_start=line_start,
+            line_end=line_end,
+            blocker_source_context=blocker_source_context,
+            bypass_strategies=bypass_strategies,
         )
         messages = [
             SystemMessage(content=_EVOLUTION_SYSTEM_PROMPT),
@@ -290,7 +316,25 @@ def _template_evolve(payload: EvolveHarnessInput) -> EvolveHarnessOutput:
     # Extract target call from existing harness.
     target_call = _extract_target_call(payload.current_harness_code)
     if not target_call:
-        target_call = "  // TODO: add target function call\n"
+        # Cannot evolve without a target call — return original harness
+        # with a note explaining why evolution was skipped. This prevents
+        # generating no-op harnesses that compile but exercise zero code.
+        log.warning(
+            "harness_evolution.template_skip_no_target_call",
+            iteration=payload.iteration,
+            blocker_type=btype.value,
+        )
+        return EvolveHarnessOutput(
+            evolved_harness_code=payload.current_harness_code,
+            bypass_strategy="Skipped — could not extract target call from harness",
+            confidence=0.0,
+            compilation_command="gcc -fsanitize=address -g -O0 -o harness harness.c",
+            notes=(
+                f"Template evolution skipped: could not identify target function call "
+                f"in harness. Blocker: {btype.value} at line {blocker.line_number}. "
+                f"Manual harness review required."
+            ),
+        )
 
     if btype == BlockerType.MAGIC_VALUE:
         magic_bytes = _parse_magic_bytes(blocker.expected_value)
@@ -352,20 +396,105 @@ def _template_evolve(payload: EvolveHarnessInput) -> EvolveHarnessOutput:
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _extract_target_call(harness_code: str) -> str:
-    """Extract the target function call from an existing harness."""
+    """Extract the target function call from an existing harness.
+
+    Searches for function calls that are likely the fuzzing target.
+    Skips standard library functions, control flow, and harness boilerplate.
+    Handles multi-line calls and calls with casts.
+    """
+    # Patterns to skip — these are not target calls.
+    skip_patterns = [
+        r"\bLLVMFuzzerTestOneInput\b",
+        r"\breturn\b",
+        r"\bif\s*\(",
+        r"\bwhile\s*\(",
+        r"\bfor\s*\(",
+        r"\bswitch\s*\(",
+        r"#\s*include",
+        r"^\s*//",
+        r"^\s*/\*",
+        r"^\s*\*",
+        r"^\s*\}",
+        r"^\s*\{",
+        r"^\s*extern\b",
+        r"^\s*int\s+main\b",
+        r"^\s*void\s+\w+\s*\(",
+        r"^\s*static\b",
+        r"^\s*const\b",
+        r"^\s*typedef\b",
+        r"^\s*struct\b",
+        r"^\s*enum\b",
+        r"^\s*union\b",
+    ]
+
+    # Standard library functions to skip.
+    stdlib_funcs = [
+        "malloc", "calloc", "realloc", "free", "memcpy", "memmove", "memset",
+        "strlen", "strcpy", "strncpy", "strcat", "strncat", "strcmp", "strncmp",
+        "printf", "fprintf", "sprintf", "snprintf", "puts", "fputs",
+        "fopen", "fclose", "fread", "fwrite", "fgets",
+        "exit", "abort", "assert",
+        "atoi", "atol", "strtol", "strtoul",
+    ]
+
     lines = harness_code.splitlines()
-    for line in lines:
+    candidates: list[str] = []
+
+    for i, line in enumerate(lines):
         stripped = line.strip()
-        # Look for function calls that aren't standard library.
-        if "(" in stripped and not stripped.startswith("//"):
-            if any(
-                prefix in stripped
-                for prefix in ("LLVMFuzzerTestOneInput", "include", "return", "free(", "malloc(", "memcpy(")
-            ):
-                continue
-            if "(" in stripped and ";" in stripped:
-                return "  " + stripped + "\n"
-    return ""
+
+        # Skip empty lines and comments.
+        if not stripped or stripped.startswith("//") or stripped.startswith("/*"):
+            continue
+
+        # Skip lines matching skip patterns.
+        if any(re.search(pat, stripped) for pat in skip_patterns):
+            continue
+
+        # Look for function calls — identifier followed by '('.
+        # Match: func_name(args...) or func_name(args...);
+        match = re.search(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(", stripped)
+        if not match:
+            continue
+
+        func_name = match.group(1)
+
+        # Skip standard library functions.
+        if func_name in stdlib_funcs:
+            continue
+
+        # Skip if it looks like a type cast: (type)expr
+        if stripped.startswith("("):
+            continue
+
+        # Skip if it's a variable declaration: type var = ...
+        if re.match(r"^\w+\s+\w+\s*=", stripped):
+            continue
+
+        # This looks like a target call. Extract the full statement.
+        # Handle multi-line calls by collecting until we find ';'.
+        call_lines = [stripped]
+        if ";" not in stripped:
+            # Multi-line call — collect subsequent lines.
+            for j in range(i + 1, min(i + 5, len(lines))):
+                next_line = lines[j].strip()
+                call_lines.append(next_line)
+                if ";" in next_line:
+                    break
+
+        full_call = " ".join(call_lines)
+
+        # Clean up the call — ensure it ends with ';'.
+        if not full_call.rstrip().endswith(";"):
+            full_call = full_call.rstrip() + ";"
+
+        # Indent and return.
+        candidates.append("  " + full_call + "\n")
+
+    # Return the first candidate (most likely the target call).
+    # In a well-structured harness, the target call is usually the first
+    # non-boilerplate function call inside LLVMFuzzerTestOneInput.
+    return candidates[0] if candidates else ""
 
 
 def _parse_magic_bytes(expected: str) -> str:
@@ -407,6 +536,82 @@ def _parse_expected_state(expected: str) -> int | None:
     if match:
         return int(match.group(1))
     return None
+
+
+def _read_blocker_context(source_path: object, line_number: int) -> str:
+    """Read source code around the blocker line for LLM context.
+
+    Returns up to 10 lines centered on the blocker line number.
+    Returns empty string if the file cannot be read.
+    """
+    from pathlib import Path
+
+    if source_path is None:
+        return "(source not available)"
+
+    path = Path(str(source_path))
+    if not path.exists():
+        return "(source file not found)"
+
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return "(could not read source file)"
+
+    if line_number <= 0 or line_number > len(lines):
+        return "(line number out of range)"
+
+    start = max(0, line_number - 6)
+    end = min(len(lines), line_number + 5)
+
+    context_lines = []
+    for i in range(start, end):
+        marker = ">>>" if i == line_number - 1 else "   "
+        context_lines.append(f"{marker} {i + 1:4d}: {lines[i]}")
+
+    return "\n".join(context_lines)
+
+
+def _generate_bypass_strategies(blocker_type: object) -> str:
+    """Generate specific bypass strategies based on blocker type."""
+    from crashwise.core.models import BlockerType
+
+    strategies = {
+        BlockerType.MAGIC_VALUE: (
+            "- Prefix the fuzzer input with the exact magic bytes before calling the target.\n"
+            "- If the magic is multi-byte, ensure correct endianness.\n"
+            "- Consider that the check may be at different offsets (not always byte 0)."
+        ),
+        BlockerType.LENGTH_CHECK: (
+            "- Ensure the input buffer is at least the minimum required length.\n"
+            "- Pad short inputs with zeros or repeat the last byte.\n"
+            "- If the length is stored in a header field, set that field correctly."
+        ),
+        BlockerType.NULL_CHECK: (
+            "- Pre-allocate and initialize any structures the target expects.\n"
+            "- If the target expects a context pointer, create one before the call.\n"
+            "- Ensure all required fields are non-null."
+        ),
+        BlockerType.STATE_MACHINE: (
+            "- Initialize the state to the expected value before calling the target.\n"
+            "- If multiple states are required, call setup functions in the correct order.\n"
+            "- Consider that state may be stored in a context structure."
+        ),
+        BlockerType.CHECKSUM: (
+            "- Compute the correct checksum over the input data.\n"
+            "- Place the checksum in the expected location (header, trailer, etc.).\n"
+            "- If the checksum algorithm is unknown, try common ones (CRC32, Adler32, sum)."
+        ),
+    }
+
+    if blocker_type in strategies:
+        return strategies[blocker_type]
+
+    return (
+        "- Analyze the blocker condition carefully.\n"
+        "- Pre-process the fuzzer input to satisfy the check.\n"
+        "- Consider adding helper functions to compute required values."
+    )
 
 
 __all__ = ["evolve_harness"]

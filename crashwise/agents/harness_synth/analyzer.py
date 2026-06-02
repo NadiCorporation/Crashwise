@@ -347,9 +347,7 @@ def _detect_init_cleanup(name: str, all_names: set[str]) -> tuple[str | None, st
     for candidate in all_names:
         cl = candidate.lower()
         # Init patterns
-        if cl in (f"{base}init", f"{base}_init", f"{base}init2"):
-            init_fn = candidate
-        elif cl.replace("_", "") == base.replace("_", "") + "init":
+        if cl in (f"{base}init", f"{base}_init", f"{base}init2") or cl.replace("_", "") == base.replace("_", "") + "init":
             init_fn = candidate
         # Cleanup patterns
         if cl in (f"{base}end", f"{base}_end", f"{base}_free", f"{base}_close",
@@ -417,7 +415,7 @@ def find_public_api(workdir: Path, *, max_results: int = 10) -> list[EntryPoint]
             line = content.count("\n", 0, match.start()) + 1
             signature = _normalise_signature(ret, name, args_raw)
 
-            init_fn, cleanup_fn = _detect_init_cleanup(name, all_function_names)
+            _init_fn, _cleanup_fn = _detect_init_cleanup(name, all_function_names)
 
             candidates.append(
                 EntryPoint(

@@ -17,8 +17,11 @@ Usage::
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+
+# Re-export asynccontextmanager for get_session
+from contextlib import asynccontextmanager
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -35,9 +38,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
-# Re-export asynccontextmanager for get_session
-from contextlib import asynccontextmanager
 
 from crashwise.core.config import get_settings
 from crashwise.core.logging import get_logger
@@ -74,12 +74,12 @@ class Campaign(Base):
     )
 
     # Relationships
-    runs: Mapped[list["FuzzingRun"]] = relationship(
+    runs: Mapped[list[FuzzingRun]] = relationship(
         back_populates="campaign",
         cascade="all, delete-orphan",
         lazy="selectin",
     )
-    seeds: Mapped[list["Seed"]] = relationship(
+    seeds: Mapped[list[Seed]] = relationship(
         back_populates="campaign",
         cascade="all, delete-orphan",
         lazy="selectin",
@@ -105,7 +105,7 @@ class FuzzingRun(Base):
 
     # Relationships
     campaign: Mapped[Campaign] = relationship(back_populates="runs")
-    crashes: Mapped[list["Crash"]] = relationship(
+    crashes: Mapped[list[Crash]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
         lazy="selectin",
@@ -153,7 +153,7 @@ class Crash(Base):
 
     # Relationships
     run: Mapped[FuzzingRun | None] = relationship(back_populates="crashes")
-    seed: Mapped["Seed | None"] = relationship(back_populates="crashes")
+    seed: Mapped[Seed | None] = relationship(back_populates="crashes")
 
 
 class Seed(Base):
@@ -320,13 +320,13 @@ async def get_crashes_for_campaign(
 __all__ = [
     "Base",
     "Campaign",
-    "FuzzingRun",
     "Crash",
+    "FuzzingRun",
     "Seed",
-    "init_db",
     "close_db",
-    "get_session",
-    "get_campaigns",
     "get_campaign_by_id",
+    "get_campaigns",
     "get_crashes_for_campaign",
+    "get_session",
+    "init_db",
 ]

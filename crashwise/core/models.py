@@ -15,10 +15,11 @@ serialised workflow histories remain replayable.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-import time
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
@@ -592,6 +593,14 @@ class FuzzingCampaignState(_StrictModel):
         default=None,
         description="Path to the most recent raw coverage data (AFL plot_data/showmap output).",
     )
+    last_stall_reasons: list[str] = Field(
+        default_factory=list,
+        description="Stall reasons from the most recent analyze_campaign call. Consumed by agentic_enrich.",
+    )
+    iteration_history: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Historical metrics per iteration for the agentic feedback analyzer.",
+    )
 
 
 class SeedMetadata(_StrictModel):
@@ -806,7 +815,7 @@ class TargetProfile(_StrictModel):
     domain:
         High-level domain classification (e.g. ``image_processing``).
     complexity_score:
-        Cyclomatic-complexity-derived score 0.0–10.0.
+        Cyclomatic-complexity-derived score 0.0-10.0.
     call_graph_depth:
         Maximum depth of the call graph from public entry points.
     attack_surface:
@@ -859,6 +868,10 @@ class ProfileTargetInput(_StrictModel):
     workdir: Path = Field(..., description="Path to the cloned target repository")
     source_paths: list[Path] = Field(default_factory=list, description="Specific files to analyse")
     max_files: int = Field(default=50, ge=1, le=500, description="Cap on files to scan")
+    enable_semantic_profiling: bool = Field(
+        default=True,
+        description="Enable LLM-powered semantic analysis to enrich the regex-based profile",
+    )
 
 
 class ProfileTargetOutput(_StrictModel):

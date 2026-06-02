@@ -16,7 +16,6 @@ import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 import httpx
 
@@ -499,7 +498,7 @@ def check_runtime_docker() -> CheckResult:
                 name="runtime.docker",
                 status=CheckStatus.FAIL,
                 message=(
-                    f"Docker daemon is running but your current SHELL SESSION "
+                    "Docker daemon is running but your current SHELL SESSION "
                     "doesn't have docker-group permissions yet."
                 ),
                 detail=(
@@ -858,7 +857,7 @@ def check_build_afl() -> CheckResult:
 
 def check_build_libfuzzer() -> CheckResult:
     """Check LibFuzzer availability (via clang -fsanitize=fuzzer)."""
-    rc, out, err = _run([
+    _rc, out, err = _run([
         "clang", "-fsanitize=fuzzer", "-x", "c", "-",
     ], timeout=3.0)
     # clang will fail because stdin is empty, but we just check it recognises the flag
@@ -968,7 +967,7 @@ async def check_service_llm(
                     ok_parts.append(f"Agentic LLM: {agentic_model} via {agentic_base}")
                 else:
                     fail_parts.append(f"Agentic LLM: HTTP {resp.status_code} from {agentic_base}")
-        except Exception as exc:
+        except Exception:
             fail_parts.append(f"Agentic LLM: unreachable at {agentic_base}")
     elif agentic_base and "localhost:11434" in agentic_base:
         try:

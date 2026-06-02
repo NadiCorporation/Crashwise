@@ -20,8 +20,8 @@ from __future__ import annotations
 from crashwise.core.logging import get_logger
 from crashwise.core.models import (
     ExecutionBackend,
-    FuzzJob,
     FuzzerType,
+    FuzzJob,
     TargetDomain,
     TargetProfile,
 )

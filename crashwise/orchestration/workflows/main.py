@@ -24,7 +24,6 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from pathlib import Path
@@ -37,7 +36,6 @@ with workflow.unsafe.imports_passed_through():
         CampaignStatus,
         CoverageAnalysis,
         CoverageBlocker,
-        CrashSeverity,
         EvolveHarnessInput,
         EvolveHarnessOutput,
         ExecuteFuzzingInput,
@@ -766,6 +764,7 @@ class MainFuzzingWorkflow:
                     "crash_id": payload.campaign_id,  # Simplified: use campaign_id as proxy
                     "crash_context": crash_context,
                     "campaign_id": payload.campaign_id,
+                    "skip_patch_generation": payload.enable_self_healing,
                 },
                 start_to_close_timeout=timedelta(minutes=5),
                 retry_policy=_AI_RETRY,
@@ -799,7 +798,7 @@ class MainFuzzingWorkflow:
 
         # Update campaign status to completed/failed.
         if payload.campaign_id:
-            final_status = "completed" if result.crash_found else "completed"
+            final_status = "completed_with_crashes" if result.crash_found else "completed"
             await workflow.execute_activity(
                 "update_campaign_status",
                 {
@@ -807,6 +806,70 @@ class MainFuzzingWorkflow:
                     "status": final_status,
                 },
                 start_to_close_timeout=timedelta(seconds=10),
+            )
+
+        # ── 8. Store campaign knowledge for cross-campaign learning ─────────
+        # Extract and store insights from this campaign to improve future campaigns.
+        # This is best-effort — failures don't affect the campaign result.
+        try:
+            # Build campaign outcome summary
+            campaign_outcome = {
+                "crashes_found": result.crash_count,
+                "coverage_edges": campaign.best_coverage.edges_hit if campaign.best_coverage else 0,
+                "strategies_used": [self._mab_state.current_arm_id] if self._mab_state else [],
+                "harness_patterns": [],  # TODO: extract from harness synthesis logs
+                "blockers_encountered": [],  # TODO: extract from coverage analysis
+            }
+
+            # Get target profile if available
+            target_profile_dict = {}
+            if hasattr(self, "_target_profile") and self._target_profile:
+                target_profile_dict = self._target_profile.model_dump()
+
+            # Extract vulnerability patterns from triage
+            vulnerabilities = []
+            if triage_out.unique_crashes:
+                for crash in triage_out.unique_crashes[:10]:  # Cap at 10
+                    vulnerabilities.append({
+                        "bug_type": crash.bug_type,
+                        "severity": crash.severity.value if crash.severity else "unknown",
+                        "severity_score": crash.severity_score if hasattr(crash, "severity_score") else 0,
+                        "location_pattern": crash.stack_hash[:32] if crash.stack_hash else "",
+                        "root_cause": crash.root_cause[:500] if hasattr(crash, "root_cause") and crash.root_cause else "",
+                        "bypass_strategy": "",
+                        "crash_id": str(crash.crash_id),
+                    })
+
+            # Extract strategy metrics from MAB state
+            strategy_metrics = []
+            if self._mab_state and self._mab_state.arms:
+                for arm in self._mab_state.arms.values():
+                    strategy_metrics.append({
+                        "strategy_arm_id": arm.arm_id,
+                        "success": arm.success_count > 0,
+                        "coverage_gain": arm.total_reward,
+                        "time_to_crash": 0.0,  # TODO: track this
+                    })
+
+            # Store knowledge
+            await workflow.execute_activity(
+                "store_campaign_knowledge",
+                {
+                    "target_name": payload.target_name,
+                    "target_profile": target_profile_dict,
+                    "campaign_outcome": campaign_outcome,
+                    "vulnerabilities": vulnerabilities,
+                    "strategy_metrics": strategy_metrics,
+                },
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            )
+            log.info("main_workflow.knowledge_stored", target_name=payload.target_name)
+        except Exception as exc:
+            # Knowledge storage is best-effort — don't fail the campaign
+            log.warning(
+                "main_workflow.knowledge_storage_failed",
+                error=str(exc)[:200],
             )
 
         return result

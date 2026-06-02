@@ -21,9 +21,7 @@ minimal inputs based on heuristic domain detection.
 from __future__ import annotations
 
 import asyncio
-import os
 import re
-import shlex
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -408,7 +406,7 @@ async def _scrape_poc_urls(
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                _, stderr = await asyncio.wait_for(
+                _, _stderr = await asyncio.wait_for(
                     proc.communicate(), timeout=_DOWNLOAD_TIMEOUT_SECONDS + 5
                 )
                 if proc.returncode != 0 or not dest_file.exists():
@@ -428,7 +426,7 @@ async def _scrape_poc_urls(
                     downloaded_path=dest_file,
                     seed_path=dest_file,
                 )
-            except (asyncio.TimeoutError, OSError) as exc:
+            except (TimeoutError, OSError) as exc:
                 log.debug("harvester.scrape_failed", url=url[:100], error=str(exc)[:80])
                 return None
 

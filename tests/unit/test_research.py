@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from crashwise.agents.research.harvester import harvest_seeds
@@ -16,7 +18,6 @@ from crashwise.agents.research.transformer import (
     transform_poc,
 )
 from crashwise.core.models import SeedMetadata, SeedSource
-
 
 # ── Harvester tests ──────────────────────────────────────────────────────────
 

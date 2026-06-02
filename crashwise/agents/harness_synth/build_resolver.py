@@ -110,8 +110,7 @@ def diagnose_compile_error(stderr: str, workdir: Path) -> list[str]:
             fixes.append(f"-I{found}")
 
     # Undefined references: "undefined reference to `compress'"
-    for m in re.finditer(r"undefined reference to [`'](\w+)'", stderr):
-        func_name = m.group(1)
+    for _m in re.finditer(r"undefined reference to [`'](\w+)'", stderr):
         # Search for .a files that might contain this symbol.
         for lib in workdir.rglob("*.a"):
             if "CMakeFiles" not in str(lib) and str(lib) not in fixes:
@@ -132,4 +131,4 @@ def diagnose_compile_error(stderr: str, workdir: Path) -> list[str]:
     return fixes
 
 
-__all__ = ["BuildPaths", "resolve_build_paths", "find_missing_header", "diagnose_compile_error"]
+__all__ = ["BuildPaths", "diagnose_compile_error", "find_missing_header", "resolve_build_paths"]

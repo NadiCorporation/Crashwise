@@ -33,7 +33,7 @@ async def persist_crash_to_web(
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
     from crashwise.core.config import get_settings
-    from crashwise.web.models import Base, CrashTestCase, FuzzingCampaign
+    from crashwise.web.models import CrashTestCase, FuzzingCampaign
 
     settings = get_settings()
     engine = create_async_engine(settings.database_url, echo=False)

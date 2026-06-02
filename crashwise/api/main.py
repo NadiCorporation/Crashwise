@@ -24,21 +24,17 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from pathlib import Path
-
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import FastAPI, HTTPException, Response, status
 from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crashwise.core.config import get_settings
 from crashwise.core.database import (
     Campaign,
-    Crash,
-    FuzzingRun,
-    Seed,
     close_db,
     get_campaign_by_id,
     get_campaigns,
@@ -155,6 +151,7 @@ app = FastAPI(
 
 # Mount the web control plane (Operation Hydra Phase 5/6).
 from crashwise.web.app import app as web_app
+
 app.mount("/api/v1", web_app)
 
 
@@ -257,7 +254,6 @@ async def get_campaign(campaign_id: UUID) -> dict[str, Any]:
 )
 async def delete_campaign(campaign_id: UUID) -> Response:
     """Delete a single campaign and all its runs/seeds/crashes."""
-    from sqlalchemy import delete as sa_delete
 
     async with get_session() as session:
         campaign = await get_campaign_by_id(session, campaign_id)
@@ -275,7 +271,7 @@ async def delete_campaign(campaign_id: UUID) -> Response:
 )
 async def delete_all_campaigns(status_filter: str | None = None) -> Response:
     """Delete campaigns. Optional filter: ?status_filter=pending,failed"""
-    from sqlalchemy import delete as sa_delete, select
+    from sqlalchemy import select
 
     async with get_session() as session:
         if status_filter:
@@ -367,7 +363,7 @@ async def start_campaign(
     try:
         client = await connect()
         workflow_id = f"crashwise-campaign-{campaign_id}"
-        handle = await client.start_workflow(
+        _handle = await client.start_workflow(
             "MainFuzzingWorkflow",
             FuzzingInput(
                 target_repo=req.target_repo,
@@ -481,48 +477,48 @@ async def export_campaign_report(
 
     # Markdown default.
     lines: list[str] = [
-        f"# CrashWise Campaign Report",
-        f"",
+        "# CrashWise Campaign Report",
+        "",
         f"**Campaign ID:** `{campaign_id}`",
         f"**Target:** {campaign.target_repo}",
         f"**Target Name:** {campaign.target_name}",
         f"**Status:** {campaign.status}",
         f"**Created:** {campaign.created_at.isoformat()}",
         f"**Total Crashes:** {len(crashes)}",
-        f"",
-        f"---",
-        f"",
+        "",
+        "---",
+        "",
     ]
 
     for idx, c in enumerate(crashes, 1):
         lines.extend([
             f"## Crash #{idx}: {c.crash_type}",
-            f"",
+            "",
             f"- **Severity:** {c.severity} (score: {c.severity_score}/10)",
             f"- **Vulnerability Type:** {c.vulnerability_type}",
             f"- **Signal:** {c.signal}",
             f"- **Stack Hash:** `{c.stack_hash}`",
             f"- **Discovered:** {c.created_at.isoformat()}",
-            f"",
+            "",
         ])
         if c.suggested_patch:
             lines.extend([
-                f"### Suggested Patch",
-                f"",
-                f"```cpp",
+                "### Suggested Patch",
+                "",
+                "```cpp",
                 f"{c.suggested_patch}",
-                f"```",
-                f"",
+                "```",
+                "",
             ])
         lines.extend([
-            f"### Stack Trace",
-            f"",
-            f"```",
+            "### Stack Trace",
+            "",
+            "```",
             f"{c.stack_trace[:2000]}",
-            f"```",
-            f"",
-            f"---",
-            f"",
+            "```",
+            "",
+            "---",
+            "",
         ])
 
     return Response(
@@ -570,7 +566,7 @@ async def verify_crash_patch(
     try:
         client = await connect()
         workflow_id = f"crashwise-verify-{crash_id}-{datetime.now().timestamp()}"
-        handle = await client.start_workflow(
+        _handle = await client.start_workflow(
             "VerifyPatchWorkflow",
             VerifyPatchInput(
                 crash_id=crash_id,

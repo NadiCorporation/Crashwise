@@ -5,7 +5,12 @@
 Triggered by the workflow only when a *unique* crash is found (to save
 API costs).  The activity sends the crash context to the configured
 inference provider, receives structured RCA + exploitability scores,
-generates a patch suggestion, and persists everything to the DB.
+and persists everything to the DB.
+
+Patch generation is skipped when self-healing is enabled (the Healing
+Engine's REPAIR mode will generate a verified patch). When self-healing
+is disabled, the activity generates an intelligent patch suggestion
+using the full crash context.
 
 If no AI provider is configured, the activity exits gracefully after
 logging a debug message.
@@ -13,12 +18,10 @@ logging a debug message.
 
 from __future__ import annotations
 
-from pathlib import Path
 from uuid import UUID
 
 from temporalio import activity
 
-from crashwise.agents.feedback.patcher import suggest_patch
 from crashwise.core.ai_provider import get_provider
 from crashwise.core.database import Crash, get_session
 from crashwise.core.logging import get_logger
@@ -31,6 +34,7 @@ async def analyze_crash(
     crash_id: str,
     crash_context: str,
     campaign_id: str,
+    skip_patch_generation: bool = False,
 ) -> dict[str, object]:
     """Perform deep AI analysis on a unique crash.
 
@@ -42,6 +46,10 @@ async def analyze_crash(
         Concatenated crash report (ASAN + GDB + stack trace).
     campaign_id:
         Campaign UUID (for logging only).
+    skip_patch_generation:
+        When True, skip patch generation (self-healing REPAIR mode will
+        generate a verified patch). When False, generate an intelligent
+        patch suggestion using the full crash context.
 
     Returns
     -------
@@ -87,17 +95,31 @@ async def analyze_crash(
         confidence=confidence,
     )
 
-    # 2. Suggest patch from RCA.
-    patch_result = await suggest_patch(root_cause, provider=provider)
-    suggested_patch = str(patch_result.get("patch", ""))
-    patch_confidence = float(patch_result.get("confidence", 0.0))
+    # 2. Generate patch suggestion (skip when self-healing will do it better).
+    if skip_patch_generation:
+        log.info(
+            "analyze_crash.patch_skipped",
+            crash_id=crash_id,
+            reason="self_healing_enabled",
+        )
+        suggested_patch = ""
+        patch_confidence = 0.0
+    else:
+        patch_result = await _generate_intelligent_patch(
+            crash_context=crash_context,
+            root_cause=root_cause,
+            bug_type=bug_type,
+            provider=provider,
+        )
+        suggested_patch = str(patch_result.get("patch", ""))
+        patch_confidence = float(patch_result.get("confidence", 0.0))
 
-    log.info(
-        "analyze_crash.patch_result",
-        crash_id=crash_id,
-        patch_len=len(suggested_patch),
-        patch_confidence=patch_confidence,
-    )
+        log.info(
+            "analyze_crash.patch_result",
+            crash_id=crash_id,
+            patch_len=len(suggested_patch),
+            patch_confidence=patch_confidence,
+        )
 
     # 3. Persist to DB.
     await _update_crash_record(
@@ -116,6 +138,83 @@ async def analyze_crash(
         "patch": suggested_patch,
         "patch_confidence": patch_confidence,
     }
+
+
+async def _generate_intelligent_patch(
+    *,
+    crash_context: str,
+    root_cause: str,
+    bug_type: str,
+    provider: object,
+) -> dict[str, str | float]:
+    """Generate an intelligent patch suggestion using full crash context.
+
+    Unlike the old stub patcher that only used root_cause, this function
+    provides the LLM with the complete crash context including ASAN output,
+    stack traces, and source code snippets when available.
+
+    Parameters
+    ----------
+    crash_context:
+        Full crash report (ASAN + GDB + stack trace + source snippets).
+    root_cause:
+        AI-generated root cause explanation.
+    bug_type:
+        Classified bug type (heap-buffer-overflow, use-after-free, etc.).
+    provider:
+        AI inference provider.
+
+    Returns
+    -------
+    dict with keys: patch (str), explanation (str), confidence (float).
+    """
+    if not root_cause or root_cause.strip().lower().startswith("ai provider not configured"):
+        log.debug("patcher.no_root_cause")
+        return {
+            "patch": "",
+            "explanation": "No root cause available — skipping patch generation",
+            "confidence": 0.0,
+        }
+
+    # Build a rich prompt with full context.
+    prompt = f"""You are an expert C/C++ security engineer. Analyze this crash and generate a minimal, safe patch.
+
+## Crash Context
+{crash_context}
+
+## Root Cause Analysis
+{root_cause}
+
+## Bug Type
+{bug_type}
+
+## Instructions
+Generate a unified diff patch that fixes the root cause. The patch should:
+1. Be minimal — only change what's necessary to fix the bug
+2. Follow secure coding practices (bounds checking, null checks, etc.)
+3. Include a brief comment explaining the fix
+4. Be conservative — when in doubt, add defensive checks
+
+Output format:
+- patch: unified diff format (--- a/file.c, +++ b/file.c, @@ ... @@)
+- explanation: one-sentence summary of the fix
+- confidence: 0.0-1.0 based on how confident you are in the fix
+"""
+
+    try:
+        result = await provider.analyze(prompt)  # type: ignore[union-attr]
+        return {
+            "patch": str(result.get("patch", "")),
+            "explanation": str(result.get("explanation", "")),
+            "confidence": float(result.get("confidence", 0.0)),
+        }
+    except Exception as exc:
+        log.warning("patcher.llm_error", error=str(exc))
+        return {
+            "patch": "",
+            "explanation": f"Patch generation failed: {exc}",
+            "confidence": 0.0,
+        }
 
 
 async def _update_crash_record(

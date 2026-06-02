@@ -15,7 +15,6 @@ from crashwise.core.database import (
     Campaign,
     Crash,
     FuzzingRun,
-    Seed,
     close_db,
     get_session,
     init_db,

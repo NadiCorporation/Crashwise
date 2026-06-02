@@ -21,7 +21,7 @@ from typing import Any
 
 from crashwise.core.config import get_settings
 from crashwise.core.logging import get_logger
-from crashwise.core.models import FuzzJob, FuzzerType
+from crashwise.core.models import FuzzerType, FuzzJob
 
 log = get_logger(__name__)
 
@@ -371,7 +371,7 @@ class DockerManager:
                 stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             else:
                 stdout, _ = await proc.communicate()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
             return -1
@@ -449,7 +449,7 @@ class DockerManager:
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await proc.communicate()
+            _, _stderr = await proc.communicate()
             if proc.returncode == 0:
                 log.info(
                     "docker.preserve_corpus.copied",
@@ -680,7 +680,7 @@ class DockerManager:
             )
             await asyncio.wait_for(proc.communicate(), timeout=10.0)
             return proc.returncode == 0
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.error("docker.daemon_timeout", detail="docker info timed out after 10s")
             return False
         except Exception:
@@ -734,7 +734,7 @@ class DockerManager:
             _, stderr = await asyncio.wait_for(
                 pull_proc.communicate(), timeout=300.0  # 5-minute pull timeout.
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Kill the stuck pull process.
             with contextlib.suppress(ProcessLookupError):
                 pull_proc.kill()
@@ -750,6 +750,6 @@ class DockerManager:
 
 __all__ = [
     "DockerManager",
-    "parse_libfuzzer_log_tail",
     "parse_afl_fuzzer_stats",
+    "parse_libfuzzer_log_tail",
 ]
