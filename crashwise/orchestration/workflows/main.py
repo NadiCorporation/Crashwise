@@ -469,14 +469,61 @@ class MainFuzzingWorkflow:
                     f"attempts={self._build_attempts} "
                     f"workspace={target_workdir}"
                 )
-                harness_path = (
-                    target_workdir / payload.harness_path if payload.harness_path else None
-                )
-                setup_out = SetupTargetOutput(
-                    workdir=target_workdir,
-                    commit_sha="healing-build",
-                    harness_path=harness_path,
-                )
+                
+                # If no harness_path provided, synthesize one using the LLM
+                if payload.harness_path is None:
+                    log.info("main_workflow.healing.synthesizing_harness")
+                    # Find the main source file in the workspace
+                    source_file = None
+                    for ext in [".c", ".cpp", ".cc"]:
+                        candidates = list(target_workdir.rglob(f"*{ext}"))
+                        # Filter out test files and build artifacts
+                        candidates = [c for c in candidates if "test" not in str(c).lower() and "build" not in str(c).lower()]
+                        if candidates:
+                            source_file = candidates[0]
+                            break
+                    
+                    if source_file is None:
+                        # Fallback: look for any C/C++ file
+                        for ext in [".c", ".cpp", ".cc", ".h", ".hpp"]:
+                            candidates = list(target_workdir.rglob(f"*{ext}"))
+                            candidates = [c for c in candidates if "build" not in str(c).lower()]
+                            if candidates:
+                                source_file = candidates[0]
+                                break
+                    
+                    if source_file is None:
+                        log.error("main_workflow.healing.no_source_file_found")
+                        use_legacy_setup = True
+                    else:
+                        log.info(f"main_workflow.healing.using_source_file {source_file}")
+                        # Synthesize harness using the LLM
+                        harness_workdir = target_workdir / "harness"
+                        try:
+                            from crashwise.agents.harness_synth import synthesize_harness
+                            synth_result = await synthesize_harness(
+                                source_path=source_file,
+                                workdir=harness_workdir,
+                                max_retries=4,
+                            )
+                            if synth_result.success and synth_result.harness_path:
+                                harness_path = synth_result.harness_path
+                                log.info(f"main_workflow.healing.harness_synthesized {harness_path}")
+                            else:
+                                log.warning("main_workflow.healing.harness_synthesis_failed")
+                                use_legacy_setup = True
+                        except Exception as exc:
+                            log.warning(f"main_workflow.healing.harness_synthesis_error {exc}")
+                            use_legacy_setup = True
+                else:
+                    harness_path = target_workdir / payload.harness_path
+                
+                if not use_legacy_setup:
+                    setup_out = SetupTargetOutput(
+                        workdir=target_workdir,
+                        commit_sha="healing-build",
+                        harness_path=harness_path,
+                    )
             else:
                 log.warning(
                     "main_workflow.healing.build_failed_fallback "
