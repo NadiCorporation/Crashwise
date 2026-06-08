@@ -556,22 +556,39 @@ class DockerManager:
         )
         return False
 
-    async def logs(self, job_id: str, *, tail: int = 100) -> str:
-        """Fetch the last N lines of container stdout+stderr."""
+    async def logs(self, job_id: str, *, tail: int = 100, stderr: bool = False) -> str:
+        """Fetch the last N lines of container stdout+stderr.
+
+        Args:
+            job_id: The job identifier
+            tail: Number of lines to fetch
+            stderr: If True, fetch only stderr; if False, fetch stdout+stderr combined
+        """
         container_id = self._containers.get(job_id)
         if not container_id:
             return ""
-        proc = await asyncio.create_subprocess_exec(
-            "docker",
-            "logs",
-            "--tail",
-            str(tail),
-            container_id,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await proc.communicate()
-        return stdout.decode("utf-8", errors="replace")
+
+        cmd = ["docker", "logs", "--tail", str(tail)]
+        if stderr:
+            # Fetch only stderr by redirecting stdout to /dev/null
+            cmd.extend([container_id])
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr_output = await proc.communicate()
+            return stderr_output.decode("utf-8", errors="replace")
+        else:
+            # Fetch combined stdout+stderr
+            cmd.extend([container_id])
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await proc.communicate()
+            return stdout.decode("utf-8", errors="replace")
 
     async def is_alive(self, job_id: str) -> bool:
         """Check whether the container is still running."""
@@ -589,6 +606,34 @@ class DockerManager:
         )
         stdout, _ = await proc.communicate()
         return stdout.decode("utf-8", errors="replace").strip() == "true"
+
+    async def get_exit_code(self, job_id: str) -> int | None:
+        """Get the exit code of a stopped container.
+
+        Returns:
+            The exit code as an integer, or None if the container is still running
+            or doesn't exist.
+        """
+        container_id = self._containers.get(job_id)
+        if not container_id:
+            return None
+
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "inspect",
+            "-f",
+            "{{.State.ExitCode}}",
+            container_id,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        exit_code_str = stdout.decode("utf-8", errors="replace").strip()
+
+        try:
+            return int(exit_code_str)
+        except (ValueError, TypeError):
+            return None
 
     async def stats(self, job_id: str) -> dict[str, Any]:
         """Return container CPU / memory stats (best-effort)."""

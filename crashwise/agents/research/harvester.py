@@ -160,6 +160,36 @@ _GENERIC_SEEDS: list[tuple[str, bytes]] = [
     ("int_overflow_64", b"\xff\xff\xff\xff\xff\xff\xff\x7f"),  # INT64_MAX
     ("format_string", b"%s%s%s%s%n%n%n%n"),
     ("path_traversal", b"../../../../../etc/passwd"),
+    # Boundary size seeds
+    ("size_1", b"\x00"),
+    ("size_2", b"\x00\x00"),
+    ("size_4", b"\x00" * 4),
+    ("size_8", b"\x00" * 8),
+    ("size_16", b"\x00" * 16),
+    ("size_32", b"\x00" * 32),
+    ("size_64", b"\x00" * 64),
+    ("size_128", b"\x00" * 128),
+    ("size_256", b"\x00" * 256),
+    ("size_512", b"\x00" * 512),
+    ("size_1024", b"\x00" * 1024),
+    ("size_2048", b"\x00" * 2048),
+    ("size_4096", b"\x00" * 4096),
+    ("size_8192", b"\x00" * 8192),
+    # Integer boundary values
+    ("int8_max", b"\x7f"),
+    ("int8_min", b"\x80"),
+    ("uint8_max", b"\xff"),
+    ("int16_max", b"\xff\x7f"),
+    ("int16_min", b"\x00\x80"),
+    ("uint16_max", b"\xff\xff"),
+    ("int32_max", b"\xff\xff\xff\x7f"),
+    ("int32_min", b"\x00\x00\x00\x80"),
+    ("uint32_max", b"\xff\xff\xff\xff"),
+    # Special patterns
+    ("alternating", b"\x00\xff" * 32),
+    ("incrementing", bytes(range(256))),
+    ("decrementing", bytes(range(255, -1, -1))),
+    ("repeated_pattern", b"ABCD" * 64),
 ]
 
 
@@ -280,6 +310,17 @@ async def harvest_seeds(
     # ── Strategy 5: Generic boundary-value seeds ─────────────────────────
     generic_seeds = _generate_generic_seeds(normalized)
     results.extend(generic_seeds)
+
+    # ── Strategy 6: Mutated seeds (increase corpus diversity) ────────────
+    if len(results) > 0 and len(results) < max_results:
+        remaining_slots = max_results - len(results)
+        mutated_seeds = _generate_mutated_seeds(
+            results[:5],  # Mutate first 5 seeds
+            normalized,
+            max_mutations=min(remaining_slots // 3, 3),  # Cap mutations
+        )
+        results.extend(mutated_seeds)
+        log.info("harvester.mutated_seeds", generated=len(mutated_seeds))
 
     log.info(
         "harvester.complete",
@@ -591,20 +632,141 @@ def _generate_generic_seeds(target_name: str) -> list[SeedMetadata]:
     return seeds
 
 
+def _generate_mutated_seeds(
+    base_seeds: list[SeedMetadata],
+    target_name: str,
+    max_mutations: int = 5,
+) -> list[SeedMetadata]:
+    """Generate mutated variants of existing seeds to increase corpus diversity.
+
+    Applies simple mutations like:
+    - Bit flipping
+    - Byte insertion/deletion
+    - Boundary value injection
+    - Truncation
+
+    Parameters
+    ----------
+    base_seeds:
+        List of seeds to mutate.
+    target_name:
+        Target name for the mutated seeds.
+    max_mutations:
+        Maximum number of mutated seeds to generate per base seed.
+
+    Returns
+    -------
+    List of mutated SeedMetadata records.
+    """
+    import random
+
+    mutated_seeds: list[SeedMetadata] = []
+
+    for base_seed in base_seeds[:3]:  # Only mutate first 3 seeds to avoid explosion
+        payload = get_seed_payload(base_seed)
+        if payload is None or len(payload) == 0:
+            continue
+
+        # Generate mutations
+        for i in range(min(max_mutations, 5)):
+            mutation_type = random.choice(["bit_flip", "byte_insert", "truncate", "boundary"])
+            mutated = bytearray(payload)
+
+            if mutation_type == "bit_flip" and len(mutated) > 0:
+                # Flip random bits
+                pos = random.randint(0, len(mutated) - 1)
+                mutated[pos] ^= random.randint(1, 255)
+
+            elif mutation_type == "byte_insert" and len(mutated) > 0:
+                # Insert random bytes
+                pos = random.randint(0, len(mutated))
+                mutated.insert(pos, random.randint(0, 255))
+
+            elif mutation_type == "truncate" and len(mutated) > 4:
+                # Truncate to random length
+                new_len = random.randint(1, len(mutated) - 1)
+                mutated = mutated[:new_len]
+
+            elif mutation_type == "boundary" and len(mutated) > 0:
+                # Inject boundary values
+                pos = random.randint(0, len(mutated) - 1)
+                mutated[pos] = random.choice([0x00, 0xff, 0x7f, 0x80])
+
+            # Create mutated seed metadata
+            mutated_seed = SeedMetadata(
+                seed_id=f"mutated-{base_seed.seed_id}-{mutation_type}-{i}",
+                source=SeedSource.MANUAL,
+                target_name=target_name,
+                description=f"Mutated seed ({mutation_type}): {base_seed.description}",
+                language="binary",
+                tags=["mutated", mutation_type, "generated"],
+                created_at=datetime.now(tz=UTC),
+            )
+            mutated_seeds.append(mutated_seed)
+
+    return mutated_seeds
+
+
 # ── Seed payload retrieval (used by transformer) ─────────────────────────────
 
 def get_seed_payload(seed: SeedMetadata) -> bytes | None:
     """Return the actual binary payload for a generated seed.
 
     For repo-scanned seeds, reads from disk. For generated seeds,
-    looks up the format/generic seed tables.
+    looks up the format/generic seed tables. For mutated seeds,
+    regenerates the mutation on-the-fly.
     """
+    import random
+
     # Repo-scanned seeds have a seed_path already.
     if seed.seed_path is not None and seed.seed_path.exists():
         try:
             return seed.seed_path.read_bytes()
         except OSError:
             pass
+
+    # Mutated seeds - regenerate the mutation
+    if seed.seed_id.startswith("mutated-"):
+        # Parse: mutated-{base_id}-{mutation_type}-{index}
+        parts = seed.seed_id.split("-")
+        if len(parts) >= 4:
+            # Reconstruct base seed ID
+            base_id = "-".join(parts[1:-2])  # Everything between "mutated-" and "-{type}-{index}"
+            mutation_type = parts[-2]
+            mutation_index = int(parts[-1])
+
+            # Create a temporary base seed to get its payload
+            base_seed = SeedMetadata(
+                seed_id=base_id,
+                source=seed.source,
+                target_name=seed.target_name,
+                description="",
+                language="binary",
+                tags=[],
+                created_at=seed.created_at,
+            )
+            base_payload = get_seed_payload(base_seed)
+            if base_payload is None or len(base_payload) == 0:
+                return None
+
+            # Regenerate the mutation with deterministic seed
+            random.seed(hash(seed.seed_id))
+            mutated = bytearray(base_payload)
+
+            if mutation_type == "bit_flip" and len(mutated) > 0:
+                pos = random.randint(0, len(mutated) - 1)
+                mutated[pos] ^= random.randint(1, 255)
+            elif mutation_type == "byte_insert" and len(mutated) > 0:
+                pos = random.randint(0, len(mutated))
+                mutated.insert(pos, random.randint(0, 255))
+            elif mutation_type == "truncate" and len(mutated) > 4:
+                new_len = random.randint(1, len(mutated) - 1)
+                mutated = mutated[:new_len]
+            elif mutation_type == "boundary" and len(mutated) > 0:
+                pos = random.randint(0, len(mutated) - 1)
+                mutated[pos] = random.choice([0x00, 0xff, 0x7f, 0x80])
+
+            return bytes(mutated)
 
     # Format seeds.
     if seed.seed_id.startswith("format-"):

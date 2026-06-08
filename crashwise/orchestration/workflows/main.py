@@ -138,7 +138,7 @@ _FUZZ_RETRY = RetryPolicy(
     backoff_coefficient=2.0,
     maximum_interval=timedelta(seconds=60),
     maximum_attempts=2,
-    non_retryable_error_types=["WorkdirMissing", "HarnessUnavailable"],
+    non_retryable_error_types=["WorkdirMissing", "HarnessUnavailable", "NoHarnessBinary"],
 )
 
 _ANALYZE_RETRY = RetryPolicy(
