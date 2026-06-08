@@ -184,10 +184,20 @@ async def generate_harness(state: HarnessState) -> HarnessState:
 async def validate_harness(state: HarnessState) -> HarnessState:
     """Compile the harness and decide whether to retry."""
     if state.harness_path is None:
-        # Should not happen — generate_harness is upstream — but be defensive.
-        log.warning("harness_synth.node.validate.no_harness")
-        state.done = True
-        return state
+        # This can happen when generate_harness detects hallucination and returns
+        # without setting harness_path. Check if we should retry.
+        if state.retry_count < state.max_retries:
+            log.warning(
+                "harness_synth.node.validate.no_harness_retry",
+                attempt=state.retry_count,
+                max_retries=state.max_retries,
+            )
+            # Don't set done=True - let should_retry decide
+            return state
+        else:
+            # Max retries exhausted - apply fallback
+            log.warning("harness_synth.node.validate.no_harness_fallback")
+            return await _apply_fallback(state, reason="No valid harness generated after max retries")
 
     # Discover built libraries and include paths from the target workdir.
     # The source_path is inside the target checkout; walk up to find build artifacts.
