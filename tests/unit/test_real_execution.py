@@ -70,6 +70,15 @@ class _FakeManager:
     async def logs(self, job_id: str, **kwargs) -> str:  # type: ignore[no-untyped-def]
         return self._sample_log
 
+    async def get_exit_code(self, job_id: str) -> int | None:
+        # Container is dead if it's not alive
+        alive = await self.is_alive(job_id)
+        return 0 if not alive else None
+
+    async def extract_coverage_data(self, job_id: str, dest: Path) -> None:
+        # No-op for tests
+        pass
+
 
 @pytest.fixture
 def fast_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,9 +168,14 @@ async def test_real_path_invokes_lifecycle_in_order(
     """Phase 21 §1.3: stop → preserve_corpus → cleanup; never rm before cp."""
     ef_module = EF_MODULE
 
+    # Create a dummy harness file to pass the existence check
+    harness_file = workdir / "harness"
+    harness_file.write_text("#!/bin/bash\necho 'dummy harness'\n")
+    harness_file.chmod(0o755)
+
     payload = ExecuteFuzzingInput(
         workdir=workdir,
-        harness_path=workdir / "harness",
+        harness_path=harness_file,
         fuzzer_type=FuzzerType.LIBFUZZER,
         timeout_seconds=10,
         campaign_id="11111111-2222-3333-4444-555555555555",
@@ -208,9 +222,14 @@ async def test_real_path_cleanup_runs_on_cancel(
     fast_heartbeat: None,
 ) -> None:
     """A CancelledError mid-run still calls cleanup() (no leaked containers)."""
+    # Create a dummy harness file to pass the existence check
+    harness_file = workdir / "harness"
+    harness_file.write_text("#!/bin/bash\necho 'dummy harness'\n")
+    harness_file.chmod(0o755)
+
     payload = ExecuteFuzzingInput(
         workdir=workdir,
-        harness_path=workdir / "harness",
+        harness_path=harness_file,
         fuzzer_type=FuzzerType.LIBFUZZER,
         timeout_seconds=10,
         campaign_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",

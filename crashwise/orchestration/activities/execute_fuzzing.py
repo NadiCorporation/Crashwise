@@ -155,6 +155,12 @@ async def _real_execute(
     last_coverage = 0
     last_exec_per_sec = 0.0
     crash_count_observed = 0
+    
+    # Resource monitoring state
+    peak_memory_mb = 0.0
+    peak_cpu_percent = 0.0
+    resource_check_interval = 10.0  # Check every 10 seconds
+    last_resource_check = 0.0
 
     try:
         await mgr.start(job)
@@ -233,6 +239,63 @@ async def _real_execute(
                     sum(1 for p in crashes_dir.iterdir() if p.is_file()),
                 )
 
+            # Resource monitoring - check CPU and memory usage periodically
+            if elapsed - last_resource_check >= resource_check_interval:
+                try:
+                    stats = await mgr.stats(job_id)
+                    if stats:
+                        # Parse CPU percent (e.g., "50.00%" -> 50.0)
+                        cpu_str = stats.get("cpu_percent", "0%")
+                        cpu_percent = 0.0
+                        if cpu_str and cpu_str != "N/A":
+                            try:
+                                cpu_percent = float(cpu_str.rstrip("%"))
+                            except ValueError:
+                                pass
+                        
+                        # Parse memory (e.g., "100MiB / 2048MiB" -> 100.0)
+                        mem_str = stats.get("memory", "0MiB")
+                        memory_mb = 0.0
+                        if mem_str and mem_str != "N/A":
+                            try:
+                                # Extract the first number before "/"
+                                mem_part = mem_str.split("/")[0].strip()
+                                # Remove unit suffix and convert to MB
+                                if "GiB" in mem_part:
+                                    memory_mb = float(mem_part.replace("GiB", "").strip()) * 1024
+                                elif "MiB" in mem_part:
+                                    memory_mb = float(mem_part.replace("MiB", "").strip())
+                                elif "KiB" in mem_part:
+                                    memory_mb = float(mem_part.replace("KiB", "").strip()) / 1024
+                            except (ValueError, IndexError):
+                                pass
+                        
+                        peak_cpu_percent = max(peak_cpu_percent, cpu_percent)
+                        peak_memory_mb = max(peak_memory_mb, memory_mb)
+                        
+                        # Log warning if resource usage is high
+                        if cpu_percent > 90.0:
+                            log.warning(
+                                "execute_fuzzing.high_cpu_usage",
+                                job_id=job_id,
+                                cpu_percent=round(cpu_percent, 1),
+                                memory_mb=round(memory_mb, 1),
+                            )
+                        if memory_mb > 1800.0:  # 90% of 2048MB limit
+                            log.warning(
+                                "execute_fuzzing.high_memory_usage",
+                                job_id=job_id,
+                                cpu_percent=round(cpu_percent, 1),
+                                memory_mb=round(memory_mb, 1),
+                            )
+                except Exception as stats_exc:
+                    log.debug(
+                        "execute_fuzzing.stats_failed",
+                        job_id=job_id,
+                        error=str(stats_exc),
+                    )
+                last_resource_check = elapsed
+
             activity.heartbeat(
                 {
                     "elapsed_seconds": round(elapsed, 2),
@@ -241,16 +304,30 @@ async def _real_execute(
                     "exec_per_sec": last_exec_per_sec,
                     "crashes": crash_count_observed,
                     "fuzzer": payload.fuzzer_type.value,
+                    "peak_cpu_percent": round(peak_cpu_percent, 1),
+                    "peak_memory_mb": round(peak_memory_mb, 1),
                 }
             )
 
             if not alive:
-                # libFuzzer/AFL exits immediately on the first crash.
-                log.info(
-                    "execute_fuzzing.container_exited",
-                    job_id=job_id,
-                    elapsed=round(elapsed, 2),
-                )
+                # Container exited early - capture diagnostics
+                try:
+                    exit_code = await mgr.get_exit_code(job_id)
+                    stderr_output = await mgr.logs(job_id, tail=50, stderr=True)
+                    log.warning(
+                        "execute_fuzzing.container_exited_early",
+                        job_id=job_id,
+                        elapsed=round(elapsed, 2),
+                        exit_code=exit_code,
+                        stderr_preview=stderr_output[:500] if stderr_output else "",
+                    )
+                except Exception as diag_exc:
+                    log.warning(
+                        "execute_fuzzing.container_exited_diagnostics_failed",
+                        job_id=job_id,
+                        elapsed=round(elapsed, 2),
+                        diagnostic_error=str(diag_exc),
+                    )
                 break
 
         # Normal completion — stop, harvest, then remove. §1.3 ordering.
@@ -307,6 +384,8 @@ async def _real_execute(
         duration_seconds=round(duration, 3),
         coverage_edges=last_coverage,
         coverage_data_path=_collect_coverage_data(crashes_dir.parent, payload),
+        peak_cpu_percent=round(peak_cpu_percent, 1),
+        peak_memory_mb=round(peak_memory_mb, 1),
     )
 
     log.info(
@@ -317,6 +396,8 @@ async def _real_execute(
         coverage=last_coverage,
         crashes=output.crash_count,
         duration_seconds=output.duration_seconds,
+        peak_cpu_percent=output.peak_cpu_percent,
+        peak_memory_mb=output.peak_memory_mb,
     )
 
     # Persist run stats and propagate to Redis + R2.
@@ -396,6 +477,8 @@ async def _simulated_execute(
         crash_count=0,
         executions=executions,
         duration_seconds=round(duration, 3),
+        peak_cpu_percent=0.0,
+        peak_memory_mb=0.0,
     )
 
 

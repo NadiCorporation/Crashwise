@@ -281,6 +281,12 @@ class ExecuteFuzzingOutput(_StrictModel):
         default=None,
         description="Path to raw coverage data file (AFL plot_data or sancov output)",
     )
+    peak_cpu_percent: float = Field(
+        default=0.0, ge=0.0, description="Peak CPU usage percentage during fuzzing"
+    )
+    peak_memory_mb: float = Field(
+        default=0.0, ge=0.0, description="Peak memory usage in MB during fuzzing"
+    )
 
 
 class SeedCorpusInput(_StrictModel):
