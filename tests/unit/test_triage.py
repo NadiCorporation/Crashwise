@@ -215,3 +215,37 @@ def test_parse_gdb_backtrace() -> None:
     assert frames[1].file == "harness.cpp"
     assert frames[1].line == 45
     assert frames[2].function == "__libc_start_main"
+
+
+# ── ASAN parser ──────────────────────────────────────────────────────────────
+_ASAN_REAL_OUTPUT = """\
+ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000020
+    #0 0x4e6c1d in inflate_fast /src/zlib/inflate.c:232:3
+    #1 0x4e1a1b in inflate /src/zlib/inflate.c:987
+    #2 0x555a2b in LLVMFuzzerTestOneInput+0x42 /src/harness.cpp:30
+"""
+
+
+def test_parse_asan_backtrace() -> None:
+    from crashwise.orchestration.activities.triage_results import _parse_asan_backtrace
+
+    frames = _parse_asan_backtrace(_ASAN_REAL_OUTPUT)
+    assert len(frames) == 3
+    assert frames[0].function == "inflate_fast"
+    assert frames[0].file == "/src/zlib/inflate.c"
+    assert frames[0].line == 232
+    assert frames[1].function == "inflate"
+    assert frames[1].line == 987
+    assert frames[2].function == "LLVMFuzzerTestOneInput"
+
+
+def test_asan_frames_produce_stable_hash() -> None:
+    from crashwise.agents.triage.dedup import compute_stack_hash
+    from crashwise.orchestration.activities.triage_results import _parse_asan_backtrace
+
+    frames = _parse_asan_backtrace(_ASAN_REAL_OUTPUT)
+    report = CrashReport(crash_id="asan", stack_frames=frames)
+    h1 = compute_stack_hash(report)
+    h2 = compute_stack_hash(report)
+    assert h1 == h2
+    assert len(h1) == 64

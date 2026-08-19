@@ -21,7 +21,7 @@ the DB write succeeded but the activity returned-result handoff failed.
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from temporalio import activity
 
@@ -68,20 +68,44 @@ async def persist_triaged_crash(
     )
 
     from crashwise.core.database import Crash, get_session
-    from crashwise.core.redis import incr_crash_counter, is_stack_hash_known
+    from crashwise.core.redis import (
+        claim_stack_hash,
+        incr_crash_counter,
+        release_stack_hash,
+    )
 
-    # ── Redis fast-path dedup ────────────────────────────────────────────
-    if crash.stack_hash and await is_stack_hash_known(payload.campaign_id, crash.stack_hash):
-        log.debug(
-            "persist_triaged_crash.redis_dedup",
-            campaign_id=payload.campaign_id,
-            stack_hash=crash.stack_hash,
-        )
-        return PersistTriagedCrashOutput(
-            persisted=False,
-            crash_uuid=None,
-            duplicate=True,
-        )
+    # Resolve the run_id up-front so a malformed value never aborts the write.
+    run_id: UUID | None = None
+    if payload.run_id:
+        try:
+            run_id = UUID(payload.run_id)
+        except (ValueError, TypeError, AttributeError):
+            log.warning(
+                "persist_triaged_crash.invalid_run_id",
+                campaign_id=payload.campaign_id,
+                run_id=payload.run_id,
+            )
+
+    stack_hash = crash.stack_hash
+    claimed = False
+
+    # ── Redis fast-path dedup (atomic claim) ────────────────────────────
+    # We reserve the hash *before* the SQL write, but roll the reservation
+    # back if the write fails — so a transient DB outage never permanently
+    # deduplicates a crash away.
+    if stack_hash:
+        claimed = await claim_stack_hash(payload.campaign_id, stack_hash)
+        if not claimed:
+            log.debug(
+                "persist_triaged_crash.redis_dedup",
+                campaign_id=payload.campaign_id,
+                stack_hash=stack_hash,
+            )
+            return PersistTriagedCrashOutput(
+                persisted=False,
+                crash_uuid=None,
+                duplicate=True,
+            )
 
     # ── DB write ─────────────────────────────────────────────────────────
     new_uuid = uuid4()
@@ -89,11 +113,11 @@ async def persist_triaged_crash(
         async with get_session() as session:
             row = Crash(
                 id=new_uuid,
-                # run_id is nullable for now — we link by campaign id.
+                run_id=run_id,
                 crash_type=crash.bug_type,
                 severity=crash.severity.value,
                 stack_trace=crash.stack_trace,
-                stack_hash=crash.stack_hash,
+                stack_hash=stack_hash,
                 signal=crash.signal,
                 logs_path=crash.crash_file_path,
                 suggested_patch=payload.patch,
@@ -106,7 +130,7 @@ async def persist_triaged_crash(
             session.add(row)
             await session.commit()
 
-        if crash.stack_hash:
+        if stack_hash:
             await incr_crash_counter(payload.campaign_id, count=1)
 
         # Mirror to the web control plane (best-effort; never fatal).
@@ -116,6 +140,7 @@ async def persist_triaged_crash(
             "persist_triaged_crash.db_committed",
             campaign_id=payload.campaign_id,
             crash_uuid=str(new_uuid),
+            run_id=str(run_id) if run_id else None,
             patch_chars=len(payload.patch),
             healing_attempts=payload.healing_attempts,
         )
@@ -125,6 +150,9 @@ async def persist_triaged_crash(
             duplicate=False,
         )
     except Exception:
+        # Roll back the Redis reservation so the crash can be retried later.
+        if claimed and stack_hash:
+            await release_stack_hash(payload.campaign_id, stack_hash)
         # We deliberately do NOT raise here — the workflow already paid
         # for the LLM repair step and we don't want a transient DB
         # outage to retry the entire healing chain. The workflow logs
