@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from crashwise.core.redis import (
+    claim_stack_hash,
     clear_dedup_cache,
     get_campaign_state,
     get_crash_counter,
@@ -21,6 +22,7 @@ from crashwise.core.redis import (
     incr_exec_counter,
     is_stack_hash_known,
     list_active_workers,
+    release_stack_hash,
     set_campaign_state,
 )
 
@@ -154,7 +156,7 @@ async def test_get_exec_counter_with_redis(monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.asyncio
 async def test_is_stack_hash_known_new_hash(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A new stack hash is not known and gets added to the set."""
+    """A new stack hash is unknown and the check is read-only (no SADD)."""
     from crashwise.core import redis as redis_mod
     from crashwise.core.config import get_settings
 
@@ -166,14 +168,13 @@ async def test_is_stack_hash_known_new_hash(monkeypatch: pytest.MonkeyPatch) -> 
     mock_pool = AsyncMock()
     mock_pool.ping = AsyncMock(return_value=True)
     mock_pool.sismember = AsyncMock(return_value=False)
-    mock_pool.sadd = AsyncMock(return_value=1)
-    mock_pool.expire = AsyncMock(return_value=True)
 
     with patch("crashwise.core.redis.redis.from_url", return_value=mock_pool):
         result = await is_stack_hash_known("campaign-1", "deadbeef")
 
     assert result is False
-    mock_pool.sadd.assert_called_once_with("crashwise:dedup:campaign-1", "deadbeef")
+    mock_pool.sismember.assert_called_once_with("crashwise:dedup:campaign-1", "deadbeef")
+    mock_pool.sadd.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -196,6 +197,87 @@ async def test_is_stack_hash_known_duplicate(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result is True
     mock_pool.sadd.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_claim_stack_hash_new(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A claim on an unseen hash returns True and adds it to the set."""
+    from crashwise.core import redis as redis_mod
+    from crashwise.core.config import get_settings
+
+    redis_mod._pool = None
+    get_settings.cache_clear()
+    monkeypatch.setenv("REDIS_ENABLED", "true")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+
+    mock_pool = AsyncMock()
+    mock_pool.ping = AsyncMock(return_value=True)
+    mock_pool.sadd = AsyncMock(return_value=1)
+    mock_pool.expire = AsyncMock(return_value=True)
+
+    with patch("crashwise.core.redis.redis.from_url", return_value=mock_pool):
+        result = await claim_stack_hash("campaign-1", "deadbeef")
+
+    assert result is True
+    mock_pool.sadd.assert_called_once_with("crashwise:dedup:campaign-1", "deadbeef")
+    mock_pool.expire.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_claim_stack_hash_duplicate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A claim on an already-seen hash returns False and does not reset TTL."""
+    from crashwise.core import redis as redis_mod
+    from crashwise.core.config import get_settings
+
+    redis_mod._pool = None
+    get_settings.cache_clear()
+    monkeypatch.setenv("REDIS_ENABLED", "true")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+
+    mock_pool = AsyncMock()
+    mock_pool.ping = AsyncMock(return_value=True)
+    mock_pool.sadd = AsyncMock(return_value=0)
+
+    with patch("crashwise.core.redis.redis.from_url", return_value=mock_pool):
+        result = await claim_stack_hash("campaign-1", "deadbeef")
+
+    assert result is False
+    mock_pool.expire.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_claim_stack_hash_noop_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When Redis is disabled, claims succeed (DB unique constraint guards)."""
+    from crashwise.core import redis as redis_mod
+    from crashwise.core.config import get_settings
+
+    redis_mod._pool = None
+    get_settings.cache_clear()
+    monkeypatch.setenv("REDIS_ENABLED", "false")
+
+    result = await claim_stack_hash("campaign-1", "deadbeef")
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_release_stack_hash(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Releasing a claim removes the member from the dedup set."""
+    from crashwise.core import redis as redis_mod
+    from crashwise.core.config import get_settings
+
+    redis_mod._pool = None
+    get_settings.cache_clear()
+    monkeypatch.setenv("REDIS_ENABLED", "true")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+
+    mock_pool = AsyncMock()
+    mock_pool.ping = AsyncMock(return_value=True)
+    mock_pool.srem = AsyncMock(return_value=1)
+
+    with patch("crashwise.core.redis.redis.from_url", return_value=mock_pool):
+        await release_stack_hash("campaign-1", "deadbeef")
+
+    mock_pool.srem.assert_called_once_with("crashwise:dedup:campaign-1", "deadbeef")
 
 
 @pytest.mark.asyncio

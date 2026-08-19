@@ -160,6 +160,8 @@ class DockerManager:
         # Prepare host paths.
         job.output_dir.mkdir(parents=True, exist_ok=True)
         job.corpus_dir.mkdir(parents=True, exist_ok=True)
+        if job.crashes_dir is not None:
+            job.crashes_dir.mkdir(parents=True, exist_ok=True)
 
         # B13: defensively remove any stale container with the same name
         # before starting (Temporal activity retries reuse job_id; a worker
@@ -223,6 +225,10 @@ class DockerManager:
                 f"{job.output_dir}:/out:rw",
             ]
         )
+        # Unified crash directory: both fuzzers write their crash artefacts
+        # to the same host directory so triage can harvest them uniformly.
+        if job.crashes_dir is not None:
+            cmd.extend(["-v", f"{job.crashes_dir}:/crashes:rw"])
         for key, val in job.env_vars.items():
             cmd.extend(["-e", f"{key}={val}"])
         # Ensure dynamically linked harness can find libs from the build tree.
@@ -257,6 +263,10 @@ class DockerManager:
                     "-max_len=4096",
                     "-print_final_stats=1",
                     "-detect_leaks=0",
+                    # Route crash reproducers into the unified /crashes mount
+                    # (mapped to workdir/crashes) so triage harvests them the
+                    # same way it harvests AFL++ /out/crashes.
+                    "-artifact_prefix=/crashes/",
                 ]
             )
 
@@ -438,13 +448,17 @@ class DockerManager:
 
         preserve_dir.mkdir(parents=True, exist_ok=True)
 
-        # Try common corpus locations inside the container.
-        corpus_paths = ["/corpus", "/out/queue", "/out/corpus", "/tmp/corpus"]
+        # Try common corpus locations inside the container. AFL++ stores its
+        # coverage frontier in /out/queue (new interesting seeds), while
+        # libFuzzer grows its corpus in-place under /corpus. We copy the
+        # *contents* (trailing "/.") so the destination directory is directly
+        # reusable as a seed corpus for the next iteration.
+        corpus_paths = ["/out/queue", "/corpus", "/out/corpus", "/tmp/corpus"]
         for src in corpus_paths:
             proc = await asyncio.create_subprocess_exec(
                 "docker",
                 "cp",
-                f"{container_id}:{src}",
+                f"{container_id}:{src}/.",
                 str(preserve_dir),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,

@@ -225,6 +225,10 @@ class MainFuzzingWorkflow:
         self._build_succeeded: bool = True
         self._healing_workspace_path: str = ""
         self._total_patches_generated: int = 0
+        # ── Phase 3 fix: track the most recent FuzzingRun id so crashes ──
+        # can be linked back to the run that produced them (exposes them
+        # to the API/UI via the campaign→run→crash join).
+        self._last_run_id: str | None = None
 
     @workflow.query(name="current_stage")
     def current_stage(self) -> str:
@@ -638,6 +642,11 @@ class MainFuzzingWorkflow:
                 retry_policy=_FUZZ_RETRY,
             )
 
+            # Remember the run this iteration persisted so the end-of-
+            # campaign triage can attach each crash to the producing run.
+            if fuzz_out.run_id:
+                self._last_run_id = fuzz_out.run_id
+
             # Analyze progress.
             self._stage = WorkflowStage.TRIAGE
             campaign = await workflow.execute_activity(
@@ -717,7 +726,7 @@ class MainFuzzingWorkflow:
                         and self._consecutive_pivots_no_growth >= 2
                         and harness_path is not None
                     ):
-                        await self._run_evolution(
+                        harness_path = await self._run_evolution(
                             payload=payload,
                             setup_out=setup_out,
                             harness_path=harness_path,
@@ -781,41 +790,48 @@ class MainFuzzingWorkflow:
         # ── 5. Per-crash autonomous repair + persistence (Phase 22) ─────────
         # The loop is a no-op when ``campaign_id`` is None (anonymous
         # smoke runs); persistence requires a campaign to attach to.
+        persisted_crashes: list[tuple[str, TriagedCrashRef]] = []
         if payload.campaign_id is not None and triage_out.unique_crashes:
-            await self._heal_and_persist_crashes(
+            persisted_crashes = await self._heal_and_persist_crashes(
                 payload=payload,
                 target_workdir=target_workdir,
                 unique_crashes=triage_out.unique_crashes,
             )
 
         # ── 6. Deep crash analysis (Phase 10) ───────────────────────────────
-        # Only run AI triage when unique crashes were found — saves API costs.
-        if campaign.crash_count > 0 and payload.campaign_id is not None:
+        # Run per-crash LLM RCA against the *actual* crash UUID and feed the
+        # real ASAN log as context, so the analysis is attached to the crash
+        # row instead of being discarded against the campaign id.
+        if payload.campaign_id is not None and persisted_crashes:
             self._stage = WorkflowStage.TRIAGE
-            log.info(
-                f"main_workflow.analyze_crash "
-                f"crash_count={campaign.crash_count} "
-                f"campaign_id={payload.campaign_id}"
-            )
-            # Build a lightweight crash context from the campaign state.
-            crash_context = (
-                f"Campaign: {payload.campaign_id}\n"
-                f"Target: {payload.target_repo}\n"
-                f"Fuzzer: {payload.fuzzer_type.value}\n"
-                f"Crashes: {campaign.crash_count}\n"
-                f"Summary: {triage_out.summary}"
-            )
-            await workflow.execute_activity(
-                "analyze_crash",
-                {
-                    "crash_id": payload.campaign_id,  # Simplified: use campaign_id as proxy
-                    "crash_context": crash_context,
-                    "campaign_id": payload.campaign_id,
-                    "skip_patch_generation": payload.enable_self_healing,
-                },
-                start_to_close_timeout=timedelta(minutes=5),
-                retry_policy=_AI_RETRY,
-            )
+            for crash_uuid, crash_ref in persisted_crashes:
+                crash_context = (
+                    crash_ref.asan_log or crash_ref.stack_trace or crash_ref.root_cause
+                )
+                log.info(
+                    f"main_workflow.analyze_crash "
+                    f"crash_uuid={crash_uuid} "
+                    f"crash_id={crash_ref.crash_id} "
+                    f"campaign_id={payload.campaign_id}"
+                )
+                try:
+                    await workflow.execute_activity(
+                        "analyze_crash",
+                        {
+                            "crash_id": crash_uuid,
+                            "crash_context": crash_context,
+                            "campaign_id": payload.campaign_id,
+                            "skip_patch_generation": payload.enable_self_healing,
+                        },
+                        start_to_close_timeout=timedelta(minutes=5),
+                        retry_policy=_AI_RETRY,
+                    )
+                except Exception as exc:  # broad-except: never break the loop
+                    log.warning(
+                        "main_workflow.analyze_crash_failed "
+                        f"crash_uuid={crash_uuid} "
+                        f"error={exc!s:.160}"
+                    )
 
         # ── 7. Compose final result ─────────────────────────────────────────
         self._stage = WorkflowStage.COMPLETED
@@ -928,7 +944,7 @@ class MainFuzzingWorkflow:
         payload: FuzzingInput,
         target_workdir: Path,
         unique_crashes: list[TriagedCrashRef],
-    ) -> None:
+    ) -> list[tuple[str, TriagedCrashRef]]:
         """Drive autonomous repair (when enabled) and persist each crash.
 
         For every unique, net-new crash returned by ``triage_results``
@@ -943,18 +959,26 @@ class MainFuzzingWorkflow:
            ``start_to_close_timeout`` so it cannot stall the workflow
            indefinitely.
         2. Persist the crash via :func:`persist_triaged_crash`, passing
-           the verified ``.patch`` text (or empty string) and the
-           number of agent attempts. The activity performs the Redis
-           fast-path dedup check and the SQL write atomically.
+           the verified ``.patch`` text (or empty string), the number of
+           agent attempts, and the campaign's most recent ``run_id`` so
+           the crash is linked to its producing fuzzing run.
 
         The method is total — it never raises. Per-crash failures are
         logged and the workflow continues so a single repair-blowup
         does not cost the entire campaign.
+
+        Returns
+        -------
+        A list of ``(crash_uuid, crash_ref)`` tuples for every crash that
+        was successfully persisted, so the caller can drive per-crash
+        root-cause analysis against the real database UUID.
         """
         log = workflow.logger
         campaign_id = payload.campaign_id
         if campaign_id is None:
-            return
+            return []
+
+        persisted: list[tuple[str, TriagedCrashRef]] = []
 
         for crash_ref in unique_crashes:
             patch_text: str = ""
@@ -1030,12 +1054,15 @@ class MainFuzzingWorkflow:
                         patch=patch_text,
                         patch_summary=patch_summary,
                         healing_attempts=healing_attempts,
+                        run_id=self._last_run_id,
                     ),
                     result_type=PersistTriagedCrashOutput,
                     start_to_close_timeout=timedelta(seconds=60),
                     retry_policy=_PERSIST_RETRY,
                 )
                 if persist_out.persisted:
+                    if persist_out.crash_uuid:
+                        persisted.append((persist_out.crash_uuid, crash_ref))
                     log.info(
                         "main_workflow.healing.crash_persisted "
                         f"crash_id={crash_ref.crash_id} "
@@ -1059,6 +1086,8 @@ class MainFuzzingWorkflow:
                     f"error={exc!s:.160}"
                 )
 
+        return persisted
+
     async def _run_evolution(
         self,
         *,
@@ -1066,7 +1095,7 @@ class MainFuzzingWorkflow:
         setup_out: SetupTargetOutput,
         harness_path: Path,
         campaign: FuzzingCampaignState,
-    ) -> None:
+    ) -> Path:
         """Phase 21 + Linux-Native: invoke harness evolution + hot-swap.
 
         Called by the main loop once the MAB has shown two consecutive
@@ -1100,7 +1129,7 @@ class MainFuzzingWorkflow:
                 "main_workflow.evolution.cap_reached "
                 f"count={self._evolution_count} max={max_evolutions}"
             )
-            return
+            return harness_path
 
         log.info(
             "main_workflow.evolution.start "
@@ -1139,7 +1168,7 @@ class MainFuzzingWorkflow:
 
         if not evolved.evolved_harness_code:
             log.warning("main_workflow.evolution.no_code")
-            return
+            return harness_path
 
         log.info(
             "main_workflow.evolution.llm_response "
@@ -1165,9 +1194,14 @@ class MainFuzzingWorkflow:
 
         if swap.swapped and swap.binary_path is not None:
             self._evolution_count += 1
+            harness_path = swap.binary_path
             log.info(f"main_workflow.evolution.success binary={swap.binary_path}")
         else:
             log.warning(f"main_workflow.evolution.failed notes={swap.notes[:80]}")
+
+        # Return the (possibly updated) harness path so the main loop uses
+        # the freshly compiled binary on the next iteration.
+        return harness_path
 
     async def _identify_blocker(
         self,

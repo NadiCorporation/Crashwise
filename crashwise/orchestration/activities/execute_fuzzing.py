@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 import time
 from pathlib import Path
+from uuid import UUID
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -122,7 +123,15 @@ async def _real_execute(
 
     # The harness binary lives next to the workdir; fall back gracefully.
     harness_path = payload.harness_path or (payload.workdir / "harness")
-    corpus_dir = payload.corpus_dir or (payload.workdir / "corpus")
+    # Seed the fuzzer from the previous iteration's preserved coverage
+    # frontier when one exists; otherwise fall back to the original seed
+    # corpus. This keeps multi-iteration campaigns building on prior
+    # discoveries instead of restarting from the initial seeds each loop.
+    preserved_dir = payload.workdir / "corpus_preserved"
+    if preserved_dir.exists() and any(p.is_file() for p in preserved_dir.rglob("*")):
+        corpus_dir = preserved_dir
+    else:
+        corpus_dir = payload.corpus_dir or (payload.workdir / "corpus")
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
     # Guard: if harness_path doesn't exist or is a directory, we can't fuzz.
@@ -141,6 +150,7 @@ async def _real_execute(
         harness_path=harness_path,
         corpus_dir=corpus_dir,
         output_dir=crashes_dir.parent,
+        crashes_dir=crashes_dir,
         timeout_seconds=payload.timeout_seconds,
         cpu_limit=2.0,
         memory_limit_mb=2048,
@@ -406,7 +416,9 @@ async def _real_execute(
         "_real_execute must be invoked with a campaign_id"
     )
     campaign_id = payload.campaign_id
-    await _persist_run(payload, output)
+    run_id = await _persist_run(payload, output)
+    if run_id is not None:
+        output.run_id = str(run_id)
     from crashwise.core.redis import incr_exec_counter
 
     await incr_exec_counter(campaign_id, count=output.executions)
@@ -485,22 +497,26 @@ async def _simulated_execute(
 async def _persist_run(
     payload: ExecuteFuzzingInput,
     output: ExecuteFuzzingOutput,
-) -> None:
-    """Write fuzzing run stats to the DB."""
-    from datetime import datetime
-    from uuid import UUID
+) -> UUID | None:
+    """Write fuzzing run stats to the DB.
+
+    Returns the newly created :class:`FuzzingRun` UUID so the workflow can
+    link discovered crashes back to the run that produced them. Returns
+    ``None`` when no campaign_id is set or the write fails.
+    """
+    from datetime import UTC, datetime
 
     from crashwise.core.database import FuzzingRun, get_session
 
     if payload.campaign_id is None:
-        return
+        return None
     try:
         async with get_session() as session:
             run = FuzzingRun(
                 campaign_id=UUID(payload.campaign_id),
                 iteration=payload.iteration,
-                started_at=datetime.utcnow(),
-                finished_at=datetime.utcnow(),
+                started_at=datetime.now(tz=UTC),
+                finished_at=datetime.now(tz=UTC),
                 executions=output.executions,
                 duration_seconds=output.duration_seconds,
                 coverage_edges=output.coverage_edges,
@@ -513,9 +529,12 @@ async def _persist_run(
                 campaign_id=payload.campaign_id,
                 iteration=payload.iteration,
                 executions=output.executions,
+                run_id=str(run.id),
             )
+            return run.id
     except Exception:
         log.warning("execute_fuzzing.db_persist_failed", exc_info=True)
+        return None
 
 
 def _simulated_execs_per_tick(fuzzer: FuzzerType) -> int:

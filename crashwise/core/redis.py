@@ -197,36 +197,69 @@ async def is_stack_hash_known(
     *,
     ttl: int = 86_400,
 ) -> bool:
-    """Check if a stack hash has been seen before for this campaign.
+    """Read-only membership check for a stack hash in the dedup set.
 
-    Uses a Redis Set for O(1) membership testing.
-
-    Parameters
-    ----------
-    campaign_id:
-        Campaign identifier.
-    stack_hash:
-        SHA256 stack trace hash.
-    ttl:
-        Expiration for the dedup set (seconds).
-
-    Returns
-    -------
-    ``True`` if the hash was already in the set (duplicate).
+    This is a pure query (no side effects). Use :func:`claim_stack_hash`
+    for the check-and-reserve semantics required by the persistence path,
+    and :func:`release_stack_hash` to roll a claim back on failure.
     """
     if not stack_hash or not await _check_enabled():
         return False
 
     pool = _get_pool()
     key = f"crashwise:dedup:{campaign_id}"
-    was_member = await pool.sismember(key, stack_hash)
-    if was_member:
+    return bool(await pool.sismember(key, stack_hash))
+
+
+async def claim_stack_hash(
+    campaign_id: str,
+    stack_hash: str,
+    *,
+    ttl: int = 86_400,
+) -> bool:
+    """Atomically reserve a stack hash in the dedup set.
+
+    ``SADD`` is atomic and returns the number of elements actually added,
+    so a concurrent claim of the same hash is guaranteed to observe the
+    other one as already-present. Returns ``True`` when the hash was newly
+    claimed (i.e. first time seen), ``False`` when it was already present
+    (duplicate). When Redis is disabled the claim is skipped and ``True``
+    is returned, leaving the database unique constraint as the fallback.
+
+    Callers MUST call :func:`release_stack_hash` if the subsequent DB
+    write fails, otherwise the hash would remain reserved and the crash
+    would be permanently deduplicated away.
+    """
+    if not stack_hash or not await _check_enabled():
         return True
 
-    # Add it now so future calls see it.
-    await pool.sadd(key, stack_hash)
-    await pool.expire(key, ttl)
-    return False
+    pool = _get_pool()
+    key = f"crashwise:dedup:{campaign_id}"
+    added = await pool.sadd(key, stack_hash)
+    if added:
+        await pool.expire(key, ttl)
+    return bool(added)
+
+
+async def release_stack_hash(campaign_id: str, stack_hash: str) -> None:
+    """Undo a prior :func:`claim_stack_hash` reservation.
+
+    Called when the persistence step that follows a successful claim
+    fails, so the crash is not permanently dropped from the dedup set.
+    """
+    if not stack_hash or not await _check_enabled():
+        return
+
+    pool = _get_pool()
+    key = f"crashwise:dedup:{campaign_id}"
+    try:
+        await pool.srem(key, stack_hash)  # type: ignore[misc]  # redis-py union
+    except Exception as exc:
+        log.warning(
+            "redis.release_stack_hash_failed",
+            campaign_id=campaign_id,
+            error=str(exc)[:100],
+        )
 
 
 async def clear_dedup_cache(campaign_id: str) -> None:
@@ -517,6 +550,7 @@ async def _load_mab_state_from_db(campaign_id: str) -> str | None:
 
 
 __all__ = [
+    "claim_stack_hash",
     "clear_dedup_cache",
     "clear_mab_state",
     "get_campaign_state",
@@ -528,6 +562,7 @@ __all__ = [
     "is_stack_hash_known",
     "list_active_workers",
     "load_mab_state",
+    "release_stack_hash",
     "save_mab_state",
     "set_campaign_state",
 ]

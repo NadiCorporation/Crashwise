@@ -223,14 +223,20 @@ async def _update_crash_record(
     vulnerability_type: str,
     suggested_patch: str,
 ) -> None:
-    """Update the crash record with AI-generated fields."""
+    """Update the crash record with AI-generated fields.
+
+    ``suggested_patch`` is only written when the row does not already carry
+    one (e.g. a verified patch produced by the healing engine), so the deep
+    RCA pass never clobbers a higher-quality autonomous repair.
+    """
     try:
         async with get_session() as session:
             crash = await session.get(Crash, UUID(crash_id))
             if crash is not None:
                 crash.severity_score = severity_score
                 crash.vulnerability_type = vulnerability_type
-                crash.suggested_patch = suggested_patch
+                if not crash.suggested_patch and suggested_patch:
+                    crash.suggested_patch = suggested_patch
                 await session.commit()
                 log.info(
                     "analyze_crash.db_updated",

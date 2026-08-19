@@ -287,6 +287,11 @@ class ExecuteFuzzingOutput(_StrictModel):
     peak_memory_mb: float = Field(
         default=0.0, ge=0.0, description="Peak memory usage in MB during fuzzing"
     )
+    run_id: str | None = Field(
+        default=None,
+        max_length=36,
+        description="UUID of the FuzzingRun row persisted for this iteration.",
+    )
 
 
 class SeedCorpusInput(_StrictModel):
@@ -399,6 +404,11 @@ class PersistTriagedCrashInput(_StrictModel):
     patch: str = Field(default="", max_length=16_384)
     patch_summary: str = Field(default="", max_length=4_096)
     healing_attempts: int = Field(default=0, ge=0)
+    run_id: str | None = Field(
+        default=None,
+        max_length=36,
+        description="UUID of the FuzzingRun row to link this crash to.",
+    )
 
 
 class PersistTriagedCrashOutput(_StrictModel):
@@ -466,6 +476,7 @@ class FuzzJob(_StrictModel):
     harness_path: Path
     corpus_dir: Path
     output_dir: Path
+    crashes_dir: Path | None = None
     timeout_seconds: int = Field(default=600, ge=10, le=86_400)
     cpu_limit: float = Field(default=2.0, ge=0.1)
     memory_limit_mb: int = Field(default=2048, ge=256)
