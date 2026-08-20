@@ -54,9 +54,7 @@ def test_init_force_recreate() -> None:
     with patch("crashwise.cli.init_db", new_callable=AsyncMock) as mock_init, \
          patch("crashwise.cli.close_db", new_callable=AsyncMock) as _mock_close, \
          patch("crashwise.core.discovery.discover_project", return_value=None), \
-         patch("crashwise.core.discovery.DiscoveredProfile") as _mock_profile_cls, \
-         patch("crashwise.cli.CrashwiseManifest") as mock_manifest_cls:
-        mock_manifest_cls.return_value.to_file = MagicMock()
+         patch("crashwise.core.discovery.DiscoveredProfile"):
         result = runner.invoke(app, ["init", "--db-force"])
         assert result.exit_code == 0
         assert "recreated successfully" in result.output
@@ -70,12 +68,16 @@ def test_run_submits_workflow() -> None:
     """The ``run`` command submits a MainFuzzingWorkflow.
 
     Pre-flight is skipped via ``--skip-preflight`` so this test does not
-    depend on Docker / clang / gcc being installed on the CI host.
+    depend on Docker / clang / gcc being installed on the CI host. The
+    API submission is stubbed to fail so the command falls through to the
+    direct Temporal path.
     """
-    mock_result = MagicMock()
-    mock_result.model_dump_json.return_value = '{"status": "ok"}'
+    mock_handle = MagicMock()
+    mock_handle.id = "crashwise-test-123"
 
-    with patch("crashwise.cli.execute_main_workflow", new_callable=AsyncMock, return_value=mock_result) as mock_exec:
+    with patch("httpx.AsyncClient", side_effect=Exception("no api")), \
+         patch("crashwise.cli.connect", new_callable=AsyncMock) as mock_connect, \
+         patch("crashwise.cli.start_main_workflow", new_callable=AsyncMock, return_value=mock_handle) as mock_start:
         result = runner.invoke(app, [
             "run",
             "https://github.com/example/target",
@@ -84,17 +86,20 @@ def test_run_submits_workflow() -> None:
             "--branch", "main",
             "--sanitizers", "address",
             "--skip-preflight",
+            "--detach",
         ])
         assert result.exit_code == 0
         assert "Submitting MainFuzzingWorkflow" in result.output
-        assert "Workflow result" in result.output
-        mock_exec.assert_awaited_once()
+        assert "Workflow submitted (direct)" in result.output
+        mock_start.assert_awaited_once()
+        mock_connect.assert_awaited_once()
 
 
 def test_run_temporal_connection_error() -> None:
     from crashwise.orchestration.client import TemporalConnectionError
 
-    with patch("crashwise.cli.execute_main_workflow", new_callable=AsyncMock, side_effect=TemporalConnectionError("down")):
+    with patch("httpx.AsyncClient", side_effect=Exception("no api")), \
+         patch("crashwise.cli.connect", new_callable=AsyncMock, side_effect=TemporalConnectionError("down")):
         result = runner.invoke(app, [
             "run",
             "https://github.com/example/target",
@@ -135,14 +140,14 @@ def test_run_preflight_blocks_when_docker_missing() -> None:
         new_callable=AsyncMock,
         return_value=fake_report,
     ), patch(
-        "crashwise.cli.execute_main_workflow", new_callable=AsyncMock
-    ) as mock_exec:
+        "crashwise.cli.start_main_workflow", new_callable=AsyncMock
+    ) as mock_start:
         result = runner.invoke(app, ["run", "https://github.com/example/target"])
         assert result.exit_code == 1
         assert "Pre-flight failed" in result.output
         assert "runtime.docker" in result.output
         # Critical: the workflow must NOT have been submitted.
-        mock_exec.assert_not_called()
+        mock_start.assert_not_called()
 
 
 # ── worker command ───────────────────────────────────────────────────────────
