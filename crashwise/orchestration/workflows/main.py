@@ -906,11 +906,11 @@ class MainFuzzingWorkflow:
             # Extract strategy metrics from MAB state
             strategy_metrics = []
             if self._mab_state and self._mab_state.arms:
-                for arm in self._mab_state.arms.values():
+                for arm in self._mab_state.arms:
                     strategy_metrics.append({
                         "strategy_arm_id": arm.arm_id,
-                        "success": arm.success_count > 0,
-                        "coverage_gain": arm.total_reward,
+                        "success": self._mab_state.successes.get(arm.arm_id, 0) > 0,
+                        "coverage_gain": self._mab_state.successes.get(arm.arm_id, 0),
                         "time_to_crash": 0.0,  # TODO: track this
                     })
 
@@ -918,7 +918,7 @@ class MainFuzzingWorkflow:
             await workflow.execute_activity(
                 "store_campaign_knowledge",
                 {
-                    "target_name": payload.target_name,
+                    "target_name": target_name,
                     "target_profile": target_profile_dict,
                     "campaign_outcome": campaign_outcome,
                     "vulnerabilities": vulnerabilities,
@@ -927,12 +927,11 @@ class MainFuzzingWorkflow:
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=RetryPolicy(maximum_attempts=2),
             )
-            log.info("main_workflow.knowledge_stored", target_name=payload.target_name)
+            log.info(f"main_workflow.knowledge_stored target_name={target_name}")
         except Exception as exc:
             # Knowledge storage is best-effort — don't fail the campaign
             log.warning(
-                "main_workflow.knowledge_storage_failed",
-                error=str(exc)[:200],
+                f"main_workflow.knowledge_storage_failed error={str(exc)[:200]}"
             )
 
         return result

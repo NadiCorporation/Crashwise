@@ -83,6 +83,17 @@ class _FakeManager:
 @pytest.fixture
 def fast_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(EF_MODULE, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    # The simulator (and real path) advance their loop off time.monotonic();
+    # without stubbing this, timeout_seconds=10 makes each test sleep 10s of
+    # wall-clock time. Advance 5s per call so a 10s timeout passes in two
+    # ticks while still allowing multi-iteration tests (e.g. cancel) to run.
+    clock = {"now": 0.0}
+
+    def _fake_monotonic() -> float:
+        clock["now"] += 5.0
+        return clock["now"]
+
+    monkeypatch.setattr(EF_MODULE.time, "monotonic", _fake_monotonic)
 
 
 @pytest.fixture

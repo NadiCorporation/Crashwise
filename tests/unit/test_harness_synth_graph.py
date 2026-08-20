@@ -85,6 +85,30 @@ def _restore_llm() -> Iterator[None]:
     set_chat_model_override(None)
 
 
+@pytest.fixture(autouse=True)
+def _stub_sanity_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the 5-second sanity gate.
+
+    ``sanity_check`` runs the freshly compiled harness for 5s (libFuzzer
+    ``-max_total_time=5``) to confirm it reaches target code. That's a real
+    subprocess with a real 5s wall-clock cost per test — not LLM work. We
+    stub it to report a passing result so the graph tests exercise the
+    compile/retry/fallback flow without the delay.
+    """
+    from crashwise.agents.harness_synth import nodes
+    from crashwise.agents.harness_synth.compiler import SanityResult
+
+    async def _fake_sanity_check(
+        binary_path: Path,
+        *,
+        timeout: float = 5.0,
+        corpus_dir: Path | None = None,
+    ) -> SanityResult:
+        return SanityResult(passed=True, edges_hit=2)
+
+    monkeypatch.setattr(nodes, "sanity_check", _fake_sanity_check)
+
+
 @pytest.mark.asyncio
 async def test_first_attempt_compiles(tmp_path: Path) -> None:
     src = tmp_path / "target.cpp"
