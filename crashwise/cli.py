@@ -631,7 +631,7 @@ def run(
     console.print("[bold cyan]Submitting MainFuzzingWorkflow[/]")
     console.print(JSON(payload.model_dump_json(indent=2)))
 
-    api_url = os.environ.get("CRASHWISE_API_URL", "http://localhost:8000")
+    api_url = os.environ.get("CRASHWISE_API_URL") or get_settings().crashwise_api_url
 
     # Try submitting via the API (creates campaign record + starts workflow).
     async def _submit_via_api() -> tuple[str, str] | None:
@@ -744,7 +744,7 @@ def worker(
 @app.command()
 def api(
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind address"),
-    port: int = typer.Option(8000, "--port", "-p", help="Bind port"),
+    port: int = typer.Option(8001, "--port", "-p", help="Bind port"),
     reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes"),
     workers: int = typer.Option(1, "--workers", "-w", help="Uvicorn worker processes"),
 ) -> None:

@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     temporal_namespace: str = Field(default="default")
     temporal_task_queue: str = Field(default="crashwise")
 
+    # ── API & Control Plane ──────────────────────────────────────────────────
+    crashwise_api_port: int = Field(default=8001)
+    crashwise_api_url: str = Field(default="http://localhost:8001")
+
     # ── LLM providers ────────────────────────────────────────────────────────
     openai_api_key: SecretStr | None = Field(
         default=None,
