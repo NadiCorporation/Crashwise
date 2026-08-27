@@ -19,7 +19,7 @@
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         Temporal Worker(s)                                  │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                     27 Registered Activities                        │    │
+│  │                     28 Registered Activities                        │    │
 │  │  setup_target              execute_fuzzing      triage_results      │    │
 │  │  seed_corpus               analyze_progress     analyze_crash       │    │
 │  │  pivot_strategy            analyze_coverage     evolve_harness      │    │
@@ -30,6 +30,7 @@
 │  │  synthesize_exploit        report_crashes       persist_triaged_crash│   │
 │  │  run_adaptive_build_activity                    query_campaign_knowledge │
 │  │  run_autonomous_repair_activity                 store_campaign_knowledge │
+│  │  synthesize_harness                                                 │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         Agent Layer (LangGraph + LangChain)                 │

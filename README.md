@@ -82,25 +82,60 @@ See [docs/INSTALL.md](docs/INSTALL.md) for full setup.
 
 ## Configuration
 
-### Required
+### Multi-Provider LLM Setup (Vendor-Neutral)
 
-| Variable | Description |
-|---|---|
-| `CRASHWISE_LLM_MODEL` | Model identifier for harness synthesis (e.g. `claude-sonnet-4-5`, `gpt-4o`) |
-| `ANTHROPIC_API_KEY` | API key for Anthropic (or `OPENAI_API_KEY` / `OPENAI_API_BASE` for OpenAI/custom) |
+CrashWise connects to any LLM provider via standard OpenAI-compatible interfaces or native providers. Configure your preferred model in `.env` or pass CLI flags directly at runtime:
 
-### Optional
+```bash
+# DeepSeek (Tested on staging)
+OPENAI_API_BASE=https://api.deepseek.com
+OPENAI_API_KEY=sk-...
+MODEL_NAME=deepseek-chat
+TEMPERATURE=0.0
+
+# Anthropic Claude
+CRASHWISE_LLM_MODEL=claude-sonnet-4-5
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Ollama / Local vLLM
+OPENAI_API_BASE=http://localhost:11434/v1
+OPENAI_API_KEY=ollama
+MODEL_NAME=llama3.1:8b
+```
+
+### Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `AI_PROVIDER` | _(disabled)_ | Crash triage backend: `ollama`, `venice`, `openai_compatible` |
-| `AI_MODEL` | — | Model for triage (e.g., `llama3.1:8b`) |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama endpoint |
+| `MODEL_NAME` / `CRASHWISE_LLM_MODEL` | `claude-sonnet-4-5` | Primary model for autonomous harness synthesis and repair |
+| `OPENAI_API_BASE` | — | OpenAI-compatible custom base URL (DeepSeek, Ollama, vLLM, Venice) |
+| `OPENAI_API_KEY` | — | API key for OpenAI-compatible endpoint |
+| `TEMPERATURE` / `CRASHWISE_LLM_TEMPERATURE` | `0.0` | Sampling temperature for deterministic harness synthesis |
+| `MAX_TOKENS` | `4096` | Max token budget per turn |
+| `REASONING_EFFORT` | `medium` | Reasoning effort parameter (`low`, `medium`, `high`) for reasoning models |
+| `AI_PROVIDER` | `openai_compatible` | Crash triage backend (`openai_compatible`, `ollama`, `venice`) |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./crashwise.db` | Async SQLAlchemy URL (`postgresql+asyncpg://...` in prod) |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis for distributed state, heartbeats, and dedup |
 | `TEMPORAL_HOST` | `localhost:7233` | Temporal server address |
 
-Supported LLM providers: Anthropic, OpenAI, NVIDIA NIM, Together AI, Groq, Ollama, vLLM, DeepSeek, and any OpenAI-compatible endpoint.
+### Granular CLI Knobs
+
+```bash
+crashwise run <target> \
+  --fuzzer libfuzzer \
+  --sanitizers address,undefined \
+  --custom-flags "-dict=json.dict -max_len=1024" \
+  --model deepseek-chat \
+  --base-url https://api.deepseek.com \
+  --api-key sk-... \
+  --temperature 0.0 \
+  --reasoning-effort medium \
+  --max-synth-retries 4 \
+  --mab \
+  --mab-algorithm thompson \
+  --self-healing \
+  --max-repair-attempts 10
+```
 
 ---
 
