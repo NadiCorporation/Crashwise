@@ -15,6 +15,8 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 FROM debian:bookworm-slim AS afl-builder
 
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
@@ -79,7 +81,8 @@ FROM debian:bookworm-slim AS runtime
 # AFL++ helper libs / runtimes live under HELPER_PATH = /usr/local/lib/afl
 # (set by AFL++'s GNUmakefile). AFL_PATH must point THERE so afl-cc and the
 # forkserver can find afl-as / runtime objects — NOT at /usr/local/bin.
-ENV PYTHONDONTWRITEBYTECODE=1 \
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:/usr/local/bin:$PATH" \
     AFL_PATH="/usr/local/lib/afl" \
