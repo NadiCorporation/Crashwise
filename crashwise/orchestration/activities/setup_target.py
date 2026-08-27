@@ -134,11 +134,33 @@ async def _clone_repo(
     branch: str | None,
     workdir: Path,
 ) -> str:
-    """Clone the target repository and return the HEAD commit SHA.
+    """Clone or copy the target repository and return the HEAD commit SHA.
 
     Uses --depth 1 for speed on initial clone; recursive for submodules.
     Falls back to full clone if shallow clone fails (some hosts reject it).
+    Supports local filesystem paths and file:// URIs directly.
     """
+    local_path = None
+    if repo_url.startswith("file://"):
+        local_path = Path(repo_url[7:])
+    elif Path(repo_url).exists() and Path(repo_url).is_dir():
+        local_path = Path(repo_url)
+
+    if local_path and local_path.exists():
+        log.info("setup_target.clone.local_path", path=str(local_path))
+        if (local_path / ".git").exists():
+            repo_url = str(local_path.resolve())
+        else:
+            shutil.rmtree(workdir, ignore_errors=True)
+            shutil.copytree(local_path, workdir, symlinks=True, ignore_dangling_symlinks=True)
+            init_proc = await asyncio.create_subprocess_exec(
+                "git", "init", str(workdir),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await init_proc.communicate()
+            return "local-snapshot"
+
     cmd = ["git", "clone", "--recursive", "--depth", "1"]
     if branch:
         cmd.extend(["--branch", branch])

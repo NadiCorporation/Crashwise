@@ -41,6 +41,9 @@ from crashwise.orchestration.activities.setup_target import setup_target
 from crashwise.orchestration.activities.store_campaign_knowledge import (
     store_campaign_knowledge,
 )
+from crashwise.orchestration.activities.synthesize_harness import (
+    synthesize_harness_activity,
+)
 from crashwise.orchestration.activities.triage_results import triage_results
 from crashwise.orchestration.activities.update_campaign import update_campaign_status
 from crashwise.orchestration.activities.verify_patch import (
@@ -55,6 +58,7 @@ from crashwise.orchestration.activities.verify_poc import verify_poc
 ALL_ACTIVITIES: list[Callable[..., Any]] = [
     setup_target,
     seed_corpus,
+    synthesize_harness_activity,
     execute_fuzzing,
     execute_job,
     analyze_progress,
@@ -93,6 +97,22 @@ __all__ = [
     "build_patched",
     "evolve_harness_activity",
     "execute_fuzzing",
+    "execute_job",
+    "hot_swap_harness",
+    "inject_seeds",
+    "kernel_monitor",
+    "mutate_harness",
+    "notify_stakeholders",
+    "persist_triaged_crash",
+    "pivot_strategy",
+    "profile_target",
+    "read_coverage_data",
+    "run_adaptive_build_activity",
+    "run_autonomous_repair_activity",
+    "seed_corpus",
+    "setup_target",
+    "store_campaign_knowledge",
+    "synthesize_harness_activity",
     "execute_job",
     "hot_swap_harness",
     "inject_seeds",

@@ -125,6 +125,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
+    tini \
     # Docker CLI (so the worker can spawn fuzzer sibling containers)
     ca-certificates \
     curl \
@@ -180,6 +181,9 @@ RUN afl-fuzz -h 2>&1 | head -1 \
 # Health check.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD crashwise version || exit 1
+
+# Process reaper to prevent zombie subprocess accumulation.
+ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Default: start the Temporal worker.
 CMD ["crashwise", "worker"]

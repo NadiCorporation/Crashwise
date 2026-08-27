@@ -9,46 +9,52 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Control Plane                                    │
+│                              Control Plane                                  │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  CLI (Typer)  │  FastAPI REST API  │  Streamlit Dashboard  │  Temporal UI  │
-│  :terminal    │  :8000             │  :8501                │  :8233        │
-├───────────────┴────────────────────┴───────────────────────┴───────────────┤
-│                         Temporal Server (gRPC :7233)                         │
-│                         PostgreSQL + Redis persistence                       │
+│  CLI (Typer)  │  FastAPI REST API  │  Next.js 14 Dashboard  │  Temporal UI  │
+│  :terminal    │  :8000 (REST/SSE)  │  :3000 (React UI)      │  :8233        │
+├───────────────┴────────────────────┴────────────────────────┴───────────────┤
+│                         Temporal Server (gRPC :7233)                        │
+│                         PostgreSQL + Redis persistence                      │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                         Temporal Worker(s)                                   │
+│                         Temporal Worker(s)                                  │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                     23 Registered Activities                         │    │
-│  │  setup_target      execute_fuzzing     triage_results               │    │
-│  │  seed_corpus       analyze_progress    analyze_crash                │    │
-│  │  pivot_strategy    analyze_coverage    evolve_harness               │    │
-│  │  hot_swap_harness  mutate_harness      inject_seeds                 │    │
-│  │  verify_patch      verify_poc          notify_stakeholders          │    │
-│  │  kernel_monitor    profile_target      execute_job                  │    │
-│  │  read_coverage_data update_campaign_status                          │    │
+│  │                     27 Registered Activities                        │    │
+│  │  setup_target              execute_fuzzing      triage_results      │    │
+│  │  seed_corpus               analyze_progress     analyze_crash       │    │
+│  │  pivot_strategy            analyze_coverage     evolve_harness      │    │
+│  │  hot_swap_harness          mutate_harness       inject_seeds        │    │
+│  │  verify_patch              verify_poc           notify_stakeholders │    │
+│  │  kernel_monitor            profile_target       execute_job         │    │
+│  │  read_coverage_data        update_campaign_status                   │    │
+│  │  synthesize_exploit        report_crashes       persist_triaged_crash│   │
+│  │  run_adaptive_build_activity                    query_campaign_knowledge │
+│  │  run_autonomous_repair_activity                 store_campaign_knowledge │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                         Agent Layer (LangGraph + LangChain)                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │ HarnessSynth │  │   Triage     │  │  Coverage    │  │  Execution   │   │
-│  │   Agent      │  │   Agent      │  │  Analyzer    │  │  Strategist  │   │
-│  ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤   │
-│  │  Evolution   │  │  Exploit Gen │  │  Harvester   │  │  Reporting   │   │
-│  │   Agent      │  │   Agent      │  │  (Seeds)     │  │  (CVSS)      │   │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
+│                         Agent Layer (LangGraph + LangChain)                 │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │ HarnessSynth │  │   Triage     │  │  Coverage    │  │  Execution   │     │
+│  │   Agent      │  │   Agent      │  │  Analyzer    │  │  Strategist  │     │
+│  ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤     │
+│  │  Evolution   │  │  Exploit Gen │  │  Harvester   │  │  Reporting   │     │
+│  │   Agent      │  │   Agent      │  │  (Seeds)     │  │  (CVSS)      │     │
+│  ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤     │
+│  │   Healing    │  │ Knowledge    │  │  Feedback    │  │  Semantic    │     │
+│  │ Engine (LLM) │  │ Base (DB)    │  │  Analyzer    │  │  Profiler    │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘     │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                         Execution Layer                                      │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────────────┐   │
-│  │  Docker    │  │   QEMU     │  │   Local    │  │  Kernel (syzkaller)│   │
-│  │  (AFL++)   │  │  (KVM)     │  │ (libFuzzer)│  │  (parsers only)   │   │
-│  └────────────┘  └────────────┘  └────────────┘  └────────────────────┘   │
+│                         Execution Layer                                     │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────────────┐     │
+│  │  Docker    │  │   QEMU     │  │   Local    │  │  Kernel (syzkaller)│     │
+│  │  (AFL++)   │  │  (KVM)     │  │ (libFuzzer)│  │  (parsers only)   │     │
+│  └────────────┘  └────────────┘  └────────────┘  └────────────────────┘     │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                         Persistence                                          │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────────────┐   │
-│  │ PostgreSQL │  │   Redis    │  │  Cloudflare│  │   Local SQLite     │   │
-│  │ (prod)     │  │ (state/MAB)│  │    R2      │  │   (dev mode)       │   │
-│  └────────────┘  └────────────┘  └────────────┘  └────────────────────┘   │
+│                         Persistence & Object Storage                        │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────────────┐     │
+│  │ PostgreSQL │  │   Redis    │  │  Cloudflare│  │   Local SQLite     │     │
+│  │ (prod :5432)│ │ (state/MAB)│  │  R2 / S3   │  │   (dev mode)       │     │
+│  └────────────┘  └────────────┘  └────────────┘  └────────────────────┘     │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -112,28 +118,34 @@ crashwise run --repo <url> --timeout 600
 
 ```
 crashwise/
-├── cli.py                          # Typer CLI (10 commands)
-├── api/main.py                     # FastAPI REST API
-├── dashboard/app.py                # Streamlit UI
+├── cli.py                          # Typer CLI (12 subcommands)
+├── api/main.py                     # FastAPI REST API (:8000)
+├── dashboard/app.py                # Streamlit prototype UI (:8501)
+├── web/                            # Web Control Plane
+│   ├── app.py                      #   FastAPI sub-app with SSE telemetry (/api/v1)
+│   ├── models.py                   #   CrashTestCase & FuzzingCampaign ORM
+│   ├── hooks.py                    #   Crash persistence hooks
+│   └── frontend/                   #   Next.js 14 Dashboard (:3000)
 ├── core/
 │   ├── config.py                   # Pydantic-settings (env + .env)
-│   ├── models.py                   # 30+ shared Pydantic models
-│   ├── database.py                 # SQLAlchemy async ORM
+│   ├── models.py                   # 40+ shared Pydantic models
+│   ├── database.py                 # SQLAlchemy async ORM (PostgreSQL / SQLite)
 │   ├── discovery.py                # Build system detection (6 systems)
 │   ├── sentinel.py                 # System diagnostics + provisioning
-│   ├── redis.py                    # Distributed state
-│   ├── storage.py                  # R2/S3 object storage
-│   ├── ai_provider.py             # Ollama/Venice/OpenAI-compatible inference
+│   ├── redis.py                    # Distributed state, heartbeats, and locks
+│   ├── storage.py                  # R2/S3/MinIO object storage
+│   ├── ai_provider.py              # Ollama/Venice/OpenAI-compatible inference
+│   ├── llm_factory.py              # Centralized multi-provider LLM factory
 │   ├── manifest.py                 # crashwise.yaml schema
 │   ├── logging.py                  # Structured logging (structlog)
-│   └── notifications.py           # Webhook/SMTP/PGP alerts
+│   └── notifications.py            # Webhook/SMTP/PGP alerts
 ├── orchestration/
-│   ├── client.py                   # Temporal client
-│   ├── worker.py                   # Temporal worker
+│   ├── client.py                   # Temporal client & workflow submitter
+│   ├── worker.py                   # Temporal worker polling task queue
 │   ├── workflows/
 │   │   ├── main.py                 # MainFuzzingWorkflow (God-Mode signals)
-│   │   └── verify_patch.py        # VerifyPatchWorkflow
-│   └── activities/                 # 22 activity implementations
+│   │   └── verify_patch.py         # VerifyPatchWorkflow (autonomous fix verification)
+│   └── activities/                 # 27 registered activity implementations
 ├── agents/
 │   ├── harness_synth/              # LangGraph harness generation
 │   │   ├── graph.py                #   analyze → generate → validate state machine
@@ -145,17 +157,21 @@ crashwise/
 │   │   ├── debug_engine.py         #   GDB crash diagnosis
 │   │   ├── type_extractor.py       #   Struct/typedef extraction from headers
 │   │   └── build_resolver.py       #   Library/include path discovery
-│   ├── triage/                     # Crash classification + exploit gen
-│   ├── feedback/                   # Coverage feedback + patch generation
-│   ├── research/                   # Coverage analysis + seed harvesting
+│   ├── healing/                    # LangGraph Adaptive Build & Autonomous Repair
+│   │   ├── graph.py                #   Multi-turn compiler & security researcher agent
+│   │   └── tools.py                #   Docker exec sandbox tools & file patchers
+│   ├── triage/                     # Crash classification + exploit gen (C PoC)
+│   ├── feedback/                   # Coverage feedback + agentic stall analysis
+│   ├── research/                   # Coverage analysis + seed harvesting + knowledge base
+│   │   └── knowledge_base.py       #   Cross-campaign pattern learning & injection
 │   ├── execution/                  # MAB strategist (Thompson Sampling + UCB1)
-│   └── reporting/                  # CVSS scoring + report generation
+│   └── reporting/                  # CVSS scoring + SARIF/MD report generation
 ├── execution/
-│   ├── docker_manager.py           # Hardened Docker orchestration
-│   ├── qemu_manager.py            # QEMU/KVM management
-│   ├── monitor.py                  # Fuzzer stats parsing
-│   └── dispatcher.py              # Backend routing
-└── kernelbridge/                   # OOPS/KASAN/KFENCE parsing
+│   ├── docker_manager.py           # Hardened Docker container manager
+│   ├── qemu_manager.py             # QEMU/KVM VM management
+│   ├── monitor.py                  # Fuzzer stats parsing (AFL++ & libFuzzer)
+│   └── dispatcher.py               # Backend routing
+└── kernelbridge/                   # OOPS/KASAN/KFENCE parsing & Syzkaller repros
 ```
 
 ---
@@ -166,7 +182,7 @@ crashwise/
 
 2. **Pydantic contracts.** Every cross-component payload is a versioned model in `core/models.py`. New fields must be additive and default-valued for replay compatibility.
 
-3. **Bounded autonomy.** LLM failures feed back into the LangGraph loop for self-correction. Bounded by `max_retries` (harness) and `max_evolution_count` (evolution) to cap LLM spend.
+3. **Bounded autonomy.** LLM failures feed back into the LangGraph loop for self-correction. Bounded by `max_retries` (harness), `max_attempts` (healing), and `max_evolution_count` (evolution) to cap LLM spend.
 
 4. **Defense in depth.** LLM-generated code passes: regex validator → clang syntax check → compiler allowlist → Docker sandbox (no network, no caps, read-only rootfs).
 
@@ -184,8 +200,8 @@ Two independent layers with separate configuration:
 
 | Layer | Purpose | Config | Quality Requirement |
 |---|---|---|---|
-| Agentic (LangChain) | Harness synthesis, evolution, exploit gen | `CRASHWISE_LLM_MODEL` + API key | High (Claude Sonnet / GPT-4o) |
-| Triage (Direct HTTP) | Root cause analysis, patch suggestions | `AI_PROVIDER` + `AI_MODEL` | Low (8B models sufficient) |
+| Agentic (LangChain / LangGraph) | Harness synthesis, evolution, exploit gen, self-healing | `CRASHWISE_LLM_MODEL` + API key | High (Claude Sonnet 3.5/4.5, GPT-4o, DeepSeek-Coder) |
+| Triage (Direct HTTP) | Root cause analysis, patch suggestions | `AI_PROVIDER` + `AI_MODEL` | Low to Medium (8B models sufficient) |
 
 The triage layer is optional — falls back to regex-based ASAN classification.
 
@@ -209,24 +225,32 @@ The triage layer is optional — falls back to regex-based ASAN classification.
 ## Database Schema
 
 ```
-Campaign        — id, target_repo, status, created_at, updated_at
-FuzzingRun      — id, campaign_id, iteration, executions, duration, status
-Crash           — id, run_id, crash_type, severity, stack_trace, stack_hash, signal
-Seed            — id, campaign_id, source, format, path
-CampaignKV      — campaign_id, key, value  (MAB state, campaign state)
+Campaign                — id, target_repo, target_name, fuzzer_type, status, created_at, updated_at
+FuzzingRun              — id, campaign_id, iteration, executions, duration_seconds, coverage_edges, status
+Crash                   — id, run_id, crash_type, severity, severity_score, vulnerability_type,
+                          suggested_patch, poc_code, poc_compiled, poc_verified, reachability,
+                          reachability_score, primitive, stack_trace, stack_hash, signal
+Seed                    — id, campaign_id, seed_id, source, target_name, language, tags, content_hash
+CampaignKV              — campaign_id, key, value  (MAB state, dynamic campaign properties)
+TargetKnowledge         — id, target_name, domain, complexity_score, attack_surface, harness_patterns, blockers
+VulnerabilityPattern    — id, target_domain, bug_type, severity, location_pattern, root_cause_summary
+StrategyEffectiveness   — id, target_domain, strategy_arm_id, success_count, avg_coverage_gain, score
 ```
 
 ---
 
 ## Infrastructure (Docker Compose)
 
-| Service | Image | Port | Purpose |
+| Service | Image / Build | Port | Purpose |
 |---|---|---|---|
-| temporal-server | `temporalio/auto-setup:1.25` | 7233 | Workflow engine |
-| temporal-ui | `temporalio/ui:2.30.0` | 8233 | Web UI |
-| postgres | `postgres:16-alpine` | 5432 | Database |
-| redis | `redis:7-alpine` | 6379 | State cache |
-| minio | `minio/minio:latest` | 9000 | S3 emulation (dev) |
+| temporal-server | `temporalio/auto-setup:1.25` | 7233 | Workflow engine (gRPC) |
+| temporal-ui | `temporalio/ui:2.30.0` | 8233 | Workflow visualization |
+| postgres | `postgres:16-alpine` | 5432 | Primary persistence |
+| redis | `redis:7-alpine` | 6379 | Distributed state, heartbeats, dedup |
+| minio | `minio/minio:latest` | 9000 | Object storage / S3 emulation |
+| crashwise-api | `Dockerfile.worker` (`uvicorn crashwise.api.main:app`) | 8000 | REST API & Web control plane backend |
+| crashwise-dashboard | `Dockerfile.frontend` (Next.js 14 App) | 3000 | Production Web Command Center UI |
+| crashwise-worker | `Dockerfile.worker` (`crashwise worker`) | — | Temporal Activity/Workflow execution worker |
 
 The worker image is a 3-stage build:
 1. AFL++ v4.21c compiled from source

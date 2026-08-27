@@ -59,7 +59,7 @@ log = get_logger(__name__)
 class CampaignCreateRequest(BaseModel):
     """Payload to start a new fuzzing campaign."""
 
-    target_repo: HttpUrl = Field(..., description="Git URL of the target")
+    target_repo: str = Field(..., min_length=1, max_length=1024, description="Git URL or directory path of the target")
     target_name: str = Field(..., min_length=1, max_length=128)
     fuzzer_type: FuzzerType = Field(default=FuzzerType.LIBFUZZER)
     timeout_seconds: int = Field(default=600, ge=10, le=86_400)

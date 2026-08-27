@@ -11,6 +11,27 @@ from crashwise.core.logging import get_logger
 log = get_logger(__name__)
 
 
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from crashwise.core.config import get_settings
+from crashwise.web.models import CrashTestCase, FuzzingCampaign
+
+_engine = None
+_session_factory: async_sessionmaker | None = None
+
+
+def _get_hook_session_factory() -> async_sessionmaker:
+    global _engine, _session_factory
+    if _session_factory is None:
+        settings = get_settings()
+        _engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)
+        _session_factory = async_sessionmaker(bind=_engine, class_=AsyncSession, expire_on_commit=False)
+    return _session_factory
+
+
 async def persist_crash_to_web(
     *,
     campaign_id: str,
@@ -27,17 +48,7 @@ async def persist_crash_to_web(
     Uses the unique constraint on (campaign_id, crash_type, crash_state)
     for deduplication — INSERT ON CONFLICT DO NOTHING.
     """
-    from uuid import UUID
-
-    from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-    from crashwise.core.config import get_settings
-    from crashwise.web.models import CrashTestCase, FuzzingCampaign
-
-    settings = get_settings()
-    engine = create_async_engine(settings.database_url, echo=False)
-    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    session_factory = _get_hook_session_factory()
 
     try:
         async with session_factory() as session:
@@ -82,5 +93,3 @@ async def persist_crash_to_web(
     except Exception as exc:
         log.warning("web.crash_persist_failed", error=str(exc)[:200])
         return False
-    finally:
-        await engine.dispose()

@@ -151,6 +151,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: crashwise-api
+    init: true
     command: ["crashwise", "api", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
     environment:
       CRASHWISE_ENV: production
@@ -223,6 +224,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+    init: true
     command: ["crashwise", "worker"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

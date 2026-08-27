@@ -65,14 +65,18 @@ See [docs/INSTALL.md](docs/INSTALL.md) for full setup.
 
 | Command | Description |
 |---|---|
-| `crashwise init` | Detect build system, generate `crashwise.yaml` manifest |
-| `crashwise run <repo-url>` | Submit fuzzing campaign (blocking) |
-| `crashwise run --detach <url>` | Submit and return immediately |
-| `crashwise doctor` | Validate system prerequisites |
-| `crashwise setup` | Install missing build dependencies |
-| `crashwise dashboard` | Launch Streamlit UI on `localhost:8501` |
-| `crashwise signal <id> pause_hunt` | Pause a running campaign |
-| `crashwise signal <id> force_pivot` | Force MAB strategy switch |
+| `crashwise init` | Detect build system, generate `crashwise.yaml` manifest & create DB tables |
+| `crashwise configure` | Interactive setup wizard for LLM providers (Anthropic, OpenAI, Venice, Ollama) |
+| `crashwise run <repo-url>` | Submit fuzzing campaign (blocking or manifest-driven) |
+| `crashwise run --detach <url>` | Submit campaign and return immediately with workflow ID |
+| `crashwise doctor` | Run system health diagnostics (Docker, compilers, memory, services) |
+| `crashwise setup` | Auto-install missing build tools and configure Docker permissions |
+| `crashwise worker` | Start a Temporal worker polling the task queue |
+| `crashwise api` | Launch the FastAPI management server on `localhost:8000` |
+| `crashwise dashboard` | Launch the Streamlit dashboard on `localhost:8501` |
+| `crashwise signal <id> <signal>` | Dispatch God-Mode signals (`pause_hunt`, `resume_hunt`, `force_pivot`, `inject_seed`) |
+| `crashwise exploit <crash_id>` | Synthesize, compile, and verify standalone C PoC exploit for a crash |
+| `crashwise info` / `version` | Display runtime configuration and version metadata |
 
 ---
 
@@ -82,8 +86,8 @@ See [docs/INSTALL.md](docs/INSTALL.md) for full setup.
 
 | Variable | Description |
 |---|---|
-| `CRASHWISE_LLM_MODEL` | Model identifier for harness synthesis |
-| `ANTHROPIC_API_KEY` | API key (or equivalent for chosen provider) |
+| `CRASHWISE_LLM_MODEL` | Model identifier for harness synthesis (e.g. `claude-sonnet-4-5`, `gpt-4o`) |
+| `ANTHROPIC_API_KEY` | API key for Anthropic (or `OPENAI_API_KEY` / `OPENAI_API_BASE` for OpenAI/custom) |
 
 ### Optional
 
@@ -92,11 +96,11 @@ See [docs/INSTALL.md](docs/INSTALL.md) for full setup.
 | `AI_PROVIDER` | _(disabled)_ | Crash triage backend: `ollama`, `venice`, `openai_compatible` |
 | `AI_MODEL` | — | Model for triage (e.g., `llama3.1:8b`) |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama endpoint |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./crashwise.db` | Async SQLAlchemy URL |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis for distributed state |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./crashwise.db` | Async SQLAlchemy URL (`postgresql+asyncpg://...` in prod) |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis for distributed state, heartbeats, and dedup |
 | `TEMPORAL_HOST` | `localhost:7233` | Temporal server address |
 
-Supported LLM providers: Anthropic, OpenAI, NVIDIA NIM, Together AI, Groq, Ollama, vLLM, any OpenAI-compatible endpoint.
+Supported LLM providers: Anthropic, OpenAI, NVIDIA NIM, Together AI, Groq, Ollama, vLLM, DeepSeek, and any OpenAI-compatible endpoint.
 
 ---
 
@@ -104,23 +108,26 @@ Supported LLM providers: Anthropic, OpenAI, NVIDIA NIM, Together AI, Groq, Ollam
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  CLI / API / Dashboard                                        │
+│  CLI / FastAPI Gateway (:8000) / Next.js Dashboard (:3000)   │
 ├──────────────────────────────────────────────────────────────┤
-│  Temporal Workflows (durable, retryable)                      │
-│  └─ MainFuzzingWorkflow → 23 Activities                      │
+│  Temporal Workflows (durable, replayable)                    │
+│  ├─ MainFuzzingWorkflow → 27 Registered Activities          │
+│  └─ VerifyPatchWorkflow (autonomous fix verification)        │
 ├──────────────────────────────────────────────────────────────┤
-│  AI Agents (LangGraph)                                        │
+│  Cognitive AI Agents (LangGraph)                             │
 │  ├─ Harness Synthesis (analyze → generate → validate → retry)│
-│  ├─ Coverage Analysis (blocker identification + dict gen)     │
-│  ├─ Crash Triage (ASAN/GDB → severity → dedup)              │
-│  └─ Exploit Generation (PoC synthesis)                        │
+│  ├─ Healing Engine (autonomous build + crasher repair)       │
+│  ├─ Coverage Feedback & Analysis (blocker isolation)         │
+│  ├─ Crash Triage (ASAN/GDB → CWE classification → dedup)    │
+│  ├─ Exploit Generation (standalone PoC synthesis)            │
+│  └─ Cross-Campaign Knowledge Base (pattern learning)         │
 ├──────────────────────────────────────────────────────────────┤
-│  Execution (Docker sandbox)                                   │
+│  Execution Sandboxes (Hardened)                              │
 │  ├─ AFL++ (multi-strategy, Thompson Sampling MAB)            │
 │  ├─ libFuzzer (in-process, coverage-guided)                  │
 │  └─ QEMU/KVM (kernel targets)                               │
 ├──────────────────────────────────────────────────────────────┤
-│  Storage: PostgreSQL │ Redis │ R2/S3 │ SQLite (dev)          │
+│  Storage: PostgreSQL 16 │ Redis 7 │ Cloudflare R2/S3 │ SQLite│
 └──────────────────────────────────────────────────────────────┘
 ```
 

@@ -103,7 +103,7 @@ class FuzzingInput(_StrictModel):
         activities will log their results to the persistence layer.
     """
 
-    target_repo: HttpUrl = Field(..., description="Git URL of target project")
+    target_repo: str = Field(..., min_length=1, max_length=1024, description="Git URL or directory path of target project")
     fuzzer_type: FuzzerType = Field(default=FuzzerType.LIBFUZZER)
     timeout_seconds: int = Field(default=600, ge=10, le=86_400)
 
@@ -133,11 +133,6 @@ class FuzzingInput(_StrictModel):
         default=10,
         ge=1,
         le=50,
-        description=(
-            "Hard cap on harness-evolution attempts per campaign. "
-            "Prevents runaway LLM spend when the model keeps emitting "
-            "the same fallback template against a structural blocker."
-        ),
     )
 
     # Phase 22 — CrashWise Healing Engine (openhands-sdk + LangGraph).
@@ -236,7 +231,7 @@ class FuzzingOutput(_StrictModel):
 class SetupTargetInput(_StrictModel):
     """Input to the ``setup_target`` activity."""
 
-    target_repo: HttpUrl
+    target_repo: str = Field(..., min_length=1, max_length=1024, description="Git URL or directory path of target project")
     target_branch: str | None = None
     sanitizers: str = "address,undefined"
     target_source_path: str | None = None
@@ -251,6 +246,27 @@ class SetupTargetOutput(_StrictModel):
     workdir: Path = Field(..., description="Local checkout directory")
     commit_sha: str = Field(..., min_length=7, max_length=64)
     harness_path: Path | None = None
+
+
+class SynthesizeHarnessInput(_StrictModel):
+    """Input to the ``synthesize_harness`` activity."""
+
+    workspace_path: Path = Field(..., description="Root directory of target repository")
+    source_file_path: Path | None = Field(default=None, description="Explicit source file if specified")
+    fuzzer_type: str = Field(default="libfuzzer", description="Fuzzer engine format")
+    max_retries: int = Field(default=4, ge=0, le=10)
+    campaign_id: str | None = None
+
+
+class SynthesizeHarnessOutput(_StrictModel):
+    """Result of the ``synthesize_harness`` activity."""
+
+    success: bool = Field(default=False)
+    harness_path: Path | None = None
+    binary_path: Path | None = None
+    source_file_used: Path | None = None
+    retry_count: int = Field(default=0, ge=0)
+    error_message: str = ""
 
 
 class ExecuteFuzzingInput(_StrictModel):
