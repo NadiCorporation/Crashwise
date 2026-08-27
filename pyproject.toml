@@ -127,6 +127,7 @@ dev = [
     "pytest-cov>=5.0.0",
     "types-pyyaml>=6.0.12",
     "pre-commit>=3.8.0",
+    "paramiko>=5.0.0",
 ]
 
 # ── Ruff (lint + format) ──────────────────────────────────────────────────────

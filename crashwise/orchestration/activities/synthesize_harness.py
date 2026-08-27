@@ -37,14 +37,17 @@ def _find_target_source_file(workspace_path: Path) -> Path | None:
     # First pass: search for non-test, non-build C/C++ implementation files
     for ext in [".c", ".cpp", ".cc", ".cxx"]:
         candidates = list(workspace_path.rglob(f"*{ext}"))
-        filtered = [
-            c
-            for c in candidates
-            if "test" not in str(c).lower()
-            and "build" not in str(c).lower()
-            and "example" not in str(c).lower()
-            and "fuzz" not in str(c).lower()
-        ]
+        filtered = []
+        for c in candidates:
+            if any(k in str(c).lower() for k in ("test", "build", "example", "fuzz")):
+                continue
+            try:
+                if "LLVMFuzzerTestOneInput" in c.read_text(encoding="utf-8", errors="ignore"):
+                    continue
+            except Exception:
+                pass
+            filtered.append(c)
+
         if filtered:
             return filtered[0]
         if candidates:
