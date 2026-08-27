@@ -115,14 +115,13 @@ async def generate_harness(state: HarnessState) -> HarnessState:
         simplified_mode=state.simplified,
     )
 
-    chat: ChatModelLike = get_chat_model()
-    user_prompt = _build_user_prompt(state)
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT_AFLPP if state.engine == "aflpp" else SYSTEM_PROMPT),
-        HumanMessage(content=user_prompt),
-    ]
-
     try:
+        chat: ChatModelLike = get_chat_model()
+        user_prompt = _build_user_prompt(state)
+        messages = [
+            SystemMessage(content=SYSTEM_PROMPT_AFLPP if state.engine == "aflpp" else SYSTEM_PROMPT),
+            HumanMessage(content=user_prompt),
+        ]
         response = await _invoke_with_backoff(chat, messages)
     except Exception as exc:
         log.warning("harness_synth.node.generate.llm_error", error=str(exc))

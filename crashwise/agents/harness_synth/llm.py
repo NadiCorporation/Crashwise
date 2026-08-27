@@ -107,6 +107,8 @@ def _build_anthropic(model_name: str, temperature: float, settings: Any) -> Chat
     api_key = (
         settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
     )
+    if not api_key:
+        raise ValueError("No Anthropic API key configured (ANTHROPIC_API_KEY).")
 
     return ChatAnthropic(
         model=model_name,
@@ -126,11 +128,13 @@ def _build_openai(
     from langchain_openai import ChatOpenAI
 
     api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
+    if not api_key and not settings.openai_api_base:
+        raise ValueError("No OpenAI API key configured (OPENAI_API_KEY).")
 
     kwargs: dict[str, Any] = {
         "model": model_name,
         "temperature": temperature,
-        "api_key": api_key,
+        "api_key": api_key or "sk-dummy",
         "timeout": 180,
         "max_retries": 2,
     }
