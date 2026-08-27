@@ -124,6 +124,9 @@ crashwise.db
 crashwise.yaml
 targets/
 
+# Internal agent orchestration handoffs (not for version control) ─────────────
+.agents/
+
 # Build cache for hot-swapped harnesses (Phase 21 / S6 hardening) ─────────────
 build_cache/
 .kiro/
