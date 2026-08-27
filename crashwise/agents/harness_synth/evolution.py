@@ -24,11 +24,13 @@ from crashwise.agents.harness_synth.llm import get_chat_model
 from crashwise.core.logging import get_logger
 from crashwise.core.models import (
     BlockerType,
+    CoverageBlocker,
     EvolveHarnessInput,
     EvolveHarnessOutput,
 )
 
 log = get_logger(__name__)
+
 
 # ── LLM prompt for harness evolution ─────────────────────────────────────────
 
@@ -182,6 +184,139 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {{
     return 0;
 }}
 """
+
+_CRC32_CHECKSUM_TEMPLATE = """\
+// Evolved harness: pre-compute valid CRC32 checksum over payload
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+
+static uint32_t compute_crc32(const uint8_t *buf, size_t len) {{
+    uint32_t crc = 0xFFFFFFFF;
+    for (size_t i = 0; i < len; ++i) {{
+        crc ^= buf[i];
+        for (int k = 0; k < 8; ++k) {{
+            crc = (crc >> 1) ^ (0xEDB88320 & (-(crc & 1)));
+        }}
+    }}
+    return ~crc;
+}}
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {{
+    if (size < {min_size}) return 0;
+    std::vector<uint8_t> payload(data, data + size);
+
+    size_t payload_start = {payload_offset};
+    size_t check_len = payload.size() > payload_start ? payload.size() - payload_start : 0;
+    uint32_t crc = compute_crc32(payload.data() + payload_start, check_len);
+
+    size_t c_off = {checksum_offset};
+    if (c_off + 4 <= payload.size()) {{
+{embed_bytes}
+    }}
+
+    {target_call}
+    return 0;
+}}
+"""
+
+_ADLER32_CHECKSUM_TEMPLATE = """\
+// Evolved harness: pre-compute valid Adler32 checksum over payload
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+
+static uint32_t compute_adler32(const uint8_t *buf, size_t len) {{
+    uint32_t s1 = 1;
+    uint32_t s2 = 0;
+    for (size_t i = 0; i < len; ++i) {{
+        s1 = (s1 + buf[i]) % 65521;
+        s2 = (s2 + s1) % 65521;
+    }}
+    return (s2 << 16) | s1;
+}}
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {{
+    if (size < {min_size}) return 0;
+    std::vector<uint8_t> payload(data, data + size);
+
+    size_t payload_start = {payload_offset};
+    size_t check_len = payload.size() > payload_start ? payload.size() - payload_start : 0;
+    uint32_t adler = compute_adler32(payload.data() + payload_start, check_len);
+
+    size_t c_off = {checksum_offset};
+    if (c_off + 4 <= payload.size()) {{
+{embed_bytes}
+    }}
+
+    {target_call}
+    return 0;
+}}
+"""
+
+_SHA256_CHECKSUM_TEMPLATE = """\
+// Evolved harness: pre-compute valid SHA-256 hash over payload
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+#include <openssl/sha.h>
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {{
+    if (size < {min_size}) return 0;
+    std::vector<uint8_t> payload(data, data + size);
+
+    size_t payload_start = {payload_offset};
+    size_t check_len = payload.size() > payload_start ? payload.size() - payload_start : 0;
+
+    uint8_t hash[SHA256_DIGEST_LENGTH];
+    SHA256(payload.data() + payload_start, check_len, hash);
+
+    size_t c_off = {checksum_offset};
+    if (c_off + SHA256_DIGEST_LENGTH <= payload.size()) {{
+        std::memcpy(payload.data() + c_off, hash, SHA256_DIGEST_LENGTH);
+    }}
+
+    {target_call}
+    return 0;
+}}
+"""
+
+_CUSTOM_XOR_CHECKSUM_TEMPLATE = """\
+// Evolved harness: pre-compute valid custom XOR folded checksum over payload
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+
+static uint8_t compute_xor_checksum(const uint8_t *buf, size_t len) {{
+    uint8_t chk = 0;
+    for (size_t i = 0; i < len; ++i) {{
+        chk ^= buf[i];
+    }}
+    return chk;
+}}
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {{
+    if (size < {min_size}) return 0;
+    std::vector<uint8_t> payload(data, data + size);
+
+    size_t payload_start = {payload_offset};
+    size_t check_len = payload.size() > payload_start ? payload.size() - payload_start : 0;
+    uint8_t chk = compute_xor_checksum(payload.data() + payload_start, check_len);
+
+    size_t c_off = {checksum_offset};
+    if (c_off < payload.size()) {{
+        payload[c_off] = chk;
+    }}
+
+    {target_call}
+    return 0;
+}}
+"""
+
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
@@ -368,6 +503,92 @@ def _template_evolve(payload: EvolveHarnessInput) -> EvolveHarnessOutput:
             target_call=target_call,
         )
         strategy = f"Initialise state to {expected_state} before target call"
+
+    elif btype == BlockerType.CHECKSUM:
+        algo = blocker.checksum_algorithm.lower() if blocker.checksum_algorithm else "crc32"
+        endian = blocker.checksum_endianness.lower() if blocker.checksum_endianness else "little"
+        c_off = blocker.checksum_offset
+        p_off = blocker.payload_offset
+        adapted_target_call = _adapt_target_call_for_payload(target_call)
+
+        if "adler" in algo:
+            if endian == "big":
+                embed_bytes = (
+                    "        payload[c_off + 0] = static_cast<uint8_t>((adler >> 24) & 0xFF);\n"
+                    "        payload[c_off + 1] = static_cast<uint8_t>((adler >> 16) & 0xFF);\n"
+                    "        payload[c_off + 2] = static_cast<uint8_t>((adler >> 8) & 0xFF);\n"
+                    "        payload[c_off + 3] = static_cast<uint8_t>(adler & 0xFF);"
+                )
+            else:
+                embed_bytes = (
+                    "        payload[c_off + 0] = static_cast<uint8_t>(adler & 0xFF);\n"
+                    "        payload[c_off + 1] = static_cast<uint8_t>((adler >> 8) & 0xFF);\n"
+                    "        payload[c_off + 2] = static_cast<uint8_t>((adler >> 16) & 0xFF);\n"
+                    "        payload[c_off + 3] = static_cast<uint8_t>((adler >> 24) & 0xFF);"
+                )
+            code = _ADLER32_CHECKSUM_TEMPLATE.format(
+                min_size=max(c_off + 4, p_off + 1, 8),
+                payload_offset=p_off,
+                checksum_offset=c_off,
+                embed_bytes=embed_bytes,
+                target_call=adapted_target_call,
+            )
+            strategy = "Pre-compute valid Adler32 checksum and embed in payload"
+            comp_cmd = "clang++ -fsanitize=fuzzer,address,undefined -g -O1 -o harness harness.cpp -lz"
+
+        elif "sha256" in algo or "sha" in algo or "hash" in algo:
+            code = _SHA256_CHECKSUM_TEMPLATE.format(
+                min_size=max(c_off + 32, p_off + 1, 32),
+                payload_offset=p_off,
+                checksum_offset=c_off,
+                target_call=adapted_target_call,
+            )
+            strategy = "Pre-compute valid SHA-256 digest and embed in payload"
+            comp_cmd = "clang++ -fsanitize=fuzzer,address,undefined -g -O1 -o harness harness.cpp -lssl -lcrypto"
+
+        elif "xor" in algo:
+            code = _CUSTOM_XOR_CHECKSUM_TEMPLATE.format(
+                min_size=max(c_off + 1, p_off + 1, 4),
+                payload_offset=p_off,
+                checksum_offset=c_off,
+                target_call=adapted_target_call,
+            )
+            strategy = "Pre-compute valid custom XOR folded checksum and embed in payload"
+            comp_cmd = "clang++ -fsanitize=fuzzer,address,undefined -g -O1 -o harness harness.cpp"
+
+        else:  # Default to CRC32
+            if endian == "big":
+                embed_bytes = (
+                    "        payload[c_off + 0] = static_cast<uint8_t>((crc >> 24) & 0xFF);\n"
+                    "        payload[c_off + 1] = static_cast<uint8_t>((crc >> 16) & 0xFF);\n"
+                    "        payload[c_off + 2] = static_cast<uint8_t>((crc >> 8) & 0xFF);\n"
+                    "        payload[c_off + 3] = static_cast<uint8_t>(crc & 0xFF);"
+                )
+            else:
+                embed_bytes = (
+                    "        payload[c_off + 0] = static_cast<uint8_t>(crc & 0xFF);\n"
+                    "        payload[c_off + 1] = static_cast<uint8_t>((crc >> 8) & 0xFF);\n"
+                    "        payload[c_off + 2] = static_cast<uint8_t>((crc >> 16) & 0xFF);\n"
+                    "        payload[c_off + 3] = static_cast<uint8_t>((crc >> 24) & 0xFF);"
+                )
+            code = _CRC32_CHECKSUM_TEMPLATE.format(
+                min_size=max(c_off + 4, p_off + 1, 8),
+                payload_offset=p_off,
+                checksum_offset=c_off,
+                embed_bytes=embed_bytes,
+                target_call=adapted_target_call,
+            )
+            strategy = "Pre-compute valid CRC32 checksum and embed in payload"
+            comp_cmd = "clang++ -fsanitize=fuzzer,address,undefined -g -O1 -o harness harness.cpp -lz"
+
+        return EvolveHarnessOutput(
+            evolved_harness_code=code,
+            bypass_strategy=strategy,
+            confidence=0.85,
+            compilation_command=comp_cmd,
+            notes=f"Template-based checksum bypass ({algo}) for blocker at line {blocker.line_number}",
+        )
+
 
     else:
         # Generic fallback: wrap with try/catch and provide minimal input.
@@ -572,6 +793,27 @@ def _read_blocker_context(source_path: object, line_number: int) -> str:
     return "\n".join(context_lines)
 
 
+def _adapt_target_call_for_payload(target_call: str) -> str:
+    """Adapt target call statement so arguments reference payload.data() and payload.size()."""
+    adapted = target_call
+    adapted = re.sub(r"\(\s*const\s+char\s*\*\s*\)\s*data\b", "(const char*)payload.data()", adapted)
+    adapted = re.sub(r"\(\s*char\s*\*\s*\)\s*data\b", "(char*)payload.data()", adapted)
+    adapted = re.sub(r"\bdata\b", "payload.data()", adapted)
+    adapted = re.sub(r"\bsize\b", "payload.size()", adapted)
+    return adapted
+
+
+def evolve_harness_for_checksum(harness_code: str, blocker: CoverageBlocker) -> str:
+    """Generate a checksum bypass wrapper harness for a given blocker."""
+    payload = EvolveHarnessInput(
+        current_harness_code=harness_code,
+        blocker=blocker,
+        target_function=blocker.function_name,
+    )
+    result = _template_evolve(payload)
+    return result.evolved_harness_code
+
+
 def _generate_bypass_strategies(blocker_type: object) -> str:
     """Generate specific bypass strategies based on blocker type."""
     from crashwise.core.models import BlockerType
@@ -598,13 +840,16 @@ def _generate_bypass_strategies(blocker_type: object) -> str:
             "- Consider that state may be stored in a context structure."
         ),
         BlockerType.CHECKSUM: (
-            "- Compute the correct checksum over the input data.\n"
-            "- Place the checksum in the expected location (header, trailer, etc.).\n"
-            "- If the checksum algorithm is unknown, try common ones (CRC32, Adler32, sum)."
+            "- Pre-compute the valid checksum over the mutated payload buffer.\n"
+            "- CRC32: use polynomial 0xEDB88320 (IEEE 802.3) or crc32() from <zlib.h>.\n"
+            "- Adler32: compute modulo-65521 two-sum or adler32() from <zlib.h>.\n"
+            "- SHA-256 / SHA-1: use <openssl/sha.h> or EVP digests.\n"
+            "- Write the calculated checksum at the expected header/trailer offset with correct endianness before calling the target.\n"
+            "- Ensure compiler links `-lz -lssl -lcrypto`."
         ),
     }
 
-    if blocker_type in strategies:
+    if isinstance(blocker_type, BlockerType) and blocker_type in strategies:
         return strategies[blocker_type]
 
     return (
@@ -614,4 +859,6 @@ def _generate_bypass_strategies(blocker_type: object) -> str:
     )
 
 
-__all__ = ["evolve_harness"]
+
+__all__ = ["evolve_harness", "evolve_harness_for_checksum"]
+

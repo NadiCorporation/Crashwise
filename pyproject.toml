@@ -99,6 +99,11 @@ dependencies = [
 
     # Manifest parsing
     "pyyaml>=6.0.0",
+
+    # AST-based code analysis (Tree-sitter C/C++)
+    "tree-sitter>=0.24.0",
+    "tree-sitter-c>=0.23.0",
+    "tree-sitter-cpp>=0.23.0",
 ]
 
 [project.urls]

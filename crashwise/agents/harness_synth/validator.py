@@ -342,7 +342,27 @@ async def syntax_check_harness(source_code: str) -> ValidationResult:
         ))
         return result
 
-    lang = "c++" if any(kw in source_code for kw in ("class ", "namespace ", "template", "std::")) else "c"
+    lang = (
+        "c++"
+        if any(
+            kw in source_code
+            for kw in (
+                "class ",
+                "namespace ",
+                "template",
+                "std::",
+                "FuzzedDataProvider",
+                "<fuzzer/",
+                "<vector>",
+                "<string>",
+                "<memory>",
+                "bool",
+                "reinterpret_cast",
+                "static_cast",
+            )
+        )
+        else "c"
+    )
     suffix = ".cpp" if lang == "c++" else ".c"
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as tmp:

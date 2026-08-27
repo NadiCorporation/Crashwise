@@ -737,14 +737,29 @@ class ExploitGenInput(_StrictModel):
         Path within the repo to the vulnerable source file.
     vulnerable_function:
         Name of the function containing the bug.
+    crash_file_path:
+        Path to the minimized crash input file triggering the bug.
+    target_headers:
+        List of target header files or include directives to `#include`.
+    target_include_dirs:
+        List of include directory paths (`-I...`).
+    target_libs:
+        List of target static or shared libraries (`.a`, `.so`, or `-l...`).
+    link_flags:
+        Additional compiler/linker flags.
     """
 
-    crash_id: str = Field(..., min_length=1, max_length=36)
-    crash_context: str = Field(..., min_length=1, max_length=32768)
+    crash_id: str = Field(..., min_length=1, max_length=512)
+    crash_context: str = Field(..., min_length=1, max_length=65536)
     bug_type: str = Field(default="unknown", max_length=64)
     target_repo: str = Field(default="", max_length=512)
     target_source_path: str = Field(default="", max_length=512)
     vulnerable_function: str = Field(default="", max_length=256)
+    crash_file_path: str = Field(default="", max_length=512)
+    target_headers: list[str] = Field(default_factory=list)
+    target_include_dirs: list[str] = Field(default_factory=list)
+    target_libs: list[str] = Field(default_factory=list)
+    link_flags: list[str] = Field(default_factory=list)
 
 
 class ExploitGenOutput(_StrictModel):
@@ -766,6 +781,14 @@ class ExploitGenOutput(_StrictModel):
         Suggested ``gcc`` / ``clang`` invocation.
     notes:
         Human-readable notes from the architect agent.
+    target_linked:
+        Whether the generated reproducer links against target headers/libraries.
+    crash_file_path:
+        Path to the crash input file used by the reproducer.
+    target_headers:
+        List of target headers included in the reproducer.
+    target_libs:
+        List of target libraries linked against.
     """
 
     poc_code: str = Field(default="", max_length=65536)
@@ -775,6 +798,10 @@ class ExploitGenOutput(_StrictModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     compilation_command: str = Field(default="", max_length=1024)
     notes: str = Field(default="", max_length=4096)
+    target_linked: bool = Field(default=True)
+    crash_file_path: str = Field(default="", max_length=512)
+    target_headers: list[str] = Field(default_factory=list)
+    target_libs: list[str] = Field(default_factory=list)
 
 
 class PocVerifyInput(_StrictModel):
@@ -794,16 +821,34 @@ class PocVerifyInput(_StrictModel):
         The signal the PoC should trigger (e.g. ``SIGSEGV``).
     expected_asan_pattern:
         Substring expected in ASAN output (e.g. ``heap-buffer-overflow``).
+    crash_file_path:
+        Path to minimized crash input file passed as argv[1].
+    target_workdir:
+        Working directory containing target build artifacts.
+    target_include_dirs:
+        Include directories for target headers.
+    target_link_libs:
+        Target archive/shared library paths (`.a`/`.so`) or flags (`-l...`).
+    link_flags:
+        Additional linker flags.
+    expected_function:
+        Expected function name in frame #0 of ASan stack trace.
     timeout_seconds:
         Wall-clock cap for compilation + execution.
     """
 
-    crash_id: str = Field(..., min_length=1, max_length=36)
+    crash_id: str = Field(..., min_length=1, max_length=512)
     poc_code: str = Field(..., min_length=1, max_length=65536)
     compilation_command: str = Field(default="", max_length=1024)
     target_repo: str = Field(default="", max_length=512)
     expected_signal: str = Field(default="SIGSEGV", max_length=32)
     expected_asan_pattern: str = Field(default="", max_length=128)
+    crash_file_path: str = Field(default="", max_length=512)
+    target_workdir: str = Field(default="", max_length=512)
+    target_include_dirs: list[str] = Field(default_factory=list)
+    target_link_libs: list[str] = Field(default_factory=list)
+    link_flags: list[str] = Field(default_factory=list)
+    expected_function: str = Field(default="", max_length=256)
     timeout_seconds: int = Field(default=60, ge=10, le=600)
 
 
@@ -826,6 +871,14 @@ class PocVerifyOutput(_StrictModel):
         The signal that actually terminated the process.
     notes:
         Human-readable summary of the verification.
+    asan_class_matched:
+        Whether the ASan error class matched the expected class.
+    function_matched:
+        Whether the crashing function in frame #0 matched expected_function.
+    target_linked:
+        Whether the verification linked against target artifacts.
+    reproduction_fidelity:
+        Fidelity score (0.0 - 1.0) of crash reproduction.
     """
 
     compiled: bool = False
@@ -835,6 +888,74 @@ class PocVerifyOutput(_StrictModel):
     stderr: str = Field(default="", max_length=8192)
     signal_received: str = Field(default="", max_length=32)
     notes: str = Field(default="", max_length=4096)
+    asan_class_matched: bool = False
+    function_matched: bool = False
+    target_linked: bool = False
+    reproduction_fidelity: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+# ── Structured Finding Reporting ─────────────────────────────────────────────
+class FindingReproductionMetadata(_StrictModel):
+    """Metadata regarding reproducer generation and verification fidelity."""
+
+    target_linked: bool = Field(default=False)
+    reproduced: bool = Field(default=False)
+    asan_matched: bool = Field(default=False)
+    function_matched: bool = Field(default=False)
+    reproducer_code: str = Field(default="", max_length=65536)
+    compilation_command: str = Field(default="", max_length=1024)
+    fidelity_score: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class FindingReport(_StrictModel):
+    """Structured report per finding with reproducibility and severity metrics.
+
+    Attributes
+    ----------
+    crash_id:
+        Identifier of the crash.
+    bug_class:
+        Classified bug category (e.g. ``heap-buffer-overflow``).
+    affected_function:
+        Name of vulnerable function (from frame #0).
+    source_location:
+        Location in source code (`file:line`).
+    crash_input_hash:
+        SHA256 hex digest of minimized crash input file.
+    severity_score:
+        Numeric score 0.0 - 10.0.
+    severity_level:
+        CrashSeverity level (CRITICAL, HIGH, MEDIUM, LOW).
+    primitive:
+        Memory safety primitive (e.g. ``write-what-where``, ``use-after-free``).
+    reproduction:
+        Reproduction metadata.
+    root_cause:
+        Technical root cause summary.
+    suggested_patch:
+        Suggested patch diff or code.
+    target_name:
+        Target project name.
+    target_repo:
+        Target repository URL.
+    created_at:
+        Timestamp when the finding was generated.
+    """
+
+    crash_id: str = Field(..., min_length=1, max_length=512)
+    bug_class: str = Field(..., min_length=1, max_length=128)
+    affected_function: str = Field(default="", max_length=256)
+    source_location: str = Field(default="", max_length=512)
+    crash_input_hash: str = Field(default="", max_length=64)
+    severity_score: float = Field(default=0.0, ge=0.0, le=10.0)
+    severity_level: CrashSeverity = Field(default=CrashSeverity.UNKNOWN)
+    primitive: str = Field(default="unknown", max_length=128)
+    reproduction: FindingReproductionMetadata = Field(default_factory=FindingReproductionMetadata)
+    root_cause: str = Field(default="", max_length=4096)
+    suggested_patch: str = Field(default="", max_length=16384)
+    target_name: str = Field(default="", max_length=128)
+    target_repo: str = Field(default="", max_length=512)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 # ── Target Profiling ─────────────────────────────────────────────────────────
@@ -1129,6 +1250,10 @@ class CoverageBlocker(_StrictModel):
     expected_value: str = Field(default="", max_length=256)
     distance_from_entry: int = Field(default=0, ge=0)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    checksum_algorithm: str = Field(default="", max_length=64)
+    checksum_offset: int = Field(default=0, ge=0)
+    checksum_endianness: str = Field(default="little", max_length=16)
+    payload_offset: int = Field(default=0, ge=0)
 
 
 class CoverageAnalysis(_StrictModel):
@@ -1258,3 +1383,58 @@ class HotSwapOutput(_StrictModel):
     stdout: str = Field(default="", max_length=8192)
     stderr: str = Field(default="", max_length=8192)
     notes: str = Field(default="", max_length=4096)
+
+
+__all__ = [
+    "AnalyzeProgressInput",
+    "BlockerType",
+    "CampaignStatus",
+    "CoverageAnalysis",
+    "CoverageBlocker",
+    "CoverageReport",
+    "CrashSeverity",
+    "DangerousFunction",
+    "EvolveHarnessInput",
+    "EvolveHarnessOutput",
+    "ExecuteFuzzingInput",
+    "ExecuteFuzzingOutput",
+    "ExecutionBackend",
+    "ExploitGenInput",
+    "ExploitGenOutput",
+    "ExploitabilityScore",
+    "FindingReport",
+    "FindingReproductionMetadata",
+    "FuzzJob",
+    "FuzzerType",
+    "FuzzingCampaignState",
+    "FuzzingInput",
+    "FuzzingOutput",
+    "HotSwapInput",
+    "HotSwapOutput",
+    "MabState",
+    "PersistTriagedCrashInput",
+    "PersistTriagedCrashOutput",
+    "PivotStrategyInput",
+    "PivotStrategyOutput",
+    "PocVerifyInput",
+    "PocVerifyOutput",
+    "ProfileTargetInput",
+    "ProfileTargetOutput",
+    "SeedCorpusInput",
+    "SeedMetadata",
+    "SeedSource",
+    "SetupTargetInput",
+    "SetupTargetOutput",
+    "StrategyArm",
+    "SynthesizeHarnessInput",
+    "SynthesizeHarnessOutput",
+    "TargetDomain",
+    "TargetProfile",
+    "TriageInput",
+    "TriageOutput",
+    "TriagedCrashRef",
+    "VerificationStatus",
+    "VerifyPatchInput",
+    "VerifyPatchOutput",
+    "WorkflowStage",
+]

@@ -178,7 +178,7 @@ async def test_llm_exception_engages_fallback(tmp_path: Path) -> None:
         async def ainvoke(self, _messages: list[BaseMessage]) -> AIMessage:
             raise RuntimeError("network down")
 
-    set_chat_model_override(_ExplodingModel())  # type: ignore[arg-type]
+    set_chat_model_override(_ExplodingModel())
 
     result = await synthesize_harness(
         source_path=src,

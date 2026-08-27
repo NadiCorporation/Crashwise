@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from crashwise.agents.harness_synth.analyzer import detect_language
 from crashwise.agents.harness_synth.graph import build_graph
+from crashwise.agents.harness_synth.models import ApiSequence
 from crashwise.agents.harness_synth.state import EntryPoint, HarnessState
 from crashwise.core.logging import get_logger
 
@@ -36,6 +37,7 @@ class HarnessSynthesisResult(BaseModel):
     success: bool = Field(default=False, description="Did the final compile succeed?")
     simplified: bool = Field(default=False, description="Was the fallback harness used?")
     selected_entry_point: EntryPoint | None = None
+    selected_sequence: ApiSequence | None = None
     retry_count: int = Field(default=0, ge=0)
     last_stderr: str = Field(default="", description="Final clang stderr (truncated)")
 
@@ -106,6 +108,7 @@ async def synthesize_harness(
         success=final.succeeded,
         simplified=final.simplified,
         selected_entry_point=final.selected_entry_point,
+        selected_sequence=final.selected_sequence,
         retry_count=final.retry_count,
         last_stderr=last_stderr,
     )

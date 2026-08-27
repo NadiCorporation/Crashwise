@@ -8,6 +8,9 @@ and GDB backtrace parsing.
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from typing import Any
+
 import pytest
 from langchain_core.messages import AIMessage
 
@@ -23,16 +26,16 @@ class _StubLLM:
     def __init__(self, response_json: str) -> None:
         self._response = response_json
 
-    async def ainvoke(self, *args: object, **kwargs: object) -> AIMessage:
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> AIMessage:
         return AIMessage(content=self._response)
 
 
 @pytest.fixture(autouse=True)
-def _clear_llm_override() -> None:
+def _clear_llm_override() -> Generator[None, None, None]:
     """Force LLM path to fail so heuristic fallback is exercised."""
 
     class _FailingLLM:
-        async def ainvoke(self, *args: object, **kwargs: object) -> None:
+        async def ainvoke(self, *args: Any, **kwargs: Any) -> AIMessage:
             raise RuntimeError("LLM disabled for heuristic tests")
 
     set_chat_model_override(_FailingLLM())
@@ -113,7 +116,7 @@ async def test_heuristic_classifies_asan_heap_uaf() -> None:
     report = CrashReport(crash_id="uaf", asan_output=_ASAN_HEAP_UAF)
     result = await triage_crash(report)
     assert result.bug_type == BugType.HEAP_USE_AFTER_FREE
-    assert result.severity == "critical"
+    assert result.severity == "high"
     assert result.confidence >= 0.8
 
 
@@ -134,7 +137,7 @@ async def test_heuristic_null_deref_from_sigsegv() -> None:
     )
     result = await triage_crash(report)
     assert result.bug_type == BugType.NULL_POINTER_DEREF
-    assert result.severity == "high"
+    assert result.severity == "low"
 
 
 @pytest.mark.asyncio
@@ -176,10 +179,10 @@ async def test_llm_malformed_json_falls_back_to_heuristics() -> None:
 @pytest.mark.asyncio
 async def test_llm_exception_falls_back_to_heuristics() -> None:
     class _ExplodingLLM:
-        async def ainvoke(self, *args: object, **kwargs: object) -> AIMessage:
+        async def ainvoke(self, *args: Any, **kwargs: Any) -> AIMessage:
             raise RuntimeError("network down")
 
-    set_chat_model_override(_ExplodingLLM())  # type: ignore[arg-type]
+    set_chat_model_override(_ExplodingLLM())
 
     report = CrashReport(crash_id="explode", asan_output=_ASAN_HEAP_OOB)
     result = await triage_crash(report)

@@ -37,7 +37,7 @@ _session_factory: async_sessionmaker | None = None
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
-async def _startup():
+async def _startup() -> None:
     global _engine, _session_factory
     settings = get_settings()
     _engine = create_async_engine(settings.database_url, echo=False)
@@ -47,7 +47,7 @@ async def _startup():
     log.info("web.startup", database=settings.database_url)
 
 
-async def _shutdown():
+async def _shutdown() -> None:
     if _engine:
         await _engine.dispose()
 

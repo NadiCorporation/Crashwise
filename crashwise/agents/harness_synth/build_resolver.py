@@ -69,9 +69,8 @@ def resolve_build_paths(workdir: Path) -> BuildPaths:
 
     # Discover shared libraries (.so).
     for lib in workdir.rglob("*.so*"):
-        if not any(skip in str(lib) for skip in skip_patterns):
-            if lib.parent not in paths.lib_dirs:
-                paths.lib_dirs.append(lib.parent)
+        if not any(skip in str(lib) for skip in skip_patterns) and lib.parent not in paths.lib_dirs:
+            paths.lib_dirs.append(lib.parent)
 
     log.info(
         "build_resolver.resolved",

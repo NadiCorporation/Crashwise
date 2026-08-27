@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Final
 
 from temporalio import activity
-from temporalio.exceptions import ApplicationError
 
 from crashwise.agents.harness_synth import synthesize_harness
 from crashwise.core.logging import get_logger
@@ -83,7 +82,7 @@ async def synthesize_harness_activity(
         workflow_id = "standalone"
         attempt = 1
 
-    started_at = datetime.now(tz=UTC)
+    datetime.now(tz=UTC)
 
     log.info(
         "synthesize_harness.start",

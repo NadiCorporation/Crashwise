@@ -165,7 +165,7 @@ async def _real_execute(
     last_coverage = 0
     last_exec_per_sec = 0.0
     crash_count_observed = 0
-    
+
     # Resource monitoring state
     peak_memory_mb = 0.0
     peak_cpu_percent = 0.0
@@ -258,11 +258,9 @@ async def _real_execute(
                         cpu_str = stats.get("cpu_percent", "0%")
                         cpu_percent = 0.0
                         if cpu_str and cpu_str != "N/A":
-                            try:
+                            with contextlib.suppress(ValueError):
                                 cpu_percent = float(cpu_str.rstrip("%"))
-                            except ValueError:
-                                pass
-                        
+
                         # Parse memory (e.g., "100MiB / 2048MiB" -> 100.0)
                         mem_str = stats.get("memory", "0MiB")
                         memory_mb = 0.0
@@ -279,10 +277,10 @@ async def _real_execute(
                                     memory_mb = float(mem_part.replace("KiB", "").strip()) / 1024
                             except (ValueError, IndexError):
                                 pass
-                        
+
                         peak_cpu_percent = max(peak_cpu_percent, cpu_percent)
                         peak_memory_mb = max(peak_memory_mb, memory_mb)
-                        
+
                         # Log warning if resource usage is high
                         if cpu_percent > 90.0:
                             log.warning(
@@ -640,10 +638,8 @@ def _collect_coverage_data(output_dir: Path, payload: ExecuteFuzzingInput) -> Pa
             for sline in result.stdout.decode("utf-8", errors="replace").splitlines():
                 if ":" in sline:
                     parts = sline.rsplit(":", 1)
-                    try:
+                    with contextlib.suppress(ValueError):
                         covered_lines.setdefault(parts[0], set()).add(int(parts[1]))
-                    except ValueError:
-                        pass
             for fname, lnums in covered_lines.items():
                 lines.append(f"SF:{fname}")
                 for ln in sorted(lnums):

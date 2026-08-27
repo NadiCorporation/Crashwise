@@ -475,7 +475,7 @@ class MainFuzzingWorkflow:
                     f"attempts={self._build_attempts} "
                     f"workspace={target_workdir}"
                 )
-                
+
                 # If no harness_path provided, synthesize one via dedicated Temporal activity
                 if payload.harness_path is None:
                     log.info("main_workflow.healing.synthesizing_harness")
@@ -505,7 +505,7 @@ class MainFuzzingWorkflow:
                         use_legacy_setup = True
                 else:
                     harness_path = target_workdir / payload.harness_path
-                
+
                 if not use_legacy_setup:
                     setup_out = SetupTargetOutput(
                         workdir=target_workdir,

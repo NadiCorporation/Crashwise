@@ -13,7 +13,7 @@ You are a senior C/C++ vulnerability researcher writing libFuzzer harnesses.
 
 You will be given:
   • A short C/C++ source file the user wants fuzzed.
-  • A specific target function inside that file.
+  • A specific target function or detected API lifecycle sequence.
   • The compiler stderr from any previous failed attempt.
   • A TARGET PROFILE describing the codebase domain, complexity, and attack surface.
 
@@ -40,13 +40,23 @@ Hard rules:
   3. Inline the target function's source (or #include the original file
      directly with `#include "<basename>"`) so no separate build step is
      required. Prefer #include — it's safer and keeps the diff small.
-  4. Drive the target with the libFuzzer input buffer; respect realistic
-     pre-conditions (e.g. NUL-terminate when passing to a `char*` API).
-  5. Never call exit(), abort(), system(), exec*(), fork(), socket(),
-     connect(), or perform any non-libFuzzer I/O. Free anything you allocate.
-  6. If the previous attempt failed, fix the SPECIFIC error reported in
+  4. Use `<fuzzer/FuzzedDataProvider.h>` (`FuzzedDataProvider fdp(data, size);`)
+     to partition fuzzed input into structured fields:
+       - Integers/enums: `fdp.ConsumeIntegral<T>()`, `fdp.ConsumeIntegralInRange<T>(min, max)`, `fdp.ConsumeEnum<T>()`
+       - Booleans/flags: `fdp.ConsumeBool()`
+       - Strings/bytes: `fdp.ConsumeBytes<uint8_t>(len)`, `fdp.ConsumeRemainingBytes<uint8_t>()`
+  5. For stateful multi-API sequences, ALWAYS invoke the full lifecycle in order:
+       - Initialization: allocate/initialize context (e.g. `ctx_new()`, `target_init()`). Check for NULL.
+       - Configuration: set options/parameters on the context using structured fuzzed fields.
+       - Processing: feed fuzzed payloads (`ConsumeRemainingBytes`) into parsing/processing functions.
+       - Cleanup: invoke matched destruction/free functions (e.g. `ctx_free()`, `target_cleanup()`).
+  6. GUARANTEE RESOURCE CLEANUP: All allocated handles, structures, and buffers
+     MUST be freed before every return path to prevent false-positive ASan leak reports.
+  7. Never call exit(), abort(), system(), exec*(), fork(), socket(),
+     connect(), or perform any non-libFuzzer I/O.
+  8. If the previous attempt failed, fix the SPECIFIC error reported in
      stderr. Do not change unrelated parts of the harness.
-  7. USE the Target Profile to focus on the most dangerous functions and
+  9. USE the Target Profile to focus on the most dangerous functions and
      realistic input shapes for this domain.
 """
 
@@ -59,6 +69,8 @@ USER_PROMPT_TEMPLATE = """\
 
 {profile_section}
 
+{sequence_section}
+
 <UNTRUSTED_TARGET_SOURCE>
 ```{language}
 {source_code}
@@ -70,6 +82,22 @@ USER_PROMPT_TEMPLATE = """\
 {retry_section}
 
 Produce the harness now. Code block only.
+"""
+
+SEQUENCE_SECTION_TEMPLATE = """\
+## DETECTED API LIFECYCLE SEQUENCE
+
+Context type: {context_type}
+- Initialization: {init_signature}
+- Configuration: {config_signatures}
+- Processing: {process_signature}
+- Cleanup: {cleanup_signature}
+
+Implement this full stateful lifecycle in your harness:
+1. Initialize the context using `{init_name}` (guard against NULL return).
+2. Configure settings on the context using `FuzzedDataProvider` values.
+3. Pass remaining fuzzer data (`ConsumeRemainingBytes`) to `{process_name}`.
+4. Clean up resources with `{cleanup_name}` before returning.
 """
 
 PROFILE_SECTION_TEMPLATE = """\
@@ -162,6 +190,7 @@ __all__ = [
     "FEEDBACK_SECTION_TEMPLATE",
     "PROFILE_SECTION_TEMPLATE",
     "RETRY_SECTION_TEMPLATE",
+    "SEQUENCE_SECTION_TEMPLATE",
     "SIMPLIFY_NOTE",
     "SYSTEM_PROMPT",
     "SYSTEM_PROMPT_AFLPP",

@@ -21,6 +21,7 @@ Resilience:
 
 from __future__ import annotations
 
+import contextlib
 import time
 from typing import Any
 
@@ -66,10 +67,8 @@ async def _reset_pool() -> None:
     """Close and reset the connection pool for reconnection."""
     global _pool
     if _pool is not None:
-        try:
+        with contextlib.suppress(Exception):
             await _pool.close()
-        except Exception:
-            pass
         _pool = None
 
 
@@ -438,10 +437,8 @@ async def clear_mab_state(campaign_id: str) -> None:
         return
     pool = _get_pool()
     key = f"crashwise:mab:{campaign_id}"
-    try:
+    with contextlib.suppress(Exception):
         await pool.delete(key)
-    except Exception:
-        pass
 
 
 # ── MAB database fallback ────────────────────────────────────────────────────

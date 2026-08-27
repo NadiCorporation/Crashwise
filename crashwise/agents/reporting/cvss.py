@@ -4,7 +4,7 @@
 
 Uses a hybrid approach:
     1. **Heuristic rules** map bug types and exploitability scores to
-       CVSS metric values.
+       CVSS metric values with 4-tier severity alignment (Critical, High, Medium, Low).
     2. **AI provider** (optional) refines the vector when available.
 
 The calculator is conservative: when data is sparse it defaults to
@@ -65,11 +65,15 @@ _BUG_TYPE_CVSS: dict[str, dict[str, str]] = {
     },
     "null-pointer-dereference": {
         "AV": "N", "AC": "H", "PR": "N", "UI": "N",
-        "S": "U", "C": "N", "I": "N", "A": "H",
+        "S": "U", "C": "N", "I": "N", "A": "L",
+    },
+    "null-deref-read": {
+        "AV": "N", "AC": "H", "PR": "N", "UI": "N",
+        "S": "U", "C": "N", "I": "N", "A": "L",
     },
     "divide-by-zero": {
         "AV": "N", "AC": "H", "PR": "N", "UI": "N",
-        "S": "U", "C": "N", "I": "N", "A": "H",
+        "S": "U", "C": "N", "I": "N", "A": "L",
     },
     "uninitialized-read": {
         "AV": "N", "AC": "L", "PR": "N", "UI": "N",

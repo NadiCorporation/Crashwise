@@ -15,38 +15,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
-
-class _StrictModel(BaseModel):
-    """Strict, non-frozen base for graph state objects."""
-
-    model_config = ConfigDict(
-        extra="forbid",
-        validate_assignment=True,
-        arbitrary_types_allowed=True,
-    )
-
-
-class EntryPoint(_StrictModel):
-    """A candidate fuzzing entry point discovered by :mod:`.analyzer`."""
-
-    name: str = Field(..., description="Function name, e.g. ``parse_packet``")
-    signature: str = Field(..., description="Best-effort full signature line")
-    line: int = Field(..., ge=1, description="1-indexed source line number")
-    takes_buffer: bool = Field(
-        default=False,
-        description=(
-            "True if the first/second args look like (uint8_t*, size_t) — i.e. "
-            "the function can be driven directly by libFuzzer's input buffer."
-        ),
-    )
-    score: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="Heuristic 0..1 ranking for prioritisation",
-    )
+from crashwise.agents.harness_synth.models import (
+    ApiFunction,
+    ApiParam,
+    ApiSequence,
+    EntryPoint,
+    _StrictModel,
+)
 
 
 class CompileResult(_StrictModel):
@@ -77,6 +54,10 @@ class HarnessState(_StrictModel):
         Candidate functions discovered by the analyser, best-first.
     selected_entry_point:
         The chosen entry point passed to the LLM. ``None`` until selection.
+    api_sequences:
+        Candidate API lifecycle sequences discovered by sequence builder.
+    selected_sequence:
+        The chosen API lifecycle sequence. ``None`` until selection.
     harness_code:
         The most recent harness source produced by ``GenerateHarness``.
     harness_path:
@@ -108,6 +89,8 @@ class HarnessState(_StrictModel):
     # ── Analysis ─────────────────────────────────────────────────────────────
     entry_points: list[EntryPoint] = Field(default_factory=list)
     selected_entry_point: EntryPoint | None = None
+    api_sequences: list[ApiSequence] = Field(default_factory=list)
+    selected_sequence: ApiSequence | None = None
 
     # ── Generation ───────────────────────────────────────────────────────────
     harness_code: str = ""
@@ -152,3 +135,14 @@ class HarnessState(_StrictModel):
     def succeeded(self) -> bool:
         """True when the most recent compile is a clean success."""
         return self.last_compile is not None and self.last_compile.success
+
+
+__all__ = [
+    "ApiFunction",
+    "ApiParam",
+    "ApiSequence",
+    "CompileResult",
+    "EntryPoint",
+    "HarnessState",
+    "_StrictModel",
+]

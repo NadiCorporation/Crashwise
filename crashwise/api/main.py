@@ -29,7 +29,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Response, status
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crashwise.core.config import get_settings

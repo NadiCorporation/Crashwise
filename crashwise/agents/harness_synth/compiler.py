@@ -159,7 +159,7 @@ class SanityResult:
     __slots__ = ("crashed_immediately", "edges_hit", "output", "passed")
 
     def __init__(self, *, passed: bool, edges_hit: int = 0,
-                 crashed_immediately: bool = False, output: str = ""):
+                 crashed_immediately: bool = False, output: str = "") -> None:
         self.passed = passed
         self.edges_hit = edges_hit
         self.crashed_immediately = crashed_immediately

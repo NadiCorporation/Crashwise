@@ -19,9 +19,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from crashwise.agents.harness_synth.analyzer import detect_language, find_entry_points
+from crashwise.agents.harness_synth.analyzer import (
+    analyze_source,
+    detect_language,
+    find_entry_points,
+)
 from crashwise.agents.harness_synth.compiler import compile_harness, sanity_check
 from crashwise.agents.harness_synth.debug_engine import debug_crash
 from crashwise.agents.harness_synth.llm import ChatModelLike, get_chat_model
@@ -29,10 +33,15 @@ from crashwise.agents.harness_synth.prompts import (
     FEEDBACK_SECTION_TEMPLATE,
     PROFILE_SECTION_TEMPLATE,
     RETRY_SECTION_TEMPLATE,
+    SEQUENCE_SECTION_TEMPLATE,
     SIMPLIFY_NOTE,
     SYSTEM_PROMPT,
     SYSTEM_PROMPT_AFLPP,
     USER_PROMPT_TEMPLATE,
+)
+from crashwise.agents.harness_synth.sequence_builder import (
+    build_api_sequences,
+    generate_stateful_harness,
 )
 from crashwise.agents.harness_synth.state import EntryPoint, HarnessState
 from crashwise.core.logging import get_logger
@@ -49,7 +58,7 @@ _PRIOR_ERROR_LINE_BUDGET = 6
 
 # ── Node: analyze_code ───────────────────────────────────────────────────────
 async def analyze_code(state: HarnessState) -> HarnessState:
-    """Read the source file, run the static analyser, pick the best target."""
+    """Read the source file, run the static analyser, pick the best target and API sequence."""
     log.info(
         "harness_synth.node.analyze.start",
         source_path=str(state.source_path),
@@ -60,9 +69,37 @@ async def analyze_code(state: HarnessState) -> HarnessState:
 
     source_code = state.source_path.read_text(encoding="utf-8", errors="replace")
     language = detect_language(state.source_path)
-    entry_points = find_entry_points(source_code)
 
-    selected: EntryPoint | None = entry_points[0] if entry_points else None
+    # Full AST analysis pass
+    ast_res = analyze_source(source_code, source_path=state.source_path)
+    entry_points = ast_res.entry_points if ast_res.entry_points else find_entry_points(source_code)
+
+    # Stateful API lifecycle sequence discovery (M2)
+    sequences = build_api_sequences(
+        source_code,
+        entry_points=entry_points,
+        call_graph=ast_res.call_graph,
+        reachability_depths=ast_res.reachability_depths,
+    )
+    selected_seq = sequences[0] if sequences else None
+
+    selected: EntryPoint | None = None
+    if selected_seq and selected_seq.process_function:
+        for ep in entry_points:
+            if ep.name == selected_seq.process_function.name:
+                selected = ep
+                break
+        if not selected:
+            selected = EntryPoint(
+                name=selected_seq.process_function.name,
+                signature=selected_seq.process_function.signature,
+                line=selected_seq.process_function.line,
+                takes_buffer=any(p.is_buffer for p in selected_seq.process_function.params),
+                score=selected_seq.process_function.score,
+                call_depth=selected_seq.process_function.call_depth,
+            )
+    elif entry_points:
+        selected = entry_points[0]
 
     # Operation Hydra Phase 3: Extract type definitions for the selected entry point.
     type_defs = ""
@@ -93,7 +130,9 @@ async def analyze_code(state: HarnessState) -> HarnessState:
         "harness_synth.node.analyze.complete",
         source_chars=len(source_code),
         entry_points=len(entry_points),
+        sequences=len(sequences),
         selected=selected.name if selected else None,
+        selected_seq=selected_seq.process_function.name if selected_seq else None,
         selected_score=selected.score if selected else None,
         type_defs_chars=len(type_defs),
     )
@@ -102,6 +141,8 @@ async def analyze_code(state: HarnessState) -> HarnessState:
     state.language = language
     state.entry_points = entry_points
     state.selected_entry_point = selected
+    state.api_sequences = sequences
+    state.selected_sequence = selected_seq
     state.type_definitions = type_defs
     return state
 
@@ -202,7 +243,7 @@ async def validate_harness(state: HarnessState) -> HarnessState:
     # The source_path is inside the target checkout; walk up to find build artifacts.
     target_root = state.source_path.parent
     # Walk up to find the project root (where build/ or CMakeLists.txt lives).
-    for parent in [state.source_path.parent] + list(state.source_path.parents):
+    for parent in [state.source_path.parent, *state.source_path.parents]:
         if (parent / "build").is_dir() or (parent / "CMakeLists.txt").is_file():
             target_root = parent
             break
@@ -227,9 +268,12 @@ async def validate_harness(state: HarnessState) -> HarnessState:
         extra_link_args.append("-DHAVE_CONFIG_H")
 
     extra_link_args.append("-Wno-deprecated-declarations")
-    if not any(a.endswith(".a") for a in extra_link_args):
-        if state.source_path.exists() and state.source_path.suffix in (".c", ".cpp", ".cc"):
-            extra_link_args.append(str(state.source_path))
+    if (
+        not any(a.endswith(".a") for a in extra_link_args)
+        and state.source_path.exists()
+        and state.source_path.suffix in (".c", ".cpp", ".cc")
+    ):
+        extra_link_args.append(str(state.source_path))
     extra_link_args.extend(["-lm", "-lz", "-lpthread", "-lssl", "-lcrypto"])
 
     result = await compile_harness(
@@ -396,12 +440,10 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     if "tokens per min" in msg or "requests per min" in msg:
         return True
     # Timeout (treat as transient — API may be overloaded)
-    if "timed out" in msg or "timeout" in msg:
-        return True
-    return False
+    return "timed out" in msg or "timeout" in msg
 
 
-async def _invoke_with_backoff(chat: ChatModelLike, messages: list) -> AIMessage:
+async def _invoke_with_backoff(chat: ChatModelLike, messages: list[BaseMessage]) -> AIMessage:
     """Invoke the LLM with exponential backoff on rate-limit errors.
 
     This ensures transient API blocks (429, quota, timeout) don't consume
@@ -525,17 +567,42 @@ def _build_user_prompt(state: HarnessState) -> str:
     profile_section = ""
     if state.target_profile:
         profile = state.target_profile
-        domain = profile.get("domain", "general")
-        complexity = profile.get("complexity_score", 0.0)
-        attack_surface = profile.get("attack_surface", [])
-        dangerous = profile.get("dangerous_functions", [])
-        strategy = profile.get("recommended_strategy", "standard")
+        domain = str(profile.get("domain", "general"))
+        complexity = float(profile.get("complexity_score", 0.0))  # type: ignore[arg-type]
+        raw_surface = profile.get("attack_surface")
+        attack_surface: list[object] = raw_surface if isinstance(raw_surface, list) else []
+        raw_dangerous = profile.get("dangerous_functions")
+        dangerous: list[object] = raw_dangerous if isinstance(raw_dangerous, list) else []
+        strategy = str(profile.get("recommended_strategy", "standard"))
         profile_section = PROFILE_SECTION_TEMPLATE.format(
             domain=domain,
             complexity=complexity,
-            attack_surface=", ".join(attack_surface[:10]) if attack_surface else "(unknown)",
-            dangerous_functions=", ".join(dangerous[:10]) if dangerous else "(none detected)",
+            attack_surface=", ".join(str(x) for x in attack_surface[:10]) if attack_surface else "(unknown)",
+            dangerous_functions=", ".join(str(x) for x in dangerous[:10]) if dangerous else "(none detected)",
             strategy=strategy,
+        )
+
+    # Stateful API lifecycle sequence section (M2)
+    sequence_section = ""
+    if state.selected_sequence:
+        seq = state.selected_sequence
+        init_sig = seq.init_function.signature if seq.init_function else "(none)"
+        config_sigs = (
+            ", ".join(c.signature for c in seq.configure_functions)
+            if seq.configure_functions
+            else "(none)"
+        )
+        process_sig = seq.process_function.signature
+        cleanup_sig = seq.cleanup_function.signature if seq.cleanup_function else "(none)"
+        sequence_section = SEQUENCE_SECTION_TEMPLATE.format(
+            context_type=seq.context_type or "(inferred)",
+            init_signature=init_sig,
+            config_signatures=config_sigs,
+            process_signature=process_sig,
+            cleanup_signature=cleanup_sig,
+            init_name=seq.init_function.name if seq.init_function else "init",
+            process_name=seq.process_function.name,
+            cleanup_name=seq.cleanup_function.name if seq.cleanup_function else "cleanup",
         )
 
     # Feedback from previous fuzzing iteration (Phase 6).
@@ -603,6 +670,7 @@ def _build_user_prompt(state: HarnessState) -> str:
             entry_point_line=ep.line if ep else 0,
             language=state.language,
             profile_section=profile_section,
+            sequence_section=sequence_section,
             source_code=_truncate_source(state.source_code),
             feedback_section=feedback_section,
             retry_section=types_section + crash_section + usage_section + retry_section,
@@ -630,48 +698,66 @@ def _truncate_source(source: str, max_chars: int = 12_000) -> str:
 async def _apply_fallback(state: HarnessState, *, reason: str) -> HarnessState:
     """Write a deterministic, minimal harness that always compiles.
 
-    The fallback simply forwards the libFuzzer input buffer to the most
-    promising entry point if its signature matches one of two well-known
-    shapes; otherwise it just consumes the buffer (still useful — catches
-    UB inside any included headers).
+    If an API sequence or multi-parameter target is detected, synthesizes a
+    stateful FuzzedDataProvider harness with full lifecycle and guaranteed teardown.
+    Otherwise, forwards the buffer to the entry point or exercises included headers.
     """
     log.warning("harness_synth.fallback.engage", reason=reason)
     state.simplified = True
 
-    ep = state.selected_entry_point
     include_basename = state.source_path.name
 
-    body: str
-    if ep is not None and ep.takes_buffer:
-        body = f"  (void){ep.name}(data, size);\n  return 0;\n"
-    elif ep is not None and "char *" in ep.signature.replace(" ", " "):
-        body = (
-            "  if (size == 0) return 0;\n"
-            "  std::string s(reinterpret_cast<const char*>(data), size);\n"
-            f"  (void){ep.name}(s.c_str());\n"
-            "  return 0;\n"
+    # Check for stateful API sequence fallback (M2)
+    seq = state.selected_sequence
+    if seq is None and state.source_code:
+        seqs = build_api_sequences(state.source_code, entry_points=state.entry_points)
+        if seqs:
+            seq = seqs[0]
+
+    if seq is not None and (
+        seq.init_function is not None
+        or seq.configure_functions
+        or seq.cleanup_function is not None
+        or (seq.process_function and len(seq.process_function.params) > 1)
+    ):
+        harness = generate_stateful_harness(
+            sequence=seq,
+            header_include=include_basename,
+            language=state.language,
         )
     else:
-        body = (
-            "  // Trivial consumer — exercises ASan against included headers.\n"
-            "  volatile uint8_t sink = 0;\n"
-            "  for (size_t i = 0; i < size; ++i) sink ^= data[i];\n"
-            "  (void)sink;\n"
-            "  return 0;\n"
-        )
+        ep = state.selected_entry_point
+        body: str
+        if ep is not None and ep.takes_buffer:
+            body = f"  (void){ep.name}(data, size);\n  return 0;\n"
+        elif ep is not None and "char *" in ep.signature.replace(" ", " "):
+            body = (
+                "  if (size == 0) return 0;\n"
+                "  std::string s(reinterpret_cast<const char*>(data), size);\n"
+                f"  (void){ep.name}(s.c_str());\n"
+                "  return 0;\n"
+            )
+        else:
+            body = (
+                "  // Trivial consumer — exercises ASan against included headers.\n"
+                "  volatile uint8_t sink = 0;\n"
+                "  for (size_t i = 0; i < size; ++i) sink ^= data[i];\n"
+                "  (void)sink;\n"
+                "  return 0;\n"
+            )
 
-    harness = (
-        "// SPDX-License-Identifier: MIT\n"
-        "// CrashWise auto-generated fallback harness.\n"
-        "#include <cstddef>\n"
-        "#include <cstdint>\n"
-        "#include <string>\n"
-        f'#include "{include_basename}"\n'
-        "\n"
-        'extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {\n'
-        f"{body}"
-        "}\n"
-    )
+        harness = (
+            "// SPDX-License-Identifier: MIT\n"
+            "// CrashWise auto-generated fallback harness.\n"
+            "#include <cstddef>\n"
+            "#include <cstdint>\n"
+            "#include <string>\n"
+            f'#include "{include_basename}"\n'
+            "\n"
+            'extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {\n'
+            f"{body}"
+            "}\n"
+        )
 
     harness_path = state.workdir / "harness.cpp"
     harness_path.parent.mkdir(parents=True, exist_ok=True)

@@ -577,7 +577,7 @@ def _generate_format_seeds(target_name: str, domain: str) -> list[SeedMetadata]:
     seeds: list[SeedMetadata] = []
 
     format_entries = _FORMAT_SEEDS.get(domain, [])
-    for name, payload in format_entries:
+    for name, _payload in format_entries:
         seeds.append(
             SeedMetadata(
                 seed_id=f"format-{domain}-{name}",
@@ -594,7 +594,7 @@ def _generate_format_seeds(target_name: str, domain: str) -> list[SeedMetadata]:
     if domain == "generic" and not format_entries:
         # Include a sample from common formats the target might handle.
         for fmt in ["json", "xml", "gzip"]:
-            for name, payload in _FORMAT_SEEDS.get(fmt, [])[:1]:
+            for name, _payload in _FORMAT_SEEDS.get(fmt, [])[:1]:
                 seeds.append(
                     SeedMetadata(
                         seed_id=f"format-{fmt}-{name}",
@@ -606,6 +606,7 @@ def _generate_format_seeds(target_name: str, domain: str) -> list[SeedMetadata]:
                         created_at=datetime.now(tz=UTC),
                     )
                 )
+
 
     return seeds
 
@@ -733,7 +734,8 @@ def get_seed_payload(seed: SeedMetadata) -> bytes | None:
             # Reconstruct base seed ID
             base_id = "-".join(parts[1:-2])  # Everything between "mutated-" and "-{type}-{index}"
             mutation_type = parts[-2]
-            mutation_index = int(parts[-1])
+            _mutation_index = int(parts[-1])
+
 
             # Create a temporary base seed to get its payload
             base_seed = SeedMetadata(

@@ -17,11 +17,10 @@ appropriate timeouts and retry configuration.
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from langchain_core.messages import AIMessage
 
-from crashwise.core.config import get_settings
 from crashwise.core.logging import get_logger
 
 log = get_logger(__name__)
@@ -73,7 +72,7 @@ def get_chat_model(
         max_tokens=max_tokens,
         reasoning_effort=reasoning_effort,
     )
-    return provider_config.chat_model
+    return cast(ChatModelLike, provider_config.chat_model)
 
 
 __all__ = ["ChatModelLike", "get_chat_model", "set_chat_model_override"]

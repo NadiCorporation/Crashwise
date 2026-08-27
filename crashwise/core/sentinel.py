@@ -14,7 +14,7 @@ import platform
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 import httpx
@@ -24,7 +24,7 @@ from crashwise.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-class CheckStatus(str, Enum):
+class CheckStatus(StrEnum):
     """Result of a single sentinel check."""
 
     OK = "ok"
