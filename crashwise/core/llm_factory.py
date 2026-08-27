@@ -115,6 +115,9 @@ class LLMProviderConfig:
     def _build_anthropic(self) -> Any:
         from langchain_anthropic import ChatAnthropic
 
+        if not self.api_key:
+            raise ValueError("No Anthropic API key configured (ANTHROPIC_API_KEY).")
+
         return ChatAnthropic(
             model=self.model,
             temperature=self.temperature,
@@ -128,10 +131,13 @@ class LLMProviderConfig:
     def _build_openai(self) -> Any:
         from langchain_openai import ChatOpenAI
 
+        if not self.api_key and not self.base_url:
+            raise ValueError("No OpenAI API key configured (OPENAI_API_KEY).")
+
         kwargs: dict[str, Any] = {
             "model": self.model,
             "temperature": self.temperature,
-            "api_key": self.api_key,
+            "api_key": self.api_key or "sk-dummy",
             "timeout": self.timeout_seconds,
             "max_retries": self.max_retries,
         }
