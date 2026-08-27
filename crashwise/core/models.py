@@ -112,6 +112,15 @@ class FuzzingInput(_StrictModel):
     sanitizers: str = Field(default="address,undefined")
     max_iterations: int = Field(default=5, ge=1, le=20)
     campaign_id: str | None = Field(default=None, max_length=36)
+    custom_fuzzer_flags: str | None = Field(default=None, description="Custom AFL++ or libFuzzer flags")
+
+    # Dynamic LLM controls per campaign
+    llm_model: str | None = Field(default=None, description="Model identifier override (e.g. deepseek-chat, gpt-4o)")
+    llm_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    llm_base_url: str | None = Field(default=None, description="Custom OpenAI-compatible base URL")
+    llm_api_key: str | None = Field(default=None, description="API key for the selected model")
+    reasoning_effort: str | None = Field(default=None, description="Reasoning effort ('low', 'medium', 'high')")
+    max_synth_retries: int = Field(default=4, ge=0, le=10, description="Max harness synthesis retry attempts")
 
     # Phase 21 — opt-in autonomous strategy switching and harness evolution.
     # Both default False so existing tests / smoke runs are unaffected.
@@ -122,6 +131,20 @@ class FuzzingInput(_StrictModel):
     enable_evolution: bool = Field(
         default=False,
         description="Phase 18 harness evolution — implies enable_mab",
+    )
+    mab_algorithm: str = Field(
+        default="thompson",
+        description="Bandit exploration algorithm: 'thompson' or 'ucb1'",
+    )
+    mab_exploration_ratio: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Exploration vs exploitation ratio for strategy switching",
+    )
+    mab_weights: dict[str, float] | None = Field(
+        default=None,
+        description="Optional initial weights / priors for bandit arms",
     )
     pivot_check_interval_iterations: int = Field(
         default=1,
@@ -238,6 +261,12 @@ class SetupTargetInput(_StrictModel):
     synthesize_harness: bool = False
     max_synth_retries: int = Field(default=4, ge=0, le=10)
     fuzzer_type: str = "libfuzzer"
+    custom_fuzzer_flags: str | None = None
+    llm_model: str | None = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_temperature: float | None = None
+    reasoning_effort: str | None = None
 
 
 class SetupTargetOutput(_StrictModel):
@@ -256,6 +285,11 @@ class SynthesizeHarnessInput(_StrictModel):
     fuzzer_type: str = Field(default="libfuzzer", description="Fuzzer engine format")
     max_retries: int = Field(default=4, ge=0, le=10)
     campaign_id: str | None = None
+    llm_model: str | None = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_temperature: float | None = None
+    reasoning_effort: str | None = None
 
 
 class SynthesizeHarnessOutput(_StrictModel):
@@ -280,6 +314,7 @@ class ExecuteFuzzingInput(_StrictModel):
     corpus_dir: Path | None = None
     campaign_id: str | None = Field(default=None, max_length=36)
     iteration: int = Field(default=0, ge=0)
+    custom_fuzzer_flags: str | None = None
 
 
 class ExecuteFuzzingOutput(_StrictModel):

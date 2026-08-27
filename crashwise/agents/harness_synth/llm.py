@@ -44,110 +44,36 @@ def set_chat_model_override(model: ChatModelLike | None) -> None:
     _OVERRIDE = model
 
 
-def get_chat_model() -> ChatModelLike:
-    """Return the configured chat model with provider-specific optimizations.
+def get_chat_model(
+    *,
+    model: str | None = None,
+    temperature: float | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    max_tokens: int | None = None,
+    reasoning_effort: str | None = None,
+) -> ChatModelLike:
+    """Return the configured chat model via the unified LLM provider factory.
 
     Resolution order:
         1. Test override (set_chat_model_override).
-        2. Anthropic if model starts with 'claude'.
-        3. OpenAI/compatible for everything else.
-
-    Provider detection:
-        - 'claude-*' → Anthropic (needs ANTHROPIC_API_KEY)
-        - 'gpt-*', 'o1-*' → OpenAI native (needs OPENAI_API_KEY)
-        - Anything else + OPENAI_API_BASE set → OpenAI-compatible endpoint
-        - Anything else without base → OpenAI (assumes custom model name)
+        2. Dynamic parameters passed as keyword args.
+        3. Platform-wide configuration resolved via get_llm_provider().
     """
     if _OVERRIDE is not None:
         return _OVERRIDE
 
-    settings = get_settings()
-    model_name = settings.crashwise_llm_model
-    temperature = settings.crashwise_llm_temperature
+    from crashwise.core.llm_factory import get_llm_provider
 
-    provider = _detect_provider(model_name, settings)
-
-    log.info(
-        "harness_synth.llm.resolve",
-        model=model_name,
-        temperature=temperature,
-        provider=provider,
-    )
-
-    if provider == "anthropic":
-        return _build_anthropic(model_name, temperature, settings)
-    else:
-        return _build_openai(model_name, temperature, settings, provider)
-
-
-def _detect_provider(model_name: str, settings: Any) -> str:
-    """Detect which provider to use based on model name and config."""
-    lower = model_name.lower()
-
-    if lower.startswith("claude"):
-        return "anthropic"
-
-    if lower.startswith(("gpt-", "o1-", "o3-")):
-        if settings.openai_api_base:
-            return "openai_custom"
-        return "openai"
-
-    # Non-standard model name — must be a custom endpoint.
-    if settings.openai_api_base:
-        return "openai_compatible"
-
-    # Fallback: try OpenAI native.
-    return "openai"
-
-
-def _build_anthropic(model_name: str, temperature: float, settings: Any) -> ChatModelLike:
-    """Build Anthropic client with frontier-model settings."""
-    from langchain_anthropic import ChatAnthropic
-
-    api_key = (
-        settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
-    )
-    if not api_key:
-        raise ValueError("No Anthropic API key configured (ANTHROPIC_API_KEY).")
-
-    return ChatAnthropic(
-        model=model_name,
+    provider_config = get_llm_provider(
+        model=model,
         temperature=temperature,
         api_key=api_key,
-        timeout=180,
-        max_retries=2,
-        stop=None,
-        max_tokens=4096,
+        base_url=base_url,
+        max_tokens=max_tokens,
+        reasoning_effort=reasoning_effort,
     )
-
-
-def _build_openai(
-    model_name: str, temperature: float, settings: Any, provider: str
-) -> ChatModelLike:
-    """Build OpenAI/compatible client with appropriate settings."""
-    from langchain_openai import ChatOpenAI
-
-    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
-    if not api_key and not settings.openai_api_base:
-        raise ValueError("No OpenAI API key configured (OPENAI_API_KEY).")
-
-    kwargs: dict[str, Any] = {
-        "model": model_name,
-        "temperature": temperature,
-        "api_key": api_key or "sk-dummy",
-        "timeout": 180,
-        "max_retries": 2,
-    }
-
-    # Custom base URL for NVIDIA NIM, Together, Groq, vLLM, etc.
-    if settings.openai_api_base:
-        kwargs["base_url"] = settings.openai_api_base
-
-    # Frontier models support larger context.
-    if model_name.startswith(("gpt-4o", "gpt-4-turbo")):
-        kwargs["max_tokens"] = 4096
-
-    return ChatOpenAI(**kwargs)
+    return provider_config.chat_model
 
 
 __all__ = ["ChatModelLike", "get_chat_model", "set_chat_model_override"]

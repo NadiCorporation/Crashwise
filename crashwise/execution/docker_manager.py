@@ -180,6 +180,7 @@ class DockerManager:
             "docker",
             "run",
             "-d",
+            "--init",
             "--name",
             container_name,
             # B3 — sandbox hardening.

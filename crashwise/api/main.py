@@ -67,6 +67,18 @@ class CampaignCreateRequest(BaseModel):
     harness_path: str | None = Field(default=None, max_length=512)
     sanitizers: str = Field(default="address,undefined")
     max_iterations: int = Field(default=5, ge=1, le=20)
+    custom_fuzzer_flags: str | None = Field(default=None, description="Custom AFL++ or libFuzzer flags")
+    llm_model: str | None = Field(default=None, description="LLM model override")
+    llm_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    llm_base_url: str | None = Field(default=None, description="Custom OpenAI-compatible base URL")
+    llm_api_key: str | None = Field(default=None, description="API key for LLM")
+    reasoning_effort: str | None = Field(default=None, description="Reasoning effort ('low', 'medium', 'high')")
+    max_synth_retries: int = Field(default=4, ge=0, le=10)
+    enable_mab: bool = Field(default=False)
+    mab_algorithm: str = Field(default="thompson")
+    mab_exploration_ratio: float = Field(default=0.2, ge=0.0, le=1.0)
+    enable_self_healing: bool = Field(default=False)
+    healing_max_attempts: int = Field(default=10, ge=1, le=50)
 
 
 class CampaignResponse(BaseModel):
@@ -374,6 +386,18 @@ async def start_campaign(
                 sanitizers=req.sanitizers,
                 max_iterations=req.max_iterations,
                 campaign_id=str(campaign_id),
+                custom_fuzzer_flags=req.custom_fuzzer_flags,
+                llm_model=req.llm_model,
+                llm_temperature=req.llm_temperature,
+                llm_base_url=req.llm_base_url,
+                llm_api_key=req.llm_api_key,
+                reasoning_effort=req.reasoning_effort,
+                max_synth_retries=req.max_synth_retries,
+                enable_mab=req.enable_mab,
+                mab_algorithm=req.mab_algorithm,
+                mab_exploration_ratio=req.mab_exploration_ratio,
+                enable_self_healing=req.enable_self_healing,
+                healing_max_attempts=req.healing_max_attempts,
             ),
             id=workflow_id,
             task_queue=get_settings().temporal_task_queue,

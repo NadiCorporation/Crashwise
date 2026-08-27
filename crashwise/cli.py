@@ -538,10 +538,21 @@ def run(
     branch: str | None = typer.Option(None, "--branch", "-b"),
     harness: str | None = typer.Option(None, "--harness", "-H"),
     sanitizers: str = typer.Option("address,undefined", "--sanitizers", "-s"),
+    custom_flags: str | None = typer.Option(None, "--custom-flags", help="Custom AFL++ or libFuzzer flags"),
+    model: str | None = typer.Option(None, "--model", help="LLM model (e.g. deepseek-chat, claude-sonnet-4-5, gpt-4o)"),
+    temperature: float | None = typer.Option(None, "--temperature", help="LLM temperature (0.0 to 2.0)"),
+    base_url: str | None = typer.Option(None, "--base-url", help="OpenAI-compatible base URL (e.g. https://api.deepseek.com)"),
+    api_key: str | None = typer.Option(None, "--api-key", help="LLM API key"),
+    reasoning_effort: str | None = typer.Option(None, "--reasoning-effort", help="Reasoning effort ('low', 'medium', 'high')"),
+    max_synth_retries: int = typer.Option(4, "--max-synth-retries", help="Max harness synthesis retry attempts"),
+    enable_mab: bool = typer.Option(False, "--mab", help="Enable Multi-Armed Bandit strategy switching"),
+    mab_algorithm: str = typer.Option("thompson", "--mab-algorithm", help="MAB algorithm ('thompson' or 'ucb1')"),
+    enable_self_healing: bool = typer.Option(False, "--self-healing", help="Enable autonomous build & patch repair agent"),
+    max_repair_attempts: int = typer.Option(10, "--max-repair-attempts", help="Max healing agent iterations"),
     host: str | None = typer.Option(None, "--host"),
     namespace: str | None = typer.Option(None, "--namespace"),
     task_queue: str | None = typer.Option(None, "--task-queue"),
-    manifest: Path | None = typer.Option(None, "--manifest", "-m", help="Path to crashwise.yaml"),
+    manifest: Path | None = typer.Option(None, "--manifest", help="Path to crashwise.yaml"),
     skip_preflight: bool = typer.Option(
         False,
         "--skip-preflight",
@@ -597,16 +608,26 @@ def run(
         console.print(f"  Project: [green]{manifest_obj.project.name}[/] ({manifest_obj.project.language})")
         console.print(f"  Build:   [green]{manifest_obj.build.system}[/]")
 
-    payload = FuzzingInput.model_validate(
-        {
-            "target_repo": target_repo,
-            "fuzzer_type": fuzzer,
-            "timeout_seconds": timeout_seconds,
-            "target_branch": branch,
-            "harness_path": harness,
-            "sanitizers": sanitizers,
-        }
-    )
+    payload_dict: dict[str, Any] = {
+        "target_repo": target_repo,
+        "fuzzer_type": fuzzer,
+        "timeout_seconds": timeout_seconds,
+        "target_branch": branch,
+        "harness_path": harness,
+        "sanitizers": sanitizers,
+        "custom_fuzzer_flags": custom_flags,
+        "llm_model": model,
+        "llm_temperature": temperature,
+        "llm_base_url": base_url,
+        "llm_api_key": api_key,
+        "reasoning_effort": reasoning_effort,
+        "max_synth_retries": max_synth_retries,
+        "enable_mab": enable_mab,
+        "mab_algorithm": mab_algorithm,
+        "enable_self_healing": enable_self_healing,
+        "healing_max_attempts": max_repair_attempts,
+    }
+    payload = FuzzingInput.model_validate(payload_dict)
     console.print("[bold cyan]Submitting MainFuzzingWorkflow[/]")
     console.print(JSON(payload.model_dump_json(indent=2)))
 
@@ -627,6 +648,17 @@ def run(
                         "fuzzer_type": fuzzer.value,
                         "timeout_seconds": timeout_seconds,
                         "sanitizers": sanitizers,
+                        "custom_fuzzer_flags": custom_flags,
+                        "llm_model": model,
+                        "llm_temperature": temperature,
+                        "llm_base_url": base_url,
+                        "llm_api_key": api_key,
+                        "reasoning_effort": reasoning_effort,
+                        "max_synth_retries": max_synth_retries,
+                        "enable_mab": enable_mab,
+                        "mab_algorithm": mab_algorithm,
+                        "enable_self_healing": enable_self_healing,
+                        "healing_max_attempts": max_repair_attempts,
                     },
                 )
                 resp.raise_for_status()

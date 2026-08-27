@@ -17,7 +17,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +32,36 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _map_env_aliases(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            # Model name aliases
+            if "model_name" in values and "crashwise_llm_model" not in values:
+                values["crashwise_llm_model"] = values["model_name"]
+            elif "model" in values and "crashwise_llm_model" not in values:
+                values["crashwise_llm_model"] = values["model"]
+
+            # Temperature aliases
+            if "temperature" in values and "crashwise_llm_temperature" not in values:
+                values["crashwise_llm_temperature"] = values["temperature"]
+
+            # Max tokens aliases
+            if "max_tokens" in values and "crashwise_llm_max_tokens" not in values:
+                values["crashwise_llm_max_tokens"] = values["max_tokens"]
+
+            # Reasoning effort aliases
+            if "reasoning_effort" in values and "crashwise_llm_reasoning_effort" not in values:
+                values["crashwise_llm_reasoning_effort"] = values["reasoning_effort"]
+
+            # Base URL aliases
+            if "openai_base_url" in values and "openai_api_base" not in values:
+                values["openai_api_base"] = values["openai_base_url"]
+            elif "base_url" in values and "openai_api_base" not in values:
+                values["openai_api_base"] = values["base_url"]
+
+        return values
+
     # ── Runtime ──────────────────────────────────────────────────────────────
     crashwise_env: str = Field(default="development", description="deployment environment label")
     log_level: str = Field(default="INFO", description="root log level")
@@ -42,15 +72,23 @@ class Settings(BaseSettings):
     temporal_task_queue: str = Field(default="crashwise")
 
     # ── LLM providers ────────────────────────────────────────────────────────
-    openai_api_key: SecretStr | None = None
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=None,
+    )
     anthropic_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
 
     crashwise_llm_model: str = Field(default="claude-sonnet-4-5")
     crashwise_llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    crashwise_llm_max_tokens: int = Field(default=4096, ge=256, le=131072)
+    crashwise_llm_reasoning_effort: str | None = Field(
+        default=None,
+        description="Reasoning effort for reasoning models ('low', 'medium', 'high')",
+    )
     openai_api_base: str | None = Field(
         default=None,
-        description="Custom OpenAI-compatible base URL (e.g. http://localhost:11434/v1)",
+        description="Custom OpenAI-compatible base URL (e.g. https://api.deepseek.com or http://localhost:11434/v1)",
     )
 
     # ── Filesystem layout ────────────────────────────────────────────────────

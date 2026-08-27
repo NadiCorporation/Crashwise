@@ -42,7 +42,7 @@ class LLMProviderConfig:
         Detected backend: ``"anthropic"``, ``"openai"``, ``"openai_custom"``,
         or ``"openai_compatible"``.
     model:
-        Model identifier exactly as configured (e.g. ``claude-sonnet-4-5``).
+        Model identifier exactly as configured (e.g. ``claude-sonnet-4-5``, ``deepseek-chat``).
     temperature:
         Sampling temperature.
     api_key:
@@ -51,6 +51,8 @@ class LLMProviderConfig:
         Custom OpenAI-compatible endpoint. ``None`` for native providers.
     max_tokens:
         Token budget per completion.
+    reasoning_effort:
+        Optional reasoning effort level ('low', 'medium', 'high').
     timeout_seconds:
         Per-request wall-clock cap.
     max_retries:
@@ -63,6 +65,7 @@ class LLMProviderConfig:
     api_key: str | None
     base_url: str | None
     max_tokens: int = 4096
+    reasoning_effort: str | None = None
     timeout_seconds: int = 180
     max_retries: int = 2
 
@@ -142,9 +145,12 @@ class LLMProviderConfig:
             "max_retries": self.max_retries,
         }
         if self.base_url:
-            kwargs["base_url"] = self.base_url
-        if self.model.startswith(("gpt-4o", "gpt-4-turbo")):
+            kwargs["base_url"] = self.base_url.rstrip("/")
+        if self.max_tokens:
             kwargs["max_tokens"] = self.max_tokens
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+
         return ChatOpenAI(**kwargs)
 
     def _litellm_model_string(self) -> str:
@@ -168,7 +174,17 @@ def set_llm_provider_override(config: LLMProviderConfig | None) -> None:
     _OVERRIDE = config
 
 
-def get_llm_provider(*, settings: Settings | None = None) -> LLMProviderConfig:
+def get_llm_provider(
+    *,
+    model: str | None = None,
+    temperature: float | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    max_tokens: int | None = None,
+    reasoning_effort: str | None = None,
+    timeout_seconds: int | None = None,
+    settings: Settings | None = None,
+) -> LLMProviderConfig:
     """Resolve the platform's LLM configuration into a frozen snapshot.
 
     This is the **single entry point** every CrashWise subsystem uses.
@@ -178,6 +194,20 @@ def get_llm_provider(*, settings: Settings | None = None) -> LLMProviderConfig:
 
     Parameters
     ----------
+    model:
+        Optional model name override.
+    temperature:
+        Optional sampling temperature override.
+    api_key:
+        Optional API key override.
+    base_url:
+        Optional base URL override.
+    max_tokens:
+        Optional max completion tokens override.
+    reasoning_effort:
+        Optional reasoning effort level ('low', 'medium', 'high').
+    timeout_seconds:
+        Optional request timeout in seconds.
     settings:
         Optional override for the global :func:`get_settings` singleton.
         Used by tests that want to inject a custom ``Settings`` without
@@ -187,47 +217,59 @@ def get_llm_provider(*, settings: Settings | None = None) -> LLMProviderConfig:
         return _OVERRIDE
 
     s = settings or get_settings()
-    model = s.crashwise_llm_model
-    temperature = s.crashwise_llm_temperature
-    provider = _detect_provider(model, s)
+    resolved_model = model or s.crashwise_llm_model
+    resolved_temp = temperature if temperature is not None else s.crashwise_llm_temperature
+    resolved_base_url = base_url if base_url is not None else s.openai_api_base
+    provider = _detect_provider(resolved_model, resolved_base_url, s)
 
-    api_key: str | None = None
-    if provider == "anthropic" and s.anthropic_api_key:
-        api_key = s.anthropic_api_key.get_secret_value()
-    elif s.openai_api_key:
-        api_key = s.openai_api_key.get_secret_value()
+    resolved_api_key: str | None = api_key
+    if resolved_api_key is None:
+        if provider == "anthropic" and s.anthropic_api_key:
+            resolved_api_key = s.anthropic_api_key.get_secret_value()
+        elif s.openai_api_key:
+            resolved_api_key = s.openai_api_key.get_secret_value()
 
-    base_url: str | None = s.openai_api_base if provider != "anthropic" else None
+    if provider == "anthropic":
+        resolved_base_url = None
+
+    resolved_max_tokens = max_tokens or getattr(s, "crashwise_llm_max_tokens", 4096)
+    resolved_reasoning_effort = reasoning_effort or getattr(s, "crashwise_llm_reasoning_effort", None)
+    resolved_timeout = timeout_seconds or 180
 
     config = LLMProviderConfig(
         provider=provider,
-        model=model,
-        temperature=temperature,
-        api_key=api_key,
-        base_url=base_url,
+        model=resolved_model,
+        temperature=resolved_temp,
+        api_key=resolved_api_key,
+        base_url=resolved_base_url,
+        max_tokens=resolved_max_tokens,
+        reasoning_effort=resolved_reasoning_effort,
+        timeout_seconds=resolved_timeout,
     )
 
     log.info(
         "llm_factory.resolved",
         provider=provider,
-        model=model,
-        temperature=temperature,
-        base_url=base_url or "(native)",
-        has_api_key=api_key is not None,
+        model=resolved_model,
+        temperature=resolved_temp,
+        base_url=resolved_base_url or "(native)",
+        has_api_key=resolved_api_key is not None,
     )
 
     return config
 
 
-def _detect_provider(model_name: str, settings: Settings) -> str:
-    """Detect which provider to use based on model name and config."""
+def _detect_provider(model_name: str, base_url: str | None, settings: Settings) -> str:
+    """Detect which provider to use based on model name, base URL, and config."""
     lower = model_name.lower()
     if lower.startswith("claude"):
         return "anthropic"
+    if base_url or settings.openai_api_base:
+        return "openai_compatible"
+    if lower.startswith(("deepseek", "llama", "qwen", "mistral", "ollama", "vllm", "openrouter")):
+        return "openai_compatible"
     if lower.startswith(("gpt-", "o1-", "o3-")):
         return "openai_custom" if settings.openai_api_base else "openai"
-    if settings.openai_api_base:
-        return "openai_compatible"
     return "openai"
 
 
