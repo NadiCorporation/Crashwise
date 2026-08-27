@@ -59,7 +59,7 @@ log = get_logger(__name__)
 # ── Tunables ────────────────────────────────────────────────────────────────
 _HEARTBEAT_INTERVAL_SECONDS: Final[float] = 15.0
 _WORKSPACE_ROOT: Final[Path] = Path("/tmp/crashwise/healing")
-_REPO_URL_PATTERN: Final[re.Pattern[str]] = re.compile(r"^(?:https?://|git@)[\w.\-:/@]+(?:\.git)?$")
+_REPO_URL_PATTERN: Final[re.Pattern[str]] = re.compile(r"^(?:https?://|git@|file://|/)[\w.\-:/@]+(?:\.git)?$")
 
 
 # ── Activity 1: Adaptive Build ──────────────────────────────────────────────

@@ -226,9 +226,15 @@ async def validate_harness(state: HarnessState) -> HarnessState:
     if any((target_root / d / "config.h").exists() for d in ("build", ".")):
         extra_link_args.append("-DHAVE_CONFIG_H")
 
+    extra_link_args.append("-Wno-deprecated-declarations")
+    if not any(a.endswith(".a") for a in extra_link_args):
+        if state.source_path.exists() and state.source_path.suffix in (".c", ".cpp", ".cc"):
+            extra_link_args.append(str(state.source_path))
+    extra_link_args.extend(["-lm", "-lz", "-lpthread", "-lssl", "-lcrypto"])
+
     result = await compile_harness(
         engine=state.engine,
-            harness_path=state.harness_path,
+        harness_path=state.harness_path,
         workdir=state.workdir,
         language=state.language,
         extra_includes=extra_includes,
