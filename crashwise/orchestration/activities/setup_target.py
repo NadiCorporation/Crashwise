@@ -510,17 +510,17 @@ async def _compile_harness(
                 link_libs.extend(str(o) for o in obj_files)
     # If still no object files or static libs, link source files directly
     if not link_libs:
-        src_c_files = [
+        src_files = [
             str(f)
-            for f in workdir.rglob("*.c")
+            for f in list(workdir.rglob("*.c")) + list(workdir.rglob("*.cpp")) + list(workdir.rglob("*.cc"))
             if f.resolve() != harness_source.resolve()
             and "test" not in str(f).lower()
             and "fuzz" not in str(f).lower()
             and "example" not in str(f).lower()
             and "build" not in str(f).lower()
         ]
-        if src_c_files:
-            link_libs.extend(src_c_files)
+        if src_files:
+            link_libs.extend(src_files)
 
     cmd = [
         "clang++",
