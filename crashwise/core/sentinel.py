@@ -1028,20 +1028,22 @@ async def check_service_llm(
                     fail_parts.append(f"Triage: Venice returned HTTP {resp.status_code}")
         except Exception:
             fail_parts.append("Triage: Venice unreachable")
-    elif ai_provider == "openai_compatible":
-        ollama_url = settings.ollama_url.rstrip("/")
+    elif ai_provider in ("openai_compatible", "openai", "deepseek"):
+        base_url = (settings.openai_api_base or settings.ollama_url or "https://api.openai.com/v1").rstrip("/")
+        api_key = settings.ai_api_key or (settings.openai_api_key.get_secret_value() if settings.openai_api_key else None)
         try:
             headers = {}
-            if settings.ai_api_key:
-                headers["Authorization"] = f"Bearer {settings.ai_api_key}"
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
             async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.get(f"{ollama_url}/models", headers=headers)
+                resp = await client.get(f"{base_url}/models", headers=headers)
                 if resp.status_code == 200:
-                    ok_parts.append(f"Triage: {settings.ai_model} via {ollama_url}")
+                    model_display = settings.ai_model or settings.crashwise_llm_model
+                    ok_parts.append(f"Triage: {model_display} via {base_url}")
                 else:
-                    fail_parts.append(f"Triage: {ollama_url} returned HTTP {resp.status_code}")
+                    fail_parts.append(f"Triage: {base_url} returned HTTP {resp.status_code}")
         except Exception:
-            fail_parts.append(f"Triage: unreachable at {ollama_url}")
+            fail_parts.append(f"Triage: unreachable at {base_url}")
     elif not ai_provider:
         ok_parts.append("Triage: heuristic-only (no AI provider)")
 
