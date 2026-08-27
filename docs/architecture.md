@@ -146,7 +146,7 @@ crashwise/
 │   ├── workflows/
 │   │   ├── main.py                 # MainFuzzingWorkflow (God-Mode signals)
 │   │   └── verify_patch.py         # VerifyPatchWorkflow (autonomous fix verification)
-│   └── activities/                 # 27 registered activity implementations
+│   └── activities/                 # 28 registered activity implementations
 ├── agents/
 │   ├── harness_synth/              # LangGraph harness generation
 │   │   ├── graph.py                #   analyze → generate → validate state machine
@@ -185,9 +185,9 @@ crashwise/
 
 3. **Bounded autonomy.** LLM failures feed back into the LangGraph loop for self-correction. Bounded by `max_retries` (harness), `max_attempts` (healing), and `max_evolution_count` (evolution) to cap LLM spend.
 
-4. **Defense in depth.** LLM-generated code passes: regex validator → clang syntax check → compiler allowlist → Docker sandbox (no network, no caps, read-only rootfs).
+4. **Defense in depth.** LLM-generated code passes: regex validator → clang syntax check → compiler allowlist → Docker sandbox (no network, no caps, read-only rootfs, `--init`).
 
-5. **Database as source of truth.** Redis is a read cache. All persistent state writes to PostgreSQL/SQLite first. Campaigns never lose state.
+5. **Database as source of truth.** Redis is a read cache. All persistent state writes to PostgreSQL/SQLite first with persistent connection pooling (`pool_size=20`, `max_overflow=10`, `pool_pre_ping=True`). Campaigns never lose state.
 
 6. **Shell-free execution.** All subprocess calls use `shlex.split` + `create_subprocess_exec`. No `shell=True` anywhere.
 
@@ -195,35 +195,52 @@ crashwise/
 
 ---
 
-## LLM Integration
+## LLM Integration & Provider Routing
 
-Two independent layers with separate configuration:
+CrashWise uses a vendor-neutral, universal LLM architecture ([`crashwise/core/llm_factory.py`](file:///home/yahyatoubali/Projects/Crashwise/crashwise/core/llm_factory.py)) supporting dynamic provider selection and runtime parameter overrides:
 
-| Layer | Purpose | Config | Quality Requirement |
+| Layer | Purpose | Config / Providers | Supported Backends |
 |---|---|---|---|
-| Agentic (LangChain / LangGraph) | Harness synthesis, evolution, exploit gen, self-healing | `CRASHWISE_LLM_MODEL` + API key | High (Claude Sonnet 3.5/4.5, GPT-4o, DeepSeek-Coder) |
-| Triage (Direct HTTP) | Root cause analysis, patch suggestions | `AI_PROVIDER` + `AI_MODEL` | Low to Medium (8B models sufficient) |
+| **Agentic Core** (LangGraph) | Harness synthesis, evolution, exploit gen, adaptive build & self-healing | `MODEL_NAME`, `OPENAI_API_BASE`, `OPENAI_API_KEY`, `TEMPERATURE`, `REASONING_EFFORT` | DeepSeek (`deepseek-chat`), Anthropic Claude (`claude-sonnet-4-5`), OpenAI (`gpt-4o`, `o1`/`o3`), Ollama, vLLM, Venice, Together AI, Groq |
+| **Triage & Diagnostics** | Root-cause analysis, CWE classification, patch suggestions | `AI_PROVIDER` (`openai_compatible`, `ollama`, `venice`), `AI_MODEL` | DeepSeek, OpenAI-compatible APIs, local Ollama/vLLM (8B+ models) |
 
-The triage layer is optional — falls back to regex-based ASAN classification.
+### Runtime Parameter Overrides
+Every agent node receives granular overrides via `get_llm_provider()`:
+- `model`: Target LLM model name
+- `base_url`: OpenAI-compatible endpoint URL
+- `api_key`: Secret API token
+- `temperature`: Deterministic sampling (default `0.0`)
+- `reasoning_effort`: Reasoning intensity for reasoning models (`low`, `medium`, `high`)
+- `max_tokens`: Token budget per turn (default `4096`)
 
 ---
 
 ## Execution Sandbox
 
+Every fuzzer container runs with:
+
 | Constraint | Value | Rationale |
 |---|---|---|
-| `--network none` | No egress | Untrusted harness cannot exfiltrate |
-| `--read-only` | Immutable rootfs | All writes go to explicit mounts |
-| `--cap-drop ALL` | No capabilities | Minimum privilege |
-| `--cap-add SYS_PTRACE` | AFL++ only | Forkserver requires ptrace |
-| `--pids-limit 1024` | Fork bomb protection | |
-| `--tmpfs /tmp:size=512m` | Capped scratch | Prevents disk fill |
-| `--storage-opt size=5G` | Per-container quota | Requires overlay2+xfs+pquota |
-| `--ulimit fsize=10G` | Max file size | Prevents runaway corpus |
+| Process init | `--init` | Tini init at PID 1 for clean child process reaping |
+| Network | `--network none` | Untrusted harness cannot exfiltrate |
+| Filesystem | `--read-only` | Immutable rootfs; all writes go to explicit mounts |
+| Capabilities | `--cap-drop ALL` | Drops all Linux capabilities (least privilege) |
+| AFL++ capability | `--cap-add SYS_PTRACE` | AFL++ forkserver requires ptrace |
+| PIDs | `--pids-limit 1024` | Fork bomb protection |
+| Scratch | `--tmpfs /tmp:size=512m` | Capped ephemeral scratch to prevent disk fill |
+| Disk quota | `--storage-opt size=5G` | Per-container quota (overlay2+xfs+pquota) |
+| Max file size | `--ulimit fsize=10G` | Prevents runaway corpus explosion |
 
 ---
 
-## Database Schema
+## Database Architecture & Connection Pooling
+
+CrashWise uses async SQLAlchemy 2.0 with PostgreSQL in production (`asyncpg`) and SQLite in development (`aiosqlite`). Connection pooling is managed in `crashwise/core/database.py`:
+- `pool_size=20`: Maintained persistent connection pool
+- `max_overflow=10`: Burst connection buffer
+- `pool_pre_ping=True`: Automatic dead connection detection and recovery
+- `pool_recycle=300`: Connection recycling every 5 minutes
+- Lazy engine instantiation to avoid connection leaks across worker subprocess forks.
 
 ```
 Campaign                — id, target_repo, target_name, fuzzer_type, status, created_at, updated_at

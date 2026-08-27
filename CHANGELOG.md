@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] — 2026-08-27
+
+### Community-Grade Hardening & Multi-Provider Engine
+
+#### Universal Multi-Provider LLM Integration
+- **Vendor-Neutral Provider Routing** (`crashwise/core/llm_factory.py`): Centralized LLM factory routing dynamically across OpenAI, DeepSeek (`deepseek-chat`), Anthropic Claude (`claude-sonnet-4-5`), Ollama (`llama3.1`), vLLM, Venice, Groq, and Together AI without vendor lock-in.
+- **Dynamic Configuration Aliasing** (`crashwise/core/config.py`): Added environment variable aliases for `MODEL_NAME`, `OPENAI_API_BASE`, `OPENAI_API_KEY`, `TEMPERATURE`, `MAX_TOKENS`, and `REASONING_EFFORT`.
+- **Runtime Overrides**: Unified `get_llm_provider()` across all LangGraph nodes (Harness Synthesis, Healing Engine, Crash Triage, PoC Exploit Generation) to accept per-call temperature, token budgets, and reasoning effort.
+
+#### Granular User Controls & Configuration
+- **CLI Flags** (`crashwise/cli.py`): Added `--custom-flags`, `--model`, `--base-url`, `--api-key`, `--temperature`, `--reasoning-effort`, `--max-synth-retries`, `--mab`, `--mab-algorithm`, `--self-healing`, and `--max-repair-attempts` to `crashwise run`.
+- **REST API & Workflow Payloads** (`crashwise/api/main.py`, `crashwise/core/models.py`): Expanded `CampaignCreateRequest` and `FuzzingInput` to pass all granular knobs to Temporal workflows and activities.
+
+#### Stability Hardening & Zombie Elimination
+- **Docker Sandbox Init** (`crashwise/execution/docker_manager.py`): Injected `--init` flag into container instantiation to run Docker's built-in Tini as PID 1, eliminating zombie and defunct child processes on interrupted fuzzing runs.
+- **Database Connection Pooling** (`crashwise/core/database.py`): Added connection pool management (`pool_size=20`, `max_overflow=10`, `pool_pre_ping=True`, `pool_recycle=300`) and lazy session creation, preventing connection pool exhaustion during burst triage.
+- **Activity Registry Expansion**: Added 28th registered activity (`synthesize_harness`) to enforce complete Temporal workflow determinism.
+
+#### Target Deployment & Verification
+- **C++ Source Linking Fallback** (`crashwise/orchestration/activities/setup_target.py`): Added automated discovery and linking of multi-file C++ source trees (`.cpp`, `.cc`, `.cxx`) when static archives are absent.
+- **Live Real-World Target Verification**: Deployed and fuzzed Telegram VoIP native parser (`targets/libtgvoip`) with DeepSeek API on staging host `192.168.1.13`, achieving 110,956 iterations in 4s with ASAN+UBSan instrumentation.
+- **Test Suite**: 509 unit tests passing across all suites (`uv run pytest tests/unit/`).
+
+---
+
 ## [1.1.0] — 2026-05-16
 
 ### Operation Hydra — Agentic Intelligence Layer
@@ -362,6 +387,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.3.0 | 8–11 | 158 | API + Persistence + Distributed + AI + Dashboard |
 | 0.4.0 | 12 | 169 | Patch Verification |
 | 0.5.0 | 13 | 187 | Auto-Disclosure (CVSS + Reports + Notifications) |
-| 0.6.0 | 14 | 202 | Production Packaging (CLI + Docker + CI/CD) |
 | 0.7.0 | 15 | 237 | PoC Generation + Reachability Analysis |
-| **1.0.0-rc1** | 15.5 | **237** | **Release Documentation + Repository Finalization** |
+| 1.0.0-rc1 | 15.5 | 237 | Release Documentation + Repository Finalization |
+| 1.0.0-rc2 | 21 | 382 | Hardened Docker Sandbox + Distro-Bridge + God-Mode Signals |
+| 1.1.0 | 22 | 480 | Operation Hydra (Agentic Senses, ReAct GDB Brain, Type Extractor) |
+| **1.2.0** | **23** | **509** | **Community Engine Hardening + Universal Multi-Provider LLM Routing + Live Staging Target** |

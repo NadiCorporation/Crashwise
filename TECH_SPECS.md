@@ -29,7 +29,7 @@ CrashWise is an autonomous zero-day vulnerability discovery platform combining:
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         Temporal Worker Layer (Python 3.12+)                │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ 27 Registered Activities (I/O, Compilation, Fuzzing, Healing, Triage) │  │
+│  │ 28 Registered Activities (I/O, Compilation, Fuzzing, Healing, Triage) │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         Cognitive Agent Layer (LangGraph)                   │
@@ -41,7 +41,7 @@ CrashWise is an autonomous zero-day vulnerability discovery platform combining:
 │                         Execution Sandboxes (Hardened)                      │
 │  ┌─────────────────────────────────┐   ┌──────────────────────────────┐     │
 │  │ Docker Engine (AFL++, libFuzzer)│   │ QEMU / KVM (Kernel targets)  │     │
-│  │ --network none, --read-only     │   │ -nographic, -no-reboot       │     │
+│  │ --init, --network none, -ro     │   │ -nographic, -no-reboot       │     │
 │  └─────────────────────────────────┘   └──────────────────────────────┘     │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         Persistence & Messaging                             │
@@ -51,28 +51,23 @@ CrashWise is an autonomous zero-day vulnerability discovery platform combining:
 
 ---
 
-## 3. Deep-Dive: Current Technical Bottlenecks
+## 3. Deep-Dive: Architecture, Hardening & Recent Resolutions
 
-### 3.1 Subprocess & Docker CLI Overhead
-* **Mechanism:** Fuzzer monitoring (`docker logs --tail`, `docker stats`, `docker inspect`) and container lifecycle management (`docker run`, `docker exec`, `docker cp`, `docker stop`, `docker rm`) invoke `asyncio.create_subprocess_exec` on the host Docker binary every second per running campaign.
-* **Bottleneck:** Spawning tens of CLI subprocesses per second across concurrent campaigns causes high kernel fork/exec overhead, context switching, and file descriptor thrashing.
-* **Risk:** Scaling past 10 concurrent fuzzing nodes induces CLI latency spikes and transient subprocess timeouts.
+### 3.1 Subprocess & Docker Process Isolation
+* **Mechanism:** Fuzzer monitoring (`docker logs --tail`, `docker stats`, `docker inspect`) and container lifecycle management (`docker run`, `docker exec`, `docker cp`, `docker stop`, `docker rm`) manage sandboxed execution.
+* **Resolution & Hardening:** All container invocations now pass `--init` to run Docker's built-in `tini` as PID 1, eliminating zombie and defunct child processes on aborted or timed-out fuzz runs.
 
 ### 3.2 Temporal Workflow Determinism & Payload Limits
-* **Mechanism:** 
-  1. `MainFuzzingWorkflow.run` in `crashwise/orchestration/workflows/main.py` contains direct filesystem checks (`rglob`) and synchronous LLM harness synthesis calls on fallback paths.
-  2. Large stack traces, ASAN logs, and coverage reports (up to 64KB+ per crash) are transmitted directly across activity arguments and return values.
-* **Bottleneck:** Temporal enforces strict execution determinism for event-history replay. Non-deterministic operations inside workflow code risk replay divergence. Furthermore, passing multi-megabyte payloads through Temporal's gRPC event history risks hitting the 4MB payload limit and causes workflow execution bloat.
+* **Mechanism:** Workflow state machines (`MainFuzzingWorkflow`, `VerifyPatchWorkflow`) maintain strict execution determinism across all 28 registered activities.
+* **Resolution & Hardening:** Standalone activity `synthesize_harness` isolates LangGraph LLM generation from workflow replay paths. Large blobs and crash contexts are referenced through dedicated paths and persistent storage.
 
-### 3.3 Database Engine Thrashing & Schema Partitioning
-* **Mechanism:**
-  1. `crashwise/web/hooks.py` (`persist_crash_to_web`) instantiates and disposes of a brand new SQLAlchemy async engine per crash insertion.
-  2. The codebase maintains two separate database schemas and declarative bases: `crashwise.core.database` (`Campaign`, `FuzzingRun`, `Crash`, `Seed`, `CampaignKV`) vs `crashwise.web.models` (`FuzzingCampaign`, `CrashTestCase`).
-* **Bottleneck:** Creating and tearing down database connection pools on every crash discovery causes connection spikes on PostgreSQL and degrades throughput during crash bursts.
+### 3.3 Database Engine Connection Pooling
+* **Mechanism:** SQLAlchemy async engine handles relational persistence for campaigns, runs, crashes, seeds, and knowledge graph patterns.
+* **Resolution & Hardening:** Implemented connection pooling with `pool_size=20, max_overflow=10, pool_pre_ping=True, pool_recycle=300` and lazy session management in `crashwise/core/database.py`, preventing engine thrashing during crash discovery bursts.
 
-### 3.4 Cognitive Agent Latency & Cost Accumulation
-* **Mechanism:** Multi-turn LangGraph agent loops (Harness Synthesis retry loop, Healing Engine adaptive build/repair, Exploit generation) run synchronously within worker activity slots, consuming 5–15 minutes of wall-clock time per target.
-* **Bottleneck:** A stuck compilation or repair loop exhausts API rate limits and locks worker execution threads unless aggressively bounded by `max_attempts` and strict per-turn timeout gates.
+### 3.4 Multi-Provider LLM Orchestration
+* **Mechanism:** LangGraph agents (Harness Synthesis, Healing Engine, Crash Triage, Exploit Generation) communicate with LLMs.
+* **Resolution & Hardening:** Built universal `llm_factory.py` with dynamic provider routing (DeepSeek, OpenAI, Anthropic, Ollama, vLLM, Venice), token caps, reasoning effort tuning, and AST-level safety validation.
 
 ---
 
@@ -80,12 +75,12 @@ CrashWise is an autonomous zero-day vulnerability discovery platform combining:
 
 | Component | Current Stack | Proposed Stack | Primary Justification |
 |---|---|---|---|
-| **Container Engine** | Docker CLI (`subprocess`) | Docker Engine REST API (`aiohttp` over `/var/run/docker.sock`) or containerd | Eliminates fork/exec overhead; sub-millisecond status polling and multiplexed streaming. |
-| **Workflow Engine** | Temporal.io (Python SDK) | Temporal.io (Pure Activities + Object Storage References) | Strict determinism; large blobs (corpora, binaries, ASAN logs) stored in R2/S3; only UUIDs/URIs passed in workflows. |
-| **Persistence** | Split SQLAlchemy models (Core + Web) | Unified PostgreSQL 16 schema + SQLAlchemy 2.0 (asyncpg) | Single source of truth; persistent connection pooling; eliminates redundant tables and engine re-creation. |
+| **Container Engine** | Docker CLI (`subprocess` + `--init`) | Docker Engine REST API (`aiohttp` over `/var/run/docker.sock`) or containerd | Eliminates fork/exec overhead; sub-millisecond status polling and multiplexed streaming. |
+| **Workflow Engine** | Temporal.io (28 Activities) | Temporal.io (Pure Activities + Object Storage References) | Strict determinism; large blobs (corpora, binaries, ASAN logs) stored in R2/S3; only UUIDs/URIs passed in workflows. |
+| **Persistence** | Pooled SQLAlchemy 2.0 (asyncpg) | Unified PostgreSQL 16 schema + SQLAlchemy 2.0 (asyncpg) | Single source of truth; persistent connection pooling; eliminates redundant tables and engine re-creation. |
 | **Telemetry & Events** | Polled SQL / Ad-hoc SSE | Redis Pub/Sub / SSE Stream via FastAPI | Real-time fuzzer stats broadcasting without database query saturation. |
 | **Frontend** | Dual (Streamlit + Next.js 14) | Next.js 14 (App Router + Tailwind + TypeScript) | Unified, reactive production UI; deprecation of prototype Streamlit interface. |
-| **LLM Orchestration** | LangChain / LangGraph + openhands-sdk stub | Unified `llm_factory` + LangGraph StateGraph + native Docker tool executors | Clean separation of agent prompts, provider-agnostic token management, and hardened sandbox execution. |
+| **LLM Orchestration** | Universal `llm_factory` (Multi-Provider) | Unified `llm_factory` + LangGraph StateGraph + native Docker tool executors | Clean separation of agent prompts, provider-agnostic token management, and hardened sandbox execution. |
 
 ---
 

@@ -51,11 +51,12 @@ CrashWise processes **untrusted input** at multiple layers:
 - Use `--network none` on the worker container if running CrashWise itself in Docker
 
 **The fuzzer sandbox is hardened.** Once built, the fuzzer binary runs inside Docker with:
-- `--network none`
-- `--read-only`
-- `--cap-drop ALL` (AFL++ gets `SYS_PTRACE` only)
-- `--pids-limit 1024`
-- Size-capped tmpfs
+- `--init` (Tini as PID 1 to clean up zombie/defunct child processes)
+- `--network none` (complete network isolation)
+- `--read-only` (immutable root filesystem)
+- `--cap-drop ALL` (AFL++ gets `SYS_PTRACE` only for forkserver)
+- `--pids-limit 1024` (fork-bomb protection)
+- Size-capped tmpfs on `/tmp` and `/dev/shm`
 - No shell access
 
 **LLM-generated code is validated before execution.** The pipeline:

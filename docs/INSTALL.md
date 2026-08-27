@@ -23,9 +23,31 @@ All other dependencies (Docker, Clang, GCC, LLVM, AFL++) are provisioned by `cra
 
 ```bash
 git clone https://github.com/yahyatoubali/Crashwise.git && cd Crashwise
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+uv sync  # or: python -m venv .venv && source .venv/bin/activate && pip install -e .
 crashwise version
+```
+
+---
+
+## LLM Provider Setup
+
+Configure your preferred LLM provider in `.env` (or pass flags directly via CLI):
+
+```bash
+# DeepSeek (OpenAI-compatible)
+OPENAI_API_BASE=https://api.deepseek.com
+OPENAI_API_KEY=sk-...
+MODEL_NAME=deepseek-chat
+TEMPERATURE=0.0
+
+# Anthropic Claude
+CRASHWISE_LLM_MODEL=claude-sonnet-4-5
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Ollama / Local vLLM
+OPENAI_API_BASE=http://localhost:11434/v1
+OPENAI_API_KEY=ollama
+MODEL_NAME=llama3.1:8b
 ```
 
 ---
@@ -103,9 +125,12 @@ This starts:
 | Service | Port | Purpose |
 |---|---|---|
 | Temporal Server | 7233 | Workflow orchestration (gRPC) |
-| Temporal UI | 8233 | Web interface |
-| PostgreSQL | 5432 | Persistence |
-| Redis | 6379 | Distributed state |
+| Temporal UI | 8233 | Workflow timeline & debug interface |
+| PostgreSQL | 5432 | Relational persistence |
+| Redis | 6379 | Distributed state, heartbeats, deduplication |
+| MinIO | 9000 / 9001 | S3-compatible artifact storage |
+| CrashWise API | 8000 | FastAPI REST API & SSE telemetry |
+| CrashWise Web UI | 3000 | Next.js 14 Production Command Center |
 
 ### Initialize database
 
@@ -115,13 +140,32 @@ crashwise init
 
 ---
 
-## First Campaign
+## Launching Campaigns
 
 ```bash
+# Standard blocking run with automatic harness synthesis
 crashwise run https://github.com/madler/zlib --timeout 600
+
+# Granular configuration with custom engine flags, LLM routing, and MAB
+crashwise run targets/libtgvoip \
+  --timeout 300 \
+  --fuzzer libfuzzer \
+  --sanitizers address,undefined \
+  --custom-flags "-dict=json.dict -max_len=1024" \
+  --model deepseek-chat \
+  --base-url https://api.deepseek.com \
+  --api-key sk-... \
+  --temperature 0.0 \
+  --mab \
+  --mab-algorithm thompson \
+  --self-healing \
+  --max-repair-attempts 10
+
+# Detached submission
+crashwise run --detach https://github.com/madler/zlib
 ```
 
-The pre-flight gate validates Docker, Clang, and GCC before submission. Override with `--skip-preflight` if running inside the worker container.
+The pre-flight gate validates Docker, Clang, GCC, and LLM connectivity before submission. Override with `--skip-preflight` if running inside the worker container.
 
 ### God-Mode signals (live campaign control)
 
@@ -129,9 +173,10 @@ The pre-flight gate validates Docker, Clang, and GCC before submission. Override
 crashwise signal <workflow_id> force_pivot
 crashwise signal <workflow_id> inject_seed --data filename=poc.bin
 crashwise signal <workflow_id> pause_hunt
+crashwise signal <workflow_id> resume_hunt
 ```
 
-Workflow IDs are printed by `crashwise run` and visible in Temporal UI at `http://localhost:8233`.
+Workflow IDs are printed by `crashwise run` and visible in Temporal UI at `http://localhost:8233` or Next.js Dashboard at `http://localhost:3000`.
 
 ---
 

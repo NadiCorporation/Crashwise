@@ -146,7 +146,7 @@ crashwise run <target> \
 │  CLI / FastAPI Gateway (:8000) / Next.js Dashboard (:3000)   │
 ├──────────────────────────────────────────────────────────────┤
 │  Temporal Workflows (durable, replayable)                    │
-│  ├─ MainFuzzingWorkflow → 27 Registered Activities          │
+│  ├─ MainFuzzingWorkflow → 28 Registered Activities          │
 │  └─ VerifyPatchWorkflow (autonomous fix verification)        │
 ├──────────────────────────────────────────────────────────────┤
 │  Cognitive AI Agents (LangGraph)                             │
@@ -187,14 +187,15 @@ crashwise run <target> \
 
 Every fuzzer container runs with:
 
-| Constraint | Value |
-|---|---|
-| Network | `--network none` |
-| Filesystem | `--read-only` |
-| Capabilities | `--cap-drop ALL` |
-| PIDs | `--pids-limit 1024` |
-| Scratch | Size-capped tmpfs on `/tmp` and `/dev/shm` |
-| Disk quota | `--storage-opt size=5G` (overlay2+xfs+pquota) |
+| Constraint | Value | Rationale |
+|---|---|---|
+| Process init | `--init` | Tini init at PID 1 for clean child process reaping |
+| Network | `--network none` | Prevents data exfiltration and external calls |
+| Filesystem | `--read-only` | Prevents tampering with container binaries |
+| Capabilities | `--cap-drop ALL` | Drops all Linux capabilities (least privilege) |
+| PIDs | `--pids-limit 1024` | Protects against fork bombs and runaway processes |
+| Scratch | Size-capped tmpfs on `/tmp` and `/dev/shm` | Ephemeral high-speed memory scratch |
+| Disk quota | `--storage-opt size=5G` (overlay2+xfs+pquota) | Caps maximum disk consumption per run |
 
 > AFL++ containers additionally receive `--cap-add SYS_PTRACE` for forkserver operation.
 
@@ -215,11 +216,11 @@ See [docs/architecture.md](docs/architecture.md) for the full technical referenc
 | Compatible | Requires Manual Tuning | Unsupported |
 |---|---|---|
 | C/C++ libraries with CMake/Make/Meson | Bazel builds, complex monorepos | Closed-source binaries |
-| Parser libraries (image, archive, crypto, font) | Custom toolchains, autotools edge cases | Windows-only (MSVC) |
+| Parser libraries (image, archive, crypto, font, JSON) | Custom toolchains, autotools edge cases | Windows-only (MSVC) |
 | Projects with existing fuzz harnesses | Deeply nested struct-init APIs | Managed languages |
 | Standard `(buf, size)` entry points | Callback-driven APIs (SAX parsers) | Network daemons (stateful protocols) |
 
-Validated targets: zlib, libpng, libjpeg-turbo, freetype, openssl, libxml2, harfbuzz, libarchive, pcre2.
+Validated targets: libtgvoip (Telegram VoIP json11), zlib, libpng, libjpeg-turbo, freetype, openssl, libxml2, harfbuzz, libarchive, pcre2.
 
 ---
 
