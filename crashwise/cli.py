@@ -744,7 +744,7 @@ def worker(
 @app.command()
 def api(
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind address"),
-    port: int = typer.Option(8001, "--port", "-p", help="Bind port"),
+    port: int = typer.Option(8000, "--port", "-p", help="Bind port"),
     reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes"),
     workers: int = typer.Option(1, "--workers", "-w", help="Uvicorn worker processes"),
 ) -> None:
