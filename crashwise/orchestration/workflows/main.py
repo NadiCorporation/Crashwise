@@ -501,8 +501,8 @@ class MainFuzzingWorkflow:
                         if isinstance(raw_synth, SynthesizeHarnessOutput)
                         else SynthesizeHarnessOutput.model_validate(raw_synth)
                     )
-                    if synth_out.success and synth_out.harness_path:
-                        harness_path = synth_out.harness_path
+                    if synth_out.success and (synth_out.binary_path or synth_out.harness_path):
+                        harness_path = synth_out.binary_path or synth_out.harness_path
                         log.info(f"main_workflow.healing.harness_synthesized {harness_path}")
                     else:
                         log.warning(
