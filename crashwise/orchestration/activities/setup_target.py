@@ -410,7 +410,11 @@ def _find_best_source_for_synthesis(workdir: Path) -> str | None:
         for p in workdir.rglob("*"):
             if not p.is_file() or p.suffix.lower() not in source_exts:
                 continue
-            if any(part.startswith(".") or part.lower() in skip_dirs for part in p.parts):
+            try:
+                rel_parts = [part.lower() for part in p.relative_to(workdir).parts[:-1]]
+            except ValueError:
+                rel_parts = [part.lower() for part in p.parts[:-1]]
+            if any(part.startswith(".") or part in skip_dirs for part in rel_parts):
                 continue
             if best_api.name.lower() in p.stem.lower() or p.stem.lower() in best_api.name.lower():
                 candidates_by_name.append(p)
@@ -498,19 +502,21 @@ async def _compile_harness(
         if "CMakeFiles" not in str(hdir):
             include_dirs.add(hdir)
 
-    # Discover static libraries (.a) and object files to link against.
+    # Discover static libraries (.a) and shared libraries (.so) to link against.
     link_libs: list[str] = []
-    for lib_file in workdir.rglob("*.a"):
+    for lib_file in list(workdir.rglob("*.a")) + list(workdir.rglob("*.so")):
         # Skip test/example libraries.
-        if any(skip in str(lib_file) for skip in ("test", "example", "CMakeFiles")):
+        if any(skip in str(lib_file).lower() for skip in ("test", "example", "cmakefiles")):
             continue
         link_libs.append(str(lib_file))
-    # If no .a found, try linking .o files from build directory.
+    # If no libraries found, try linking non-test .o files from build directory.
     if not link_libs:
         build_dir = workdir / "build"
         if build_dir.exists():
-            obj_files = list(build_dir.rglob("*.o"))
-            # Only link if reasonable number of objects (not hundreds).
+            obj_files = [
+                o for o in build_dir.rglob("*.o")
+                if not any(skip in str(o).lower() for skip in ("test", "example", "main", "unity"))
+            ]
             if 0 < len(obj_files) <= 50:
                 link_libs.extend(str(o) for o in obj_files)
     # If still no object files or static libs, link source files directly
