@@ -431,6 +431,41 @@ async def list_crashes(
 
 
 @app.get(
+    "/crashes",
+    response_model=list[CrashResponse],
+    tags=["crashes"],
+)
+async def list_all_crashes(
+    vulnerability_type: str | None = None,
+    min_severity_score: int | None = None,
+) -> list[CrashResponse]:
+    """List all crashes discovered across all campaigns."""
+    async with get_session() as session:
+        stmt = select(Crash)
+        if vulnerability_type:
+            stmt = stmt.where(Crash.vulnerability_type == vulnerability_type)
+        if min_severity_score is not None:
+            stmt = stmt.where(Crash.severity_score >= min_severity_score)
+        crashes = (await session.execute(stmt)).scalars().all()
+        return [
+            CrashResponse(
+                id=c.id,
+                crash_type=c.crash_type,
+                severity=c.severity,
+                severity_score=c.severity_score,
+                vulnerability_type=c.vulnerability_type,
+                suggested_patch=c.suggested_patch,
+                stack_trace=c.stack_trace,
+                stack_hash=c.stack_hash,
+                signal=c.signal,
+                logs_path=c.logs_path,
+                created_at=c.created_at.isoformat(),
+            )
+            for c in crashes
+        ]
+
+
+@app.get(
     "/campaigns/{campaign_id}/crashes/{crash_id}",
     response_model=CrashDetailResponse,
     tags=["campaigns"],
