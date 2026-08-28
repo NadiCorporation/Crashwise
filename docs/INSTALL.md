@@ -29,9 +29,23 @@ crashwise version
 
 ---
 
-## LLM Provider Setup
+## LLM Provider Setup & Configuration
 
-Configure your preferred LLM provider in `.env` (or pass flags directly via CLI):
+Configure your preferred LLM provider and infrastructure settings via the interactive or headless wizard:
+
+```bash
+# Interactive configuration wizard
+crashwise configure
+
+# Headless / CI configuration
+crashwise configure --non-interactive \
+  --temporal-host=localhost:7233 \
+  --api-port=8000 \
+  --database-url=sqlite+aiosqlite:///./crashwise.db \
+  --workdir=/tmp/crashwise
+```
+
+Or configure `.env` directly:
 
 ```bash
 # DeepSeek (OpenAI-compatible)
@@ -59,9 +73,9 @@ crashwise setup
 ```
 
 This command:
-1. Detects the Linux distribution from `/etc/os-release`
-2. Installs Docker, Docker Compose v2, CMake, Clang, LLD, GCC, LLVM via the native package manager
-3. Installs AFL++ (from AUR on Arch, from `universe` on Ubuntu)
+1. Detects the Linux distribution from `/etc/os-release` (Alpine, Arch, Debian, Fedora, RHEL, Ubuntu)
+2. Installs Docker, Docker Compose v2, CMake, Clang, LLD, GCC, LLVM via the native package manager (`apk`, `pacman`, `apt`, `dnf`)
+3. Installs AFL++ (from AUR on Arch, from `universe` on Ubuntu, packages on Alpine/Fedora)
 4. Adds the current user to the `docker` group if missing
 5. Starts the Docker daemon if stopped
 
@@ -82,6 +96,12 @@ crashwise doctor
 ---
 
 ## Distro-Specific Notes
+
+### Alpine Linux
+
+```bash
+apk add python3 py3-pip git build-base cmake clang llvm
+```
 
 ### Arch Linux
 
@@ -130,7 +150,7 @@ This starts:
 | Redis | 6379 | Distributed state, heartbeats, deduplication |
 | MinIO | 9000 / 9001 | S3-compatible artifact storage |
 | CrashWise API | 8000 | FastAPI REST API & SSE telemetry |
-| CrashWise Web UI | 3000 | Next.js 14 Production Command Center |
+| CrashWise Web UI | 3000 | Next.js 14 7-Tab Production Command Center |
 
 ### Initialize database
 
@@ -145,6 +165,12 @@ crashwise init
 ```bash
 # Standard blocking run with automatic harness synthesis
 crashwise run https://github.com/madler/zlib --timeout 600
+
+# Monorepo / sub-directory target scoping & clone depth
+crashwise run https://github.com/google/re2 \
+  --target-subdir "re2" \
+  --target-clone-depth 1 \
+  --timeout 300
 
 # Granular configuration with custom engine flags, LLM routing, and MAB
 crashwise run targets/libtgvoip \

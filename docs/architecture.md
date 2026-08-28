@@ -82,13 +82,15 @@ crashwise run --repo <url> --timeout 600
 │  └─ Generic boundary-value seeds                                           │
 │                                                                            │
 │  Stage 2: Setup Target                                                     │
-│  ├─ git clone --recursive (shallow + full fallback)                        │
-│  ├─ Detect build system (CMake/Make/Meson/Bazel/Cargo/Go)                  │
+│  ├─ git clone --recursive (shallow depth or full clone based on config)    │
+│  ├─ Subdirectory scoping (target_subdir) for isolated monorepo targets    │
+│  ├─ Detect build system (CMake / Make / Meson / Bazel / Cargo / Go)       │
 │  ├─ Build with CC=clang CFLAGS="-fsanitize=address,undefined               │
 │  │   -fsanitize-coverage=trace-pc-guard,trace-cmp                          │
 │  │   -fprofile-instr-generate -fcoverage-mapping"                          │
+│  ├─ Multi-library ranking & bazel-bin/ artifact extraction                 │
 │  ├─ Find existing harness OR synthesize via LangGraph agent                │
-│  └─ Compile harness linked against target .a/.o files                      │
+│  └─ Compile harness linked against target .a/.so (atomic -Wl,-rpath)       │
 │                                                                            │
 │  Stage 3: Feedback Loop (N iterations)                                     │
 │  ├─ God-Mode gate: check pause/inject_seed/force_pivot signals             │
@@ -119,20 +121,31 @@ crashwise run --repo <url> --timeout 600
 
 ```
 crashwise/
-├── cli.py                          # Typer CLI (12 subcommands)
-├── api/main.py                     # FastAPI REST API (:8000)
+├── cli.py                          # Typer CLI (12 subcommands + non-interactive configure)
+├── api/main.py                     # FastAPI REST API & SSE control plane (:8000)
 ├── dashboard/app.py                # Streamlit prototype UI (:8501)
 ├── web/                            # Web Control Plane
 │   ├── app.py                      #   FastAPI sub-app with SSE telemetry (/api/v1)
 │   ├── models.py                   #   CrashTestCase & FuzzingCampaign ORM
 │   ├── hooks.py                    #   Crash persistence hooks
-│   └── frontend/                   #   Next.js 14 Dashboard (:3000)
+│   └── frontend/                   #   Next.js 14 7-Tab Control Plane (:3000)
+│       ├── app/page.tsx            #     Primary reactive dashboard tabs
+│       └── components/             #     Control modules
+│           ├── campaigns-table.tsx #       Live campaigns overview
+│           ├── telemetry.tsx       #       Global execution stats
+│           ├── crash-matrix.tsx    #       Deduplicated crash table
+│           ├── campaign-launcher.tsx #     Interactive campaign submission form
+│           ├── system-config.tsx   #       In-place .env configuration editor
+│           ├── worker-status.tsx   #       Worker health & heartbeat telemetry
+│           ├── crash-detail-modal.tsx #    Full crash & PoC inspection modal
+│           └── log-streamer.tsx    #       Real-time SSE log tail terminal
 ├── core/
-│   ├── config.py                   # Pydantic-settings (env + .env)
-│   ├── models.py                   # 40+ shared Pydantic models
-│   ├── database.py                 # SQLAlchemy async ORM (PostgreSQL / SQLite)
-│   ├── discovery.py                # Build system detection (6 systems)
-│   ├── sentinel.py                 # System diagnostics + provisioning
+│   ├── config.py                   # Pydantic-settings (CRASHWISE_WORKDIR, env + .env)
+│   ├── configure.py                # Interactive & headless CLI wizard
+│   ├── models.py                   # 40+ shared Pydantic models (target_subdir, clone_depth)
+│   ├── database.py                 # SQLAlchemy async ORM (PostgreSQL / SQLite, pooled)
+│   ├── discovery.py                # Multi-build system detection (CMake/Make/Meson/Bazel/Cargo/Go)
+│   ├── sentinel.py                 # Multi-distro system diagnostics + provisioning (apk/pacman/apt/dnf)
 │   ├── redis.py                    # Distributed state, heartbeats, and locks
 │   ├── storage.py                  # R2/S3/MinIO object storage
 │   ├── ai_provider.py              # Ollama/Venice/OpenAI-compatible inference
@@ -147,10 +160,12 @@ crashwise/
 │   │   ├── main.py                 # MainFuzzingWorkflow (God-Mode signals)
 │   │   └── verify_patch.py         # VerifyPatchWorkflow (autonomous fix verification)
 │   └── activities/                 # 28 registered activity implementations
+│       ├── setup_target.py         #   Monorepo scoping, Bazel/Meson/CMake multi-lib ranking
+│       └── execute_fuzzing.py      #   AsyncPG naive datetime persistence, container exec
 ├── agents/
 │   ├── harness_synth/              # LangGraph harness generation
 │   │   ├── graph.py                #   analyze → generate → validate state machine
-│   │   ├── nodes.py                #   LLM nodes + self-correction loop
+│   │   ├── nodes.py                #   LLM nodes + atomic -Wl,-rpath injection
 │   │   ├── analyzer.py             #   Entry point detection + header API discovery
 │   │   ├── compiler.py             #   Compilation + 5s sanity gate
 │   │   ├── validator.py            #   Safety checks (regex blocklist)
@@ -168,7 +183,7 @@ crashwise/
 │   ├── execution/                  # MAB strategist (Thompson Sampling + UCB1)
 │   └── reporting/                  # CVSS scoring + SARIF/MD report generation
 ├── execution/
-│   ├── docker_manager.py           # Hardened Docker container manager
+│   ├── docker_manager.py           # Hardened Docker container manager (--init, --network none)
 │   ├── qemu_manager.py             # QEMU/KVM VM management
 │   ├── monitor.py                  # Fuzzer stats parsing (AFL++ & libFuzzer)
 │   └── dispatcher.py               # Backend routing

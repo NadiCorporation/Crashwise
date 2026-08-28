@@ -25,9 +25,10 @@ Response time: 48 hours. Coordinated disclosure timeline negotiated per report.
 
 | Version | Supported |
 |---|---|
-| 1.1.x (current) | Yes |
-| 1.0.x | Security fixes only |
-| < 1.0 | No |
+| 1.3.x (current) | Yes |
+| 1.2.x | Yes |
+| 1.1.x | Security fixes only |
+| < 1.1 | No |
 
 ---
 
@@ -38,6 +39,7 @@ CrashWise processes **untrusted input** at multiple layers:
 | Layer | Untrusted Source | Mitigation |
 |---|---|---|
 | Target repository | Malicious `CMakeLists.txt`, `Makefile`, source code | Build runs in worker process (not sandboxed — see below) |
+| Monorepo scoping | Malicious `target_subdir` path | Strict path resolution & directory traversal sanitization |
 | LLM output | Harness code, compilation commands | Regex validator → `clang -fsyntax-only` → compiler allowlist → Docker sandbox |
 | Operator signals | `inject_seed` payload | Filename sanitization, base64 validation, size caps, path containment |
 | Crash data | ASAN output, GDB backtraces | Wrapped in `<UNTRUSTED_TARGET_SOURCE>` markers in LLM prompts |

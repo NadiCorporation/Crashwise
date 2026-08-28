@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.0] — 2026-08-28
+
+### Adaptive Linux Installation, Monorepo Support & Next.js Control Plane
+
+#### Adaptive Installation & Zero Hardcodes (R1)
+- **Multi-Distro Dynamic Provisioning** (`crashwise/core/sentinel.py`): Extended OS detection and package installation maps to support Alpine Linux (`apk`), Arch Linux (`pacman`), Fedora/RHEL (`dnf`), and Debian/Ubuntu (`apt`) without hardcoded distro assumptions.
+- **Configurable Workdir & Timeouts** (`crashwise/core/config.py`, `crashwise/orchestration/activities/setup_target.py`): Added `CRASHWISE_WORKDIR` env var (default `/tmp/crashwise`) and `CRASHWISE_BUILD_TIMEOUT` (default `900s`), eliminating hardcoded filesystem paths.
+- **Headless Non-Interactive Configuration** (`crashwise/core/configure.py`, `crashwise/cli.py`): Added Section 3 (Infrastructure setup) and full non-interactive CLI support (`crashwise configure --non-interactive ...`) for automated provisioning and CI/CD pipelines.
+- **Parameterized Docker Compose** (`docker-compose.yaml`, `.env.example`): Converted all credentials and service ports to `${VAR:-default}` syntax for seamless environment variable overrides.
+
+#### Complex Target & Monorepo Support (R2)
+- **Monorepo Sub-Directory Target Scoping** (`crashwise/core/models.py`, `crashwise/orchestration/activities/setup_target.py`): Added `target_subdir` to `CampaignCreateRequest` and `SetupTargetInput` with directory traversal protection. Scopes build system detection, compilation, and harness generation to targeted sub-libraries.
+- **Configurable Clone Depth** (`crashwise/orchestration/activities/setup_target.py`): Added `target_clone_depth` (`0` for full git clone, `1` for shallow clone by default).
+- **Build System Upgrades** (`crashwise/core/discovery.py`, `crashwise/orchestration/activities/setup_target.py`):
+  - **Bazel**: Added build command detection, `--copt` sanitizer flag injection, and extraction of static/shared libraries from `bazel-bin/`.
+  - **Meson**: Configured with `--reconfigure` and `--wrap-mode=nofallback` to ensure complete sanitizer flag passthrough.
+  - **CMake Multi-Library Ranking**: Dynamically ranks and selects the most relevant compiled library matching `target_name` for harness linking.
+- **Shared Library RPATH Injection** (`crashwise/agents/harness_synth/nodes.py`): Injected `-Wl,-rpath,<lib_dir>` to ensure dynamically linked `.so` binaries locate dependent libraries at runtime.
+
+#### Full Next.js Web UI Control Plane & FastAPI Backend (R3)
+- **7-Tab Operator Command Center** (`crashwise/web/frontend/`): Upgraded Next.js 14 dashboard to feature 7 distinct tabs:
+  - ⚡ **Live**: Real-time telemetry, campaign statuses, active execution states.
+  - 🔴 **Crashes**: Deduplicated crash matrix with severity coloring.
+  - 🎛️ **God-Mode**: Live Temporal signal dispatch (pause, resume, force pivot).
+  - 🚀 **Launcher** (`components/campaign-launcher.tsx`): Interactive form to launch new campaigns (supports monorepo subdir, sanitizers, LLM providers, MAB, self-healing).
+  - ⚙️ **Configuration** (`components/system-config.tsx`): Live `.env` editor with masked secret keys (reveal toggle) and restart indicators.
+  - 👷 **Worker Status** (`components/worker-status.tsx`): Live worker health cards, uptime, and task queue monitoring.
+  - 📜 **Live Logs** (`components/log-streamer.tsx`): SSE terminal stream with campaign ID filtering.
+- **FastAPI Backend Extensions** (`crashwise/api/main.py`): Added `GET/POST /api/config`, `GET /api/workers`, `GET /campaigns/{id}/crashes/{crash_id}`, and `GET /api/logs/stream`.
+- **Zero CDN Dependencies**: Self-contained Tailwind CSS dark theme with clean production builds (`npm run build`).
+
+#### Runtime Fixes & Verification
+- **PostgreSQL AsyncPG Naive Datetime Fix** (`crashwise/orchestration/activities/execute_fuzzing.py`): Replaced timezone-aware UTC datetimes with naive UTC datetimes for `TIMESTAMP WITHOUT TIME ZONE` compatibility.
+- **Ubuntu 24.04 GLIBC 2.38 Image Base** (`Dockerfile.worker`): Rebuilt worker container on Ubuntu 24.04 with native AFL++ 4.09c and Clang 18 to resolve GLIBC ABI mismatch between host and container.
+- **Harness Synthesis Scope Fix** (`crashwise/agents/harness_synth/nodes.py`): Resolved `UnboundLocalError` on `extra_link_args` before library discovery loop.
+- **Test Suite**: Expanded test suite to **786 passed unit and integration tests** with 0 regressions.
+
+---
+
 ## [1.2.0] — 2026-08-27
 
 ### Community-Grade Hardening & Multi-Provider Engine

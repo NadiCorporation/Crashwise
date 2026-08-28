@@ -66,14 +66,14 @@ See [docs/INSTALL.md](docs/INSTALL.md) for full setup.
 | Command | Description |
 |---|---|
 | `crashwise init` | Detect build system, generate `crashwise.yaml` manifest & create DB tables |
-| `crashwise configure` | Interactive setup wizard for LLM providers (Anthropic, OpenAI, Venice, Ollama) |
-| `crashwise run <repo-url>` | Submit fuzzing campaign (blocking or manifest-driven) |
+| `crashwise configure` | Interactive & headless setup wizard for LLM providers and infrastructure (`--non-interactive`) |
+| `crashwise run <repo-url>` | Submit fuzzing campaign (supports `--target-subdir`, `--target-clone-depth`) |
 | `crashwise run --detach <url>` | Submit campaign and return immediately with workflow ID |
-| `crashwise doctor` | Run system health diagnostics (Docker, compilers, memory, services) |
-| `crashwise setup` | Auto-install missing build tools and configure Docker permissions |
+| `crashwise doctor` | Run system health diagnostics (Docker, compilers, memory, services across distros) |
+| `crashwise setup` | Auto-install missing build tools across Debian/Ubuntu, Arch, Fedora/RHEL, and Alpine |
 | `crashwise worker` | Start a Temporal worker polling the task queue |
-| `crashwise api` | Launch the FastAPI management server on `localhost:8000` |
-| `crashwise dashboard` | Launch the Streamlit dashboard on `localhost:8501` |
+| `crashwise api` | Launch the FastAPI management server & SSE telemetry backend |
+| `crashwise dashboard` | Launch the Streamlit dashboard or Next.js 14 Control Plane on `localhost:3000` |
 | `crashwise signal <id> <signal>` | Dispatch God-Mode signals (`pause_hunt`, `resume_hunt`, `force_pivot`, `inject_seed`) |
 | `crashwise exploit <crash_id>` | Synthesize, compile, and verify standalone C PoC exploit for a crash |
 | `crashwise info` / `version` | Display runtime configuration and version metadata |
@@ -114,14 +114,19 @@ MODEL_NAME=llama3.1:8b
 | `MAX_TOKENS` | `4096` | Max token budget per turn |
 | `REASONING_EFFORT` | `medium` | Reasoning effort parameter (`low`, `medium`, `high`) for reasoning models |
 | `AI_PROVIDER` | `openai_compatible` | Crash triage backend (`openai_compatible`, `ollama`, `venice`) |
+| `CRASHWISE_WORKDIR` | `/tmp/crashwise` | Working directory root for target cloning and build sandboxes |
+| `CRASHWISE_BUILD_TIMEOUT` | `900` | Target build timeout in seconds |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./crashwise.db` | Async SQLAlchemy URL (`postgresql+asyncpg://...` in prod) |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis for distributed state, heartbeats, and dedup |
 | `TEMPORAL_HOST` | `localhost:7233` | Temporal server address |
+| `CRASHWISE_API_PORT` | `8000` | FastAPI management server listening port |
 
 ### Granular CLI Knobs
 
 ```bash
 crashwise run <target> \
+  --target-subdir "components/parser" \
+  --target-clone-depth 1 \
   --fuzzer libfuzzer \
   --sanitizers address,undefined \
   --custom-flags "-dict=json.dict -max_len=1024" \
@@ -215,12 +220,14 @@ See [docs/architecture.md](docs/architecture.md) for the full technical referenc
 
 | Compatible | Requires Manual Tuning | Unsupported |
 |---|---|---|
-| C/C++ libraries with CMake/Make/Meson | Bazel builds, complex monorepos | Closed-source binaries |
-| Parser libraries (image, archive, crypto, font, JSON) | Custom toolchains, autotools edge cases | Windows-only (MSVC) |
-| Projects with existing fuzz harnesses | Deeply nested struct-init APIs | Managed languages |
-| Standard `(buf, size)` entry points | Callback-driven APIs (SAX parsers) | Network daemons (stateful protocols) |
+| C/C++ libraries with CMake / Make / Meson / Bazel | Custom exotic proprietary toolchains | Closed-source binaries without symbols |
+| Monorepos & sub-projects (`--target-subdir`) | Deeply nested struct-init APIs | Windows-only (MSVC) |
+| Multi-library CMake trees (automatic target ranking) | Callback-driven APIs (SAX parsers) | Managed languages (Java/C#) |
+| Parser libraries (image, archive, crypto, font, JSON) | Complex kernel state machines | Network daemons (stateful protocols) |
+| Projects with existing fuzz harnesses | | |
+| Standard `(buf, size)` entry points | | |
 
-Validated targets: libtgvoip (Telegram VoIP json11), zlib, libpng, libjpeg-turbo, freetype, openssl, libxml2, harfbuzz, libarchive, pcre2.
+Validated targets: libtgvoip (Telegram VoIP json11), zlib, libpng, libjpeg-turbo, freetype, openssl, libxml2, harfbuzz, libarchive, pcre2, re2, libevent.
 
 ---
 
