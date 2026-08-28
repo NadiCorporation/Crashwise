@@ -33,12 +33,30 @@ def _find_target_source_file(workspace_path: Path) -> Path | None:
     if not workspace_path.exists():
         return None
 
-    # First pass: search for non-test, non-build C/C++ implementation files
+    # First pass: try smart header-aware API discovery
+    try:
+        from crashwise.orchestration.activities.setup_target import _find_best_source_for_synthesis
+        best = _find_best_source_for_synthesis(workspace_path)
+        if best and Path(best).exists():
+            return Path(best)
+    except Exception:
+        pass
+
+    skip_dirs = {
+        "test", "tests", "build", "cmakefiles", "example", "examples",
+        "fuzz", "fuzzing", "docs", "doc", ".git", "third_party", "vendor",
+    }
+
+    # Second pass: search for non-test, non-build C/C++ implementation files
     for ext in [".c", ".cpp", ".cc", ".cxx"]:
         candidates = list(workspace_path.rglob(f"*{ext}"))
         filtered = []
         for c in candidates:
-            if any(k in str(c).lower() for k in ("test", "build", "example", "fuzz")):
+            try:
+                rel_parts = [p.lower() for p in c.relative_to(workspace_path).parts[:-1]]
+            except ValueError:
+                rel_parts = [p.lower() for p in c.parts[:-1]]
+            if any(k in skip_dirs or k.startswith(".") for k in rel_parts):
                 continue
             try:
                 if "LLVMFuzzerTestOneInput" in c.read_text(encoding="utf-8", errors="ignore"):
@@ -49,18 +67,17 @@ def _find_target_source_file(workspace_path: Path) -> Path | None:
 
         if filtered:
             return filtered[0]
-        if candidates:
-            # Fallback to any file with matching extension if all were filtered
-            non_build = [c for c in candidates if "build" not in str(c).lower()]
-            if non_build:
-                return non_build[0]
 
-    # Second pass: headers as last resort
+    # Third pass: headers as last resort
     for ext in [".h", ".hpp"]:
         candidates = list(workspace_path.rglob(f"*{ext}"))
-        filtered = [c for c in candidates if "build" not in str(c).lower()]
-        if filtered:
-            return filtered[0]
+        for c in candidates:
+            try:
+                rel_parts = [p.lower() for p in c.relative_to(workspace_path).parts[:-1]]
+            except ValueError:
+                rel_parts = [p.lower() for p in c.parts[:-1]]
+            if not any(k in skip_dirs or k.startswith(".") for k in rel_parts):
+                return c
 
     return None
 
