@@ -104,6 +104,9 @@ class FuzzingInput(_StrictModel):
     """
 
     target_repo: str = Field(..., min_length=1, max_length=1024, description="Git URL or directory path of target project")
+    target_name: str | None = Field(default=None, max_length=128, description="Target name or identifier")
+    target_subdir: str | None = Field(default=None, max_length=512, description="Monorepo subdirectory path")
+    target_clone_depth: int = Field(default=1, ge=0, description="Git clone depth (0 for full clone)")
     fuzzer_type: FuzzerType = Field(default=FuzzerType.LIBFUZZER)
     timeout_seconds: int = Field(default=600, ge=10, le=86_400)
 
@@ -255,6 +258,9 @@ class SetupTargetInput(_StrictModel):
     """Input to the ``setup_target`` activity."""
 
     target_repo: str = Field(..., min_length=1, max_length=1024, description="Git URL or directory path of target project")
+    target_name: str | None = Field(default=None, max_length=128, description="Target name or identifier")
+    target_subdir: str | None = Field(default=None, max_length=512, description="Monorepo subdirectory path")
+    target_clone_depth: int = Field(default=1, ge=0, description="Git clone depth (0 for full clone)")
     target_branch: str | None = None
     sanitizers: str = "address,undefined"
     target_source_path: str | None = None

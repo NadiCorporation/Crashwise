@@ -9,7 +9,7 @@ fail fast with structured error info.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -173,7 +173,7 @@ async def update_verification_status(
                 crash.verification_status = status
                 crash.verification_stdout = stdout[:8192]
                 crash.verification_stderr = stderr[:8192]
-                crash.verified_at = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+                crash.verified_at = datetime.now(tz=UTC).replace(tzinfo=None)
                 await session.commit()
                 log.info("update_verification_status.complete", crash_id=crash_id)
             else:

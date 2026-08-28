@@ -75,7 +75,14 @@ def _mock_clone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
     st_module = sys.modules["crashwise.orchestration.activities.setup_target"]
 
-    async def _fake_clone(repo_url: str, branch: str | None, workdir: Path) -> str:
+    async def _fake_clone(
+        repo_url: str,
+        branch: str | None,
+        workdir: Path,
+        clone_depth: int = 1,
+        *args: object,
+        **kwargs: object,
+    ) -> str:
         (workdir / "main.c").write_text("int main() { return 0; }\n")
         return "abc123deadbeef"
 

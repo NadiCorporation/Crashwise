@@ -2,9 +2,8 @@
 # Copyright (c) 2026 CrashWise Contributors
 """Tests for the universal multi-provider LLM factory."""
 
-import pytest
 from crashwise.core.config import Settings
-from crashwise.core.llm_factory import get_llm_provider, _detect_provider
+from crashwise.core.llm_factory import _detect_provider, get_llm_provider
 
 
 def test_detect_provider():

@@ -14,7 +14,6 @@ from crashwise.core.models import (
     FuzzingInput,
     SetupTargetInput,
     SynthesizeHarnessInput,
-    SynthesizeHarnessOutput,
 )
 from crashwise.orchestration.activities.setup_target import _clone_repo
 from crashwise.orchestration.activities.synthesize_harness import (

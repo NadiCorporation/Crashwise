@@ -33,6 +33,7 @@ class BuildPaths:
             args.append(str(lib))
         for ld in self.lib_dirs:
             args.append(f"-L{ld}")
+            args.append(f"-Wl,-rpath,{ld.resolve()}")
         return args
 
 

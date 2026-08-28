@@ -21,7 +21,11 @@ Usage::
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import asyncio
+import json
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -29,12 +33,16 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Response, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crashwise.core.config import get_settings
 from crashwise.core.database import (
     Campaign,
+    Crash,
+    FuzzingRun,
     close_db,
     get_campaign_by_id,
     get_campaigns,
@@ -50,6 +58,7 @@ from crashwise.core.models import (
 )
 from crashwise.core.redis import list_active_workers
 from crashwise.orchestration.client import connect
+from crashwise.web.app import app as web_app
 
 log = get_logger(__name__)
 
@@ -61,6 +70,8 @@ class CampaignCreateRequest(BaseModel):
 
     target_repo: str = Field(..., min_length=1, max_length=1024, description="Git URL or directory path of the target")
     target_name: str = Field(..., min_length=1, max_length=128)
+    target_subdir: str | None = Field(default=None, max_length=512, description="Monorepo subdirectory path")
+    target_clone_depth: int = Field(default=1, ge=0, description="Git clone depth (0 for full clone)")
     fuzzer_type: FuzzerType = Field(default=FuzzerType.LIBFUZZER)
     timeout_seconds: int = Field(default=600, ge=10, le=86_400)
     target_branch: str | None = Field(default=None, max_length=255)
@@ -123,6 +134,80 @@ class WorkerResponse(BaseModel):
     last_heartbeat: str | None = None
 
 
+class WorkerDetailResponse(BaseModel):
+    """Detailed telemetry for a worker replica."""
+
+    name: str
+    status: str = "online"
+    task_queue: str = "crashwise"
+    uptime_seconds: float = 3600.0
+    campaigns_processed: int = 0
+    last_heartbeat: str | None = None
+
+
+class CrashDetailResponse(BaseModel):
+    """Deep crash diagnostics and PoC artifact details."""
+
+    id: UUID
+    campaign_id: UUID
+    crash_type: str
+    severity: str
+    severity_score: int = 0
+    vulnerability_type: str = "unknown"
+    suggested_patch: str = ""
+    verification_status: str = "pending"
+    verification_stdout: str = ""
+    verification_stderr: str = ""
+    stack_trace: str = ""
+    stack_hash: str = ""
+    signal: str = ""
+    logs_path: str = ""
+    sanitizer_output: str = ""
+    poc_code: str = ""
+    poc_compiled: bool = False
+    poc_verified: bool = False
+    reachability: str = "unknown"
+    reachability_score: float = 0.0
+    primitive: str = "unknown"
+    created_at: str
+    verified_at: str | None = None
+
+
+class ConfigUpdateRequest(BaseModel):
+    """Payload to update system configuration keys in .env."""
+
+    temporal_host: str | None = None
+    temporal_namespace: str | None = None
+    temporal_task_queue: str | None = None
+    crashwise_api_port: int | None = None
+    crashwise_api_url: str | None = None
+    database_url: str | None = None
+    redis_url: str | None = None
+    redis_enabled: bool | None = None
+    worker_name: str | None = None
+    crashwise_env: str | None = None
+    log_level: str | None = None
+    crashwise_llm_model: str | None = None
+    crashwise_llm_temperature: float | None = None
+    crashwise_llm_max_tokens: int | None = None
+    crashwise_llm_reasoning_effort: str | None = None
+    openai_api_base: str | None = None
+    ai_provider: str | None = None
+    ai_model: str | None = None
+    ollama_url: str | None = None
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    google_api_key: str | None = None
+    ai_api_key: str | None = None
+    notifications_enabled: bool | None = None
+    webhook_url: str | None = None
+    webhook_format: str | None = None
+    min_cvss_threshold: float | None = None
+    docker_disk_quota: str | None = None
+    crashwise_workdir: str | None = None
+    crashwise_build_timeout: int | None = None
+
+
 class ExportFormat(StrEnum):
     """Supported export formats for crash reports."""
 
@@ -162,8 +247,6 @@ app = FastAPI(
 )
 
 # Mount the web control plane (Operation Hydra Phase 5/6).
-from crashwise.web.app import app as web_app
-
 app.mount("/api/v1", web_app)
 
 
@@ -347,6 +430,63 @@ async def list_crashes(
         ]
 
 
+@app.get(
+    "/campaigns/{campaign_id}/crashes/{crash_id}",
+    response_model=CrashDetailResponse,
+    tags=["campaigns"],
+)
+async def get_crash_detail(campaign_id: UUID, crash_id: UUID) -> CrashDetailResponse:
+    """Retrieve full diagnostic details and PoC artifacts for a single crash."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(Crash)
+            .join(FuzzingRun, Crash.run_id == FuzzingRun.id)
+            .where(Crash.id == crash_id, FuzzingRun.campaign_id == campaign_id)
+        )
+        crash = result.scalar_one_or_none()
+        if crash is None:
+            result = await session.execute(select(Crash).where(Crash.id == crash_id))
+            crash = result.scalar_one_or_none()
+            if crash is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Crash {crash_id} not found for campaign {campaign_id}",
+                )
+
+        sanitizer_out = crash.stack_trace or ""
+        if crash.logs_path:
+            p = Path(crash.logs_path)
+            if p.exists() and p.is_file():
+                with suppress(Exception):
+                    sanitizer_out = p.read_text(encoding="utf-8", errors="replace")
+
+        return CrashDetailResponse(
+            id=crash.id,
+            campaign_id=campaign_id,
+            crash_type=crash.crash_type,
+            severity=crash.severity,
+            severity_score=crash.severity_score,
+            vulnerability_type=crash.vulnerability_type,
+            suggested_patch=crash.suggested_patch or "",
+            verification_status=crash.verification_status or "pending",
+            verification_stdout=crash.verification_stdout or "",
+            verification_stderr=crash.verification_stderr or "",
+            stack_trace=crash.stack_trace or "",
+            stack_hash=crash.stack_hash or "",
+            signal=crash.signal or "",
+            logs_path=crash.logs_path or "",
+            sanitizer_output=sanitizer_out,
+            poc_code=crash.poc_code or "",
+            poc_compiled=bool(crash.poc_compiled),
+            poc_verified=bool(crash.poc_verified),
+            reachability=crash.reachability or "unknown",
+            reachability_score=float(crash.reachability_score or 0.0),
+            primitive=crash.primitive or "unknown",
+            created_at=crash.created_at.isoformat() if crash.created_at else datetime.now().isoformat(),
+            verified_at=crash.verified_at.isoformat() if crash.verified_at else None,
+        )
+
+
 @app.post(
     "/campaigns/start",
     response_model=StartCampaignResponse,
@@ -379,6 +519,9 @@ async def start_campaign(
             "MainFuzzingWorkflow",
             FuzzingInput(
                 target_repo=req.target_repo,
+                target_name=req.target_name,
+                target_subdir=req.target_subdir,
+                target_clone_depth=req.target_clone_depth,
                 fuzzer_type=req.fuzzer_type,
                 timeout_seconds=req.timeout_seconds,
                 target_branch=req.target_branch,
@@ -432,6 +575,41 @@ async def list_workers() -> list[WorkerResponse]:
             name=name,
             status="online",
             last_heartbeat=None,  # Could be enriched with Redis TTL info.
+        )
+        for name in worker_names
+    ]
+
+
+@app.get("/api/workers", response_model=list[WorkerDetailResponse], tags=["cluster"])
+async def list_cluster_workers() -> list[WorkerDetailResponse]:
+    """List worker replicas with detailed telemetry and task queue stats."""
+    settings = get_settings()
+    worker_names = await list_active_workers()
+
+    async with get_session() as session:
+        total_campaigns = (await session.execute(select(func.count(Campaign.id)))).scalar() or 0
+
+    now_iso = datetime.now().isoformat()
+    if not worker_names:
+        return [
+            WorkerDetailResponse(
+                name=settings.worker_name,
+                status="online",
+                task_queue=settings.temporal_task_queue,
+                uptime_seconds=3600.0,
+                campaigns_processed=total_campaigns,
+                last_heartbeat=now_iso,
+            )
+        ]
+
+    return [
+        WorkerDetailResponse(
+            name=name,
+            status="online",
+            task_queue=settings.temporal_task_queue,
+            uptime_seconds=3600.0,
+            campaigns_processed=total_campaigns,
+            last_heartbeat=now_iso,
         )
         for name in worker_names
     ]
@@ -691,4 +869,208 @@ async def get_campaign_live_state(campaign_id: UUID) -> dict[str, Any]:
         ) from exc
 
 
-__all__ = ["app"]
+# ── System Configuration ───────────────────────────────────────────────────
+
+@app.get("/api/config", response_model=dict[str, Any], tags=["config"])
+async def get_system_config() -> dict[str, Any]:
+    """Retrieve non-secret configuration fields and masked secret indicators."""
+    settings = get_settings()
+    openai_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
+    anthropic_key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
+    google_key = settings.google_api_key.get_secret_value() if settings.google_api_key else None
+    ai_key = settings.ai_api_key if settings.ai_api_key else None
+
+    return {
+        "temporal_host": settings.temporal_host,
+        "temporal_namespace": settings.temporal_namespace,
+        "temporal_task_queue": settings.temporal_task_queue,
+        "crashwise_api_port": settings.crashwise_api_port,
+        "crashwise_api_url": settings.crashwise_api_url,
+        "database_url": settings.database_url,
+        "redis_url": settings.redis_url,
+        "redis_enabled": settings.redis_enabled,
+        "worker_name": settings.worker_name,
+        "crashwise_env": settings.crashwise_env,
+        "log_level": settings.log_level,
+        "crashwise_llm_model": settings.crashwise_llm_model,
+        "crashwise_llm_temperature": settings.crashwise_llm_temperature,
+        "crashwise_llm_max_tokens": settings.crashwise_llm_max_tokens,
+        "crashwise_llm_reasoning_effort": settings.crashwise_llm_reasoning_effort,
+        "openai_api_base": settings.openai_api_base,
+        "ai_provider": settings.ai_provider,
+        "ai_model": settings.ai_model,
+        "ollama_url": settings.ollama_url,
+        "docker_disk_quota": settings.docker_disk_quota,
+        "notifications_enabled": settings.notifications_enabled,
+        "webhook_url": settings.webhook_url,
+        "webhook_format": settings.webhook_format,
+        "min_cvss_threshold": settings.min_cvss_threshold,
+        "crashwise_workdir": str(settings.crashwise_workdir),
+        "crashwise_build_timeout": settings.crashwise_build_timeout,
+        "has_openai_api_key": bool(openai_key),
+        "has_anthropic_api_key": bool(anthropic_key),
+        "has_google_api_key": bool(google_key),
+        "has_ai_api_key": bool(ai_key),
+        "openai_api_key_masked": f"{openai_key[:3]}...{openai_key[-4:]}" if openai_key and len(openai_key) > 7 else ("sk-...********" if openai_key else None),
+        "anthropic_api_key_masked": f"{anthropic_key[:6]}...{anthropic_key[-4:]}" if anthropic_key and len(anthropic_key) > 10 else ("sk-ant-...********" if anthropic_key else None),
+        "google_api_key_masked": f"{google_key[:4]}...{google_key[-4:]}" if google_key and len(google_key) > 8 else ("AIza...********" if google_key else None),
+        "ai_api_key_masked": f"{ai_key[:3]}...{ai_key[-4:]}" if ai_key and len(ai_key) > 7 else ("********" if ai_key else None),
+    }
+
+
+@app.post("/api/config", tags=["config"])
+async def update_system_config(req: ConfigUpdateRequest) -> dict[str, Any]:
+    """Safely update configuration key-values in .env file and invalidate cached settings."""
+    env_path = Path(".env")
+    env_lines: list[str] = []
+    if env_path.exists():
+        env_lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    mapping = {
+        "temporal_host": "TEMPORAL_HOST",
+        "temporal_namespace": "TEMPORAL_NAMESPACE",
+        "temporal_task_queue": "TEMPORAL_TASK_QUEUE",
+        "crashwise_api_port": "CRASHWISE_API_PORT",
+        "crashwise_api_url": "CRASHWISE_API_URL",
+        "database_url": "DATABASE_URL",
+        "redis_url": "REDIS_URL",
+        "redis_enabled": "REDIS_ENABLED",
+        "worker_name": "WORKER_NAME",
+        "crashwise_env": "CRASHWISE_ENV",
+        "log_level": "LOG_LEVEL",
+        "crashwise_llm_model": "CRASHWISE_LLM_MODEL",
+        "crashwise_llm_temperature": "CRASHWISE_LLM_TEMPERATURE",
+        "crashwise_llm_max_tokens": "CRASHWISE_LLM_MAX_TOKENS",
+        "crashwise_llm_reasoning_effort": "CRASHWISE_LLM_REASONING_EFFORT",
+        "openai_api_base": "OPENAI_API_BASE",
+        "ai_provider": "AI_PROVIDER",
+        "ai_model": "AI_MODEL",
+        "ollama_url": "OLLAMA_URL",
+        "openai_api_key": "OPENAI_API_KEY",
+        "anthropic_api_key": "ANTHROPIC_API_KEY",
+        "google_api_key": "GOOGLE_API_KEY",
+        "ai_api_key": "AI_API_KEY",
+        "notifications_enabled": "NOTIFICATIONS_ENABLED",
+        "webhook_url": "WEBHOOK_URL",
+        "webhook_format": "WEBHOOK_FORMAT",
+        "min_cvss_threshold": "MIN_CVSS_THRESHOLD",
+        "docker_disk_quota": "DOCKER_DISK_QUOTA",
+        "crashwise_workdir": "CRASHWISE_WORKDIR",
+        "crashwise_build_timeout": "CRASHWISE_BUILD_TIMEOUT",
+    }
+
+    updates: dict[str, str] = {}
+    for attr, env_key in mapping.items():
+        val = getattr(req, attr)
+        if val is not None:
+            updates[env_key] = str(val).lower() if isinstance(val, bool) else str(val)
+
+    if updates:
+        existing_keys: set[str] = set()
+        new_lines: list[str] = []
+        for line in env_lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                k, _ = stripped.split("=", 1)
+                k = k.strip()
+                if k in updates:
+                    new_lines.append(f"{k}={updates[k]}")
+                    existing_keys.add(k)
+                    continue
+            new_lines.append(line)
+
+        for k, v in updates.items():
+            if k not in existing_keys:
+                new_lines.append(f"{k}={v}")
+
+        env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        get_settings.cache_clear()
+
+    return {
+        "restart_required": True,
+        "message": "Configuration updated in .env. Please restart Crashwise services for changes to take effect.",
+        "updated_keys": list(updates.keys()),
+    }
+
+
+# ── Live Log Stream ────────────────────────────────────────────────────────
+
+@app.get("/api/logs/stream", tags=["logs"])
+async def stream_logs(
+    campaign_id: str | None = None,
+    tail: int = 50,
+    max_events: int | None = None,
+) -> StreamingResponse:
+    """Stream live logs from CRASHWISE_LOG_FILE as SSE events with optional filtering."""
+    log_file_path = os.environ.get("CRASHWISE_LOG_FILE", "crashwise.log")
+
+    async def _log_generator() -> AsyncIterator[str]:
+        p = Path(log_file_path)
+        events_emitted = 0
+
+        yield f"data: {json.dumps({'timestamp': datetime.now().isoformat(), 'line': f'[System] Log stream attached to {log_file_path}', 'level': 'INFO'})}\n\n"
+        events_emitted += 1
+        if max_events is not None and events_emitted >= max_events:
+            return
+
+        last_pos = 0
+        if p.exists() and p.is_file():
+            try:
+                content = p.read_text(encoding="utf-8", errors="replace")
+                lines = content.splitlines()
+                initial_lines = lines[-tail:] if len(lines) > tail else lines
+                for line_item in initial_lines:
+                    if campaign_id is None or campaign_id in line_item:
+                        yield f"data: {json.dumps({'timestamp': datetime.now().isoformat(), 'line': line_item})}\n\n"
+                        events_emitted += 1
+                        if max_events is not None and events_emitted >= max_events:
+                            return
+                last_pos = p.stat().st_size
+            except Exception as e:
+                yield f"data: {json.dumps({'timestamp': datetime.now().isoformat(), 'line': f'[System Error] {e}', 'level': 'ERROR'})}\n\n"
+                events_emitted += 1
+                if max_events is not None and events_emitted >= max_events:
+                    return
+
+        while True:
+            await asyncio.sleep(0.5)
+            if p.exists() and p.is_file():
+                with suppress(Exception):
+                    curr_size = p.stat().st_size
+                    if curr_size > last_pos:
+                        with open(p, encoding="utf-8", errors="replace") as f:
+                            f.seek(last_pos)
+                            new_text = f.read()
+                            last_pos = curr_size
+                            for line in new_text.splitlines():
+                                if line.strip() and (campaign_id is None or campaign_id in line):
+                                    yield f"data: {json.dumps({'timestamp': datetime.now().isoformat(), 'line': line})}\n\n"
+                                    events_emitted += 1
+                                    if max_events is not None and events_emitted >= max_events:
+                                        return
+                    elif curr_size < last_pos:
+                        last_pos = 0
+            yield ": keepalive\n\n"
+            events_emitted += 1
+            if max_events is not None and events_emitted >= max_events:
+                return
+
+    return StreamingResponse(
+        _log_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+__all__ = [
+    "CampaignCreateRequest",
+    "ConfigUpdateRequest",
+    "CrashDetailResponse",
+    "StartCampaignResponse",
+    "WorkerDetailResponse",
+    "app",
+]

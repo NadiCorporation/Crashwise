@@ -26,6 +26,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import typer
 import uvicorn
@@ -66,16 +67,136 @@ def version() -> None:
 
 
 @app.command()
-def configure() -> None:
-    """Interactive LLM provider setup wizard.
+def configure(
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="Run non-interactively and apply CLI options directly to .env",
+    ),
+    env_file: Path = typer.Option(
+        Path(".env"),
+        "--env-file",
+        help="Path to .env configuration file",
+    ),
+    api_port: int | None = typer.Option(
+        None,
+        "--api-port",
+        help="CrashWise API server port (CRASHWISE_API_PORT)",
+    ),
+    temporal_host: str | None = typer.Option(
+        None,
+        "--temporal-host",
+        help="Temporal orchestrator host:port (TEMPORAL_HOST)",
+    ),
+    temporal_namespace: str | None = typer.Option(
+        None,
+        "--temporal-namespace",
+        help="Temporal namespace (TEMPORAL_NAMESPACE)",
+    ),
+    temporal_task_queue: str | None = typer.Option(
+        None,
+        "--temporal-task-queue",
+        help="Temporal task queue (TEMPORAL_TASK_QUEUE)",
+    ),
+    database_url: str | None = typer.Option(
+        None,
+        "--database-url",
+        help="SQLAlchemy database URL (DATABASE_URL)",
+    ),
+    redis_url: str | None = typer.Option(
+        None,
+        "--redis-url",
+        help="Redis URL (REDIS_URL)",
+    ),
+    worker_name: str | None = typer.Option(
+        None,
+        "--worker-name",
+        help="Worker name identifier (WORKER_NAME)",
+    ),
+    workdir: Path | None = typer.Option(
+        None,
+        "--workdir",
+        help="Root target workdir path (CRASHWISE_WORKDIR)",
+    ),
+    build_timeout: int | None = typer.Option(
+        None,
+        "--build-timeout",
+        help="Target build timeout in seconds (CRASHWISE_BUILD_TIMEOUT)",
+    ),
+    llm_provider: str | None = typer.Option(
+        None,
+        "--llm-provider",
+        help="LLM provider for agentic workflows (anthropic/openai/ollama/custom)",
+    ),
+    llm_model: str | None = typer.Option(
+        None,
+        "--llm-model",
+        help="LLM model name (CRASHWISE_LLM_MODEL)",
+    ),
+    llm_api_key: str | None = typer.Option(
+        None,
+        "--llm-api-key",
+        help="API key for agentic LLM provider",
+    ),
+    openai_api_base: str | None = typer.Option(
+        None,
+        "--openai-api-base",
+        help="Custom OpenAI-compatible base URL (OPENAI_API_BASE)",
+    ),
+    ai_provider: str | None = typer.Option(
+        None,
+        "--ai-provider",
+        help="AI provider for crash triage (ollama/venice/openai_compatible/none)",
+    ),
+    ai_model: str | None = typer.Option(
+        None,
+        "--ai-model",
+        help="AI model for crash triage (AI_MODEL)",
+    ),
+    ai_api_key: str | None = typer.Option(
+        None,
+        "--ai-api-key",
+        help="API key for crash triage (AI_API_KEY)",
+    ),
+    ollama_url: str | None = typer.Option(
+        None,
+        "--ollama-url",
+        help="Ollama base URL (OLLAMA_URL)",
+    ),
+) -> None:
+    """Configure CrashWise AI providers, infrastructure, and runtime settings.
 
-    Guides you through choosing AI providers for agentic workflows
-    (harness synthesis, evolution) and crash triage (root-cause analysis).
-    Saves configuration to .env in the current directory.
+    Runs interactive wizard by default, or accepts flags in --non-interactive mode.
+    Saves configuration to .env (or custom --env-file).
     """
-    from crashwise.core.configure import run_configure_wizard
+    if non_interactive:
+        from crashwise.core.configure import run_configure_non_interactive
 
-    run_configure_wizard()
+        saved = run_configure_non_interactive(
+            env_path=env_file,
+            api_port=api_port,
+            temporal_host=temporal_host,
+            temporal_namespace=temporal_namespace,
+            temporal_task_queue=temporal_task_queue,
+            database_url=database_url,
+            redis_url=redis_url,
+            worker_name=worker_name,
+            workdir=workdir,
+            build_timeout=build_timeout,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            llm_api_key=llm_api_key,
+            openai_api_base=openai_api_base,
+            ai_provider=ai_provider,
+            ai_model=ai_model,
+            ai_api_key=ai_api_key,
+            ollama_url=ollama_url,
+        )
+        console.print(f"[bold green]Configuration saved to[/] {saved}")
+    else:
+        from crashwise.core.configure import run_configure_wizard
+
+        run_configure_wizard(env_path=env_file)
 
 
 @app.command()
@@ -310,7 +431,7 @@ def setup(
                 console.print(
                     "[bold red]bash not found. Cannot execute setup script.[/]"
                 )
-                raise typer.Exit(code=1)
+                raise typer.Exit(code=1) from None
 
     # ── Post-install: docker group + daemon socket ────────────────────
     _interactive_post_install(yes=yes)
@@ -552,6 +673,9 @@ def run(
     host: str | None = typer.Option(None, "--host"),
     namespace: str | None = typer.Option(None, "--namespace"),
     task_queue: str | None = typer.Option(None, "--task-queue"),
+    name: str | None = typer.Option(None, "--name", help="Target name or identifier"),
+    subdir: str | None = typer.Option(None, "--subdir", "--target-subdir", help="Subdirectory inside repo to target"),
+    clone_depth: int = typer.Option(1, "--clone-depth", help="Git clone depth (0 for full clone)", min=0),
     manifest: Path | None = typer.Option(None, "--manifest", help="Path to crashwise.yaml"),
     skip_preflight: bool = typer.Option(
         False,
@@ -610,6 +734,9 @@ def run(
 
     payload_dict: dict[str, Any] = {
         "target_repo": target_repo,
+        "target_name": name,
+        "target_subdir": subdir,
+        "target_clone_depth": clone_depth,
         "fuzzer_type": fuzzer,
         "timeout_seconds": timeout_seconds,
         "target_branch": branch,
@@ -637,7 +764,7 @@ def run(
     async def _submit_via_api() -> tuple[str, str] | None:
         import httpx
 
-        target_name = target_repo.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+        target_name = name or target_repo.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
         try:
             async with httpx.AsyncClient(timeout=10) as http:
                 resp = await http.post(
@@ -645,8 +772,12 @@ def run(
                     json={
                         "target_repo": target_repo,
                         "target_name": target_name,
+                        "target_subdir": subdir,
+                        "target_clone_depth": clone_depth,
                         "fuzzer_type": fuzzer.value,
                         "timeout_seconds": timeout_seconds,
+                        "target_branch": branch,
+                        "harness_path": harness,
                         "sanitizers": sanitizers,
                         "custom_fuzzer_flags": custom_flags,
                         "llm_model": model,
@@ -698,7 +829,7 @@ def run(
 
                 client = await connect(host=host, namespace=namespace)
                 handle = client.get_workflow_handle(workflow_id)
-                return await handle.result()
+                return cast(FuzzingOutput, await handle.result())
 
             result = asyncio.run(_await_result())
             console.print("[bold green]✓ Workflow complete![/]")
@@ -932,7 +1063,7 @@ def exploit(
                 crash_id=crash_id,
                 raw_text=crash.stack_trace,
                 signal=crash.signal,
-                stack_trace=crash.stack_trace,
+                asan_output=crash.stack_trace,
             )
 
             result = await generate_exploit(report, target_func="")

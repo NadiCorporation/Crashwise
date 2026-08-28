@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -99,6 +100,14 @@ class Settings(BaseSettings):
     crashwise_harness_dir: Path = Field(default=Path("./harnesses"))
     crashwise_corpus_dir: Path = Field(default=Path("./corpus"))
     crashwise_crash_dir: Path = Field(default=Path("./crashes"))
+    crashwise_workdir: Path = Field(
+        default=Path("/tmp/crashwise"),
+        description="Root working directory for cloning and building targets (CRASHWISE_WORKDIR)",
+    )
+    crashwise_build_timeout: int = Field(
+        default=900,
+        description="Target build timeout in seconds (CRASHWISE_BUILD_TIMEOUT)",
+    )
 
     # ── Database ─────────────────────────────────────────────────────────────
     database_url: str = Field(

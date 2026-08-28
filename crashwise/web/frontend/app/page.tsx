@@ -4,6 +4,10 @@ import { useEffect, useState, useCallback } from "react";
 import { CampaignsTable } from "@/components/campaigns-table";
 import { LiveTelemetry } from "@/components/telemetry";
 import { CrashMatrix } from "@/components/crash-matrix";
+import { CampaignLauncher } from "@/components/campaign-launcher";
+import { SystemConfig } from "@/components/system-config";
+import { WorkerStatus } from "@/components/worker-status";
+import { LogStreamer } from "@/components/log-streamer";
 
 interface Campaign {
   id: string;
@@ -12,14 +16,16 @@ interface Campaign {
   run_count: number;
 }
 
+type TabType = "live" | "crashes" | "control" | "launcher" | "config" | "workers" | "logs";
+
 export default function DashboardPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [activeTab, setActiveTab] = useState<"live" | "crashes" | "control">("live");
+  const [activeTab, setActiveTab] = useState<TabType>("live");
   const [signalResult, setSignalResult] = useState<string>("");
 
   const refresh = useCallback(() => {
     fetch("/campaigns")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : []))
       .then(setCampaigns)
       .catch(() => {});
   }, []);
@@ -50,32 +56,43 @@ export default function DashboardPage() {
     }
   };
 
+  const tabs: { id: TabType; label: string }[] = [
+    { id: "live", label: "⚡ Live" },
+    { id: "crashes", label: "🔴 Crashes" },
+    { id: "control", label: "🎛️ God-Mode" },
+    { id: "launcher", label: "🚀 Launcher" },
+    { id: "config", label: "⚙️ Configuration" },
+    { id: "workers", label: "🖥️ Worker Status" },
+    { id: "logs", label: "📜 Live Logs" },
+  ];
+
   return (
     <div className="space-y-6">
-      {/* Tab navigation */}
-      <div className="flex gap-1 border-b border-border">
-        {(["live", "crashes", "control"] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-xs font-bold uppercase tracking-wider transition ${
-              activeTab === tab
-                ? "text-foreground border-b-2 border-accent-green"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {tab === "live" && "⚡ Live"}
-            {tab === "crashes" && "🔴 Crashes"}
-            {tab === "control" && "🎛️ God-Mode"}
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+      {/* 7-Tab Navigation Header */}
+      <div className="flex items-center justify-between border-b border-border overflow-x-auto">
+        <div className="flex gap-1">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition whitespace-nowrap ${
+                activeTab === tab.id
+                  ? "text-foreground border-b-2 border-accent-green"
+                  : "text-muted-foreground hover:text-foreground border-b-2 border-transparent"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 text-xs text-muted-foreground px-2 shrink-0 font-mono">
           <span className={`w-2 h-2 rounded-full ${running.length > 0 ? "bg-accent-green animate-pulse" : "bg-muted-foreground"}`} />
-          {running.length} active
+          <span>{running.length} active</span>
         </div>
       </div>
 
-      {/* ═══ LIVE TAB ═══ */}
+      {/* ═══ 1. LIVE TAB ═══ */}
       {activeTab === "live" && (
         <div className="space-y-6">
           <LiveTelemetry />
@@ -101,46 +118,51 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ═══ CRASHES TAB ═══ */}
+      {/* ═══ 2. CRASHES TAB ═══ */}
       {activeTab === "crashes" && <CrashMatrix />}
 
-      {/* ═══ GOD-MODE TAB ═══ */}
+      {/* ═══ 3. GOD-MODE TAB ═══ */}
       {activeTab === "control" && (
         <div className="space-y-6">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
-            Runtime Signal Dispatch
-          </h2>
+          <div className="border-b border-border pb-4">
+            <h2 className="text-lg font-bold text-foreground">🎛️ God-Mode Signal Dispatch</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Transmit runtime control signals directly to running Temporal workflow state machines.
+            </p>
+          </div>
 
           {running.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No active campaigns to control.</p>
+            <div className="border border-border rounded-lg p-12 text-center text-muted-foreground text-xs font-mono">
+              No running campaigns available for signal interception.
+            </div>
           ) : (
             running.map((c) => {
               const wfId = `crashwise-campaign-${c.id}`;
               return (
-                <div key={c.id} className="border border-border rounded-lg p-4 space-y-4">
+                <div key={c.id} className="border border-border rounded-lg p-4 space-y-4 bg-muted/20">
                   <div className="flex items-center justify-between">
-                    <span className="font-bold">{c.target_name}</span>
+                    <span className="font-bold text-sm text-foreground">{c.target_name}</span>
                     <span className="text-xs text-muted-foreground font-mono">{wfId.slice(0, 40)}…</span>
                   </div>
 
                   <div className="grid grid-cols-3 gap-2">
                     <button
                       onClick={() => sendSignal(wfId, "pause_hunt", true)}
-                      className="px-3 py-2 bg-accent-orange/20 text-accent-orange rounded text-xs font-bold hover:bg-accent-orange/30 transition"
+                      className="px-3 py-2 bg-accent-orange/20 text-accent-orange rounded text-xs font-bold hover:bg-accent-orange/30 transition border border-accent-orange/30"
                     >
-                      ⏸ PAUSE
+                      ⏸ PAUSE HUNT
                     </button>
                     <button
                       onClick={() => sendSignal(wfId, "pause_hunt", false)}
-                      className="px-3 py-2 bg-accent-green/20 text-accent-green rounded text-xs font-bold hover:bg-accent-green/30 transition"
+                      className="px-3 py-2 bg-accent-green/20 text-accent-green rounded text-xs font-bold hover:bg-accent-green/30 transition border border-accent-green/30"
                     >
-                      ▶ RESUME
+                      ▶ RESUME HUNT
                     </button>
                     <button
                       onClick={() => sendSignal(wfId, "force_pivot", "operator override")}
-                      className="px-3 py-2 bg-accent-blue/20 text-accent-blue rounded text-xs font-bold hover:bg-accent-blue/30 transition"
+                      className="px-3 py-2 bg-accent-blue/20 text-accent-blue rounded text-xs font-bold hover:bg-accent-blue/30 transition border border-accent-blue/30"
                     >
-                      🔀 PIVOT
+                      🔀 FORCE PIVOT
                     </button>
                   </div>
                 </div>
@@ -149,14 +171,30 @@ export default function DashboardPage() {
           )}
 
           {signalResult && (
-            <div className={`text-xs font-mono p-2 rounded ${
-              signalResult.startsWith("✓") ? "bg-accent-green/10 text-accent-green" : "bg-accent-red/10 text-accent-red"
+            <div className={`text-xs font-mono p-3 rounded border ${
+              signalResult.startsWith("✓")
+                ? "bg-accent-green/10 text-accent-green border-accent-green/30"
+                : "bg-accent-red/10 text-accent-red border-accent-red/30"
             }`}>
               {signalResult}
             </div>
           )}
         </div>
       )}
+
+      {/* ═══ 4. CAMPAIGN LAUNCHER TAB ═══ */}
+      {activeTab === "launcher" && (
+        <CampaignLauncher onNavigateToLive={() => setActiveTab("live")} />
+      )}
+
+      {/* ═══ 5. SYSTEM CONFIGURATION TAB ═══ */}
+      {activeTab === "config" && <SystemConfig />}
+
+      {/* ═══ 6. WORKER STATUS TAB ═══ */}
+      {activeTab === "workers" && <WorkerStatus />}
+
+      {/* ═══ 7. LIVE LOGS TAB ═══ */}
+      {activeTab === "logs" && <LogStreamer />}
     </div>
   );
 }

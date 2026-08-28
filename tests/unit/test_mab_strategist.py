@@ -207,10 +207,12 @@ async def test_evaluate_same_arm_wins_no_pivot() -> None:
         (now - 1800, 10000),
         (now, 10001),  # plateau
     ]
-    # Make afl_default the clear winner.
-    state.successes = {"afl_default": 100, "afl_exploit": 0}
-    state.failures = {"afl_default": 0, "afl_exploit": 100}
-    state.trials = {"afl_default": 100, "afl_exploit": 100}
+    # Make afl_default the clear winner across all arms.
+    state.successes = {arm.arm_id: 0 for arm in state.arms}
+    state.failures = {arm.arm_id: 100 for arm in state.arms}
+    state.trials = {arm.arm_id: 100 for arm in state.arms}
+    state.successes["afl_default"] = 100
+    state.failures["afl_default"] = 0
 
     result = await evaluate_and_pivot(
         PivotStrategyInput(

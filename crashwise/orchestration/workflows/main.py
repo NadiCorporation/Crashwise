@@ -532,6 +532,9 @@ class MainFuzzingWorkflow:
                 "setup_target",
                 SetupTargetInput(
                     target_repo=str(payload.target_repo),
+                    target_name=payload.target_name,
+                    target_subdir=payload.target_subdir,
+                    target_clone_depth=payload.target_clone_depth,
                     target_branch=payload.target_branch,
                     sanitizers=payload.sanitizers,
                     synthesize_harness=payload.harness_path is None,

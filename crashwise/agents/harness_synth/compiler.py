@@ -10,6 +10,7 @@ established by ``setup_target`` so all artefacts stay sandboxed.
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import time
 from collections.abc import Sequence

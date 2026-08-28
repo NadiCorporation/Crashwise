@@ -130,6 +130,8 @@ def _install_hint(distro: str, packages: list[str]) -> str:
     """Compose a one-line install suggestion for the given distro+pkgs."""
     pkgs = " ".join(packages)
     sudo = _sudo_prefix()
+    if distro == "alpine":
+        return f"{sudo}apk add --no-cache {pkgs}"
     if distro == "arch":
         return f"{sudo}pacman -S --needed {pkgs}"
     if distro == "fedora":
@@ -147,7 +149,7 @@ class DistroInfo:
     """Normalised host-distribution identity.
 
     ``family`` is the package-manager family CrashWise dispatches on
-    (``arch`` / ``debian`` / ``fedora`` / ``unknown``).  ``id_`` and
+    (``arch`` / ``debian`` / ``fedora`` / ``alpine`` / ``unknown``).  ``id_`` and
     ``pretty_name`` come straight from ``/etc/os-release`` so callers
     can render user-friendly diagnostics ("Detected: Ubuntu 24.04
     LTS") without re-reading the file.
@@ -169,6 +171,10 @@ class DistroInfo:
     @property
     def is_fedora(self) -> bool:
         return self.family == "fedora"
+
+    @property
+    def is_alpine(self) -> bool:
+        return self.family == "alpine"
 
 
 class DistroDetector:
@@ -232,6 +238,8 @@ class DistroDetector:
     def _normalise(id_: str, id_like: str) -> str:
         id_ = id_.lower()
         id_like = id_like.lower()
+        if id_ == "alpine" or "alpine" in id_like:
+            return "alpine"
         if id_ == "arch" or "arch" in id_like or "manjaro" in id_ or "endeavouros" in id_:
             return "arch"
         if (
@@ -603,6 +611,10 @@ def check_runtime_docker_compose() -> CheckResult:
                     f"{sudo}dnf install -y docker-compose-plugin && "
                     f"{sudo}dnf remove -y python3-docker-compose"
                 )
+            elif distro == "alpine":
+                migrate_cmd = (
+                    f"{sudo}apk add --no-cache docker-cli-compose"
+                )
             else:  # debian / ubuntu
                 migrate_cmd = (
                     f"{sudo}apt-get remove -y docker-compose && "
@@ -672,6 +684,24 @@ def _build_remediation(check_name: str, default_pkgs: list[str]) -> str:
         check_name, default_pkgs
     )
     return _install_hint(distro, pkgs)
+
+
+def check_build_git() -> CheckResult:
+    """Check Git availability."""
+    rc, out, _ = _run(["git", "--version"])
+    if rc == 0:
+        ver = out.splitlines()[0] if out else "unknown"
+        return CheckResult(
+            name="build.git",
+            status=CheckStatus.OK,
+            message=f"Git found ({ver}).",
+        )
+    return CheckResult(
+        name="build.git",
+        status=CheckStatus.FAIL,
+        message="Git not found.",
+        remediation=f"Install: {_build_remediation('build.git', ['git'])}",
+    )
 
 
 def check_build_cmake() -> CheckResult:
@@ -913,7 +943,9 @@ async def check_service_redis(
     try:
         import redis.asyncio as redis_mod
         r = redis_mod.Redis(host=host, port=port, socket_connect_timeout=timeout)
-        await r.ping()
+        res = r.ping()
+        if asyncio.iscoroutine(res):
+            await res
         await r.close()
         return CheckResult(
             name="service.redis",
@@ -955,9 +987,9 @@ async def check_service_llm(
     if agentic_base and agentic_base != "http://localhost:11434/v1":
         try:
             headers: dict[str, str] = {}
-            api_key = settings.openai_api_key
-            if api_key and api_key.get_secret_value() not in ("", "ollama"):
-                headers["Authorization"] = f"Bearer {api_key.get_secret_value()}"
+            agentic_key = settings.openai_api_key
+            if agentic_key and agentic_key.get_secret_value() not in ("", "ollama"):
+                headers["Authorization"] = f"Bearer {agentic_key.get_secret_value()}"
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.get(
                     f"{agentic_base.rstrip('/')}/models",
@@ -1030,11 +1062,13 @@ async def check_service_llm(
             fail_parts.append("Triage: Venice unreachable")
     elif ai_provider in ("openai_compatible", "openai", "deepseek"):
         base_url = (settings.openai_api_base or settings.ollama_url or "https://api.openai.com/v1").rstrip("/")
-        api_key = settings.ai_api_key or (settings.openai_api_key.get_secret_value() if settings.openai_api_key else None)
+        ai_key = settings.ai_api_key or (
+            settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
+        )
         try:
             headers = {}
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
+            if ai_key:
+                headers["Authorization"] = f"Bearer {ai_key}"
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.get(f"{base_url}/models", headers=headers)
                 if resp.status_code == 200:
@@ -1123,6 +1157,7 @@ async def run_all_checks(
 
     # Build tools (sync)
     report.checks.extend([
+        check_build_git(),
         check_build_cmake(),
         check_build_clang(),
         check_build_gcc(),
@@ -1145,8 +1180,8 @@ async def run_all_checks(
 # ── Provisioner ──────────────────────────────────────────────────────────────
 
 
-# Per-distro package mappings. Phase 21 adds Arch (pacman) and Fedora (dnf)
-# alongside the existing Debian (apt) mapping.
+# Per-distro package mappings. Supports Debian (apt), Arch (pacman),
+# Fedora (dnf), and Alpine (apk).
 _CHECK_PACKAGES_BY_DISTRO: dict[str, dict[str, list[str]]] = {
     "debian": {
         # On Ubuntu/Debian the BINARY package is named ``afl++``
@@ -1156,6 +1191,7 @@ _CHECK_PACKAGES_BY_DISTRO: dict[str, dict[str, list[str]]] = {
         # with "Unable to locate package" on every supported release.
         "runtime.docker": ["docker.io", "docker-compose-plugin"],
         "runtime.docker-compose": ["docker-compose-plugin"],
+        "build.git": ["git"],
         "build.cmake": ["cmake"],
         "build.clang": ["clang", "lld"],
         "build.gcc": ["gcc", "g++"],
@@ -1166,6 +1202,7 @@ _CHECK_PACKAGES_BY_DISTRO: dict[str, dict[str, list[str]]] = {
         # Arch core / extra repo names — pacman.
         "runtime.docker": ["docker", "docker-buildx", "docker-compose"],
         "runtime.docker-compose": ["docker-compose"],
+        "build.git": ["git"],
         "build.cmake": ["cmake"],
         "build.clang": ["clang", "lld"],
         # Arch ships C++ as part of `gcc`; no separate g++ package.
@@ -1180,11 +1217,22 @@ _CHECK_PACKAGES_BY_DISTRO: dict[str, dict[str, list[str]]] = {
     "fedora": {
         "runtime.docker": ["docker", "docker-compose-plugin"],
         "runtime.docker-compose": ["docker-compose-plugin"],
+        "build.git": ["git"],
         "build.cmake": ["cmake"],
         "build.clang": ["clang", "lld"],
         "build.gcc": ["gcc", "gcc-c++"],
         "build.llvm": ["llvm-devel", "lld"],
         "build.afl++": ["american-fuzzy-lop"],
+    },
+    "alpine": {
+        "runtime.docker": ["docker", "docker-cli-compose"],
+        "runtime.docker-compose": ["docker-cli-compose"],
+        "build.git": ["git"],
+        "build.cmake": ["cmake"],
+        "build.clang": ["clang", "lld"],
+        "build.gcc": ["gcc", "g++", "musl-dev"],
+        "build.llvm": ["llvm-dev", "lld"],
+        "build.afl++": ["afl++"],
     },
 }
 
@@ -1207,6 +1255,10 @@ _INSTALL_COMMANDS: dict[str, tuple[str, str]] = {
     "fedora": (
         "{sudo}dnf -y check-update || true",
         "{sudo}dnf install -y {pkgs}",
+    ),
+    "alpine": (
+        "{sudo}apk update",
+        "{sudo}apk add --no-cache {pkgs}",
     ),
 }
 

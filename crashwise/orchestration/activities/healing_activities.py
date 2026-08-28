@@ -58,8 +58,17 @@ log = get_logger(__name__)
 
 # ── Tunables ────────────────────────────────────────────────────────────────
 _HEARTBEAT_INTERVAL_SECONDS: Final[float] = 15.0
-_WORKSPACE_ROOT: Final[Path] = Path("/tmp/crashwise/healing")
 _REPO_URL_PATTERN: Final[re.Pattern[str]] = re.compile(r"^(?:https?://|git@|file://|/)[\w.\-:/@]+(?:\.git)?$")
+
+
+def _get_healing_workspace_root() -> Path:
+    """Return configured root path for healing workspaces."""
+    try:
+        from crashwise.core.config import get_settings
+
+        return get_settings().crashwise_workdir / "healing"
+    except Exception:
+        return Path("/tmp/crashwise/healing")
 
 
 # ── Activity 1: Adaptive Build ──────────────────────────────────────────────
@@ -355,7 +364,7 @@ def _allocate_workspace(scope_id: str, *, mode: str) -> Path:
     desirable for repair runs that follow a build run.
     """
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", scope_id)[:64] or "anonymous"
-    target = _WORKSPACE_ROOT / mode / safe
+    target = _get_healing_workspace_root() / mode / safe
     target.mkdir(parents=True, exist_ok=True)
     return target
 

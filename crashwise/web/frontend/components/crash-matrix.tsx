@@ -1,18 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CrashDetailModal } from "./crash-detail-modal";
 
-interface Crash {
+interface CrashRow {
   id: string;
   campaign_id: string;
   crash_type: string;
-  crash_state: string;
   severity: string;
-  status: string;
-  found_at: string;
-  sanitizer_log?: string;
-  gdb_backtrace?: string;
-  reproducer_path?: string;
+  severity_score?: number;
+  vulnerability_type?: string;
+  status?: string;
+  found_at?: string;
+  created_at?: string;
+  signal?: string;
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -33,118 +34,220 @@ const CRASH_TYPE_COLORS: Record<string, string> = {
 };
 
 export function CrashMatrix() {
-  const [crashes, setCrashes] = useState<Crash[]>([]);
-  const [selected, setSelected] = useState<Crash | null>(null);
+  const [crashes, setCrashes] = useState<CrashRow[]>([]);
+  const [selectedCrash, setSelectedCrash] = useState<{ id: string; campaignId: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [severityFilter, setSeverityFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+
+  const loadCrashes = async () => {
+    setLoading(true);
+    try {
+      // 1. Try fetching from /campaigns and aggregate
+      const campResp = await fetch("/campaigns");
+      let allCrashes: CrashRow[] = [];
+
+      if (campResp.ok) {
+        const campaigns = await campResp.json();
+        const crashPromises = campaigns.map(async (c: any) => {
+          try {
+            const cr = await fetch(`/campaigns/${c.id}/crashes`);
+            if (cr.ok) {
+              const list = await cr.json();
+              return list.map((item: any) => ({
+                ...item,
+                campaign_id: c.id,
+                found_at: item.created_at,
+              }));
+            }
+          } catch {
+            return [];
+          }
+          return [];
+        });
+        const results = await Promise.all(crashPromises);
+        allCrashes = results.flat();
+      }
+
+      // 2. Also try /api/v1/crashes to get any web control plane crashes
+      try {
+        const v1Resp = await fetch("/api/v1/crashes");
+        if (v1Resp.ok) {
+          const v1List = await v1Resp.json();
+          for (const v1Item of v1List) {
+            if (!allCrashes.some((c) => c.id === v1Item.id)) {
+              allCrashes.push({
+                id: v1Item.id,
+                campaign_id: v1Item.campaign_id || "00000000-0000-0000-0000-000000000000",
+                crash_type: v1Item.crash_type,
+                severity: v1Item.severity,
+                severity_score: v1Item.severity_score || 0,
+                vulnerability_type: v1Item.vulnerability_type || "unknown",
+                status: v1Item.status || "discovered",
+                found_at: v1Item.found_at || v1Item.created_at || new Date().toISOString(),
+                signal: v1Item.signal || "SIGSEGV",
+              });
+            }
+          }
+        }
+      } catch {}
+
+      setCrashes(allCrashes);
+    } catch {
+      setCrashes([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    fetch("/api/v1/crashes")
-      .then((r) => r.json())
-      .then(setCrashes)
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    loadCrashes();
   }, []);
 
-  if (loading) return <p className="text-muted-foreground text-sm">Loading...</p>;
-  if (!crashes.length) {
-    return (
-      <div className="border border-border rounded-lg p-8 text-center">
-        <p className="text-muted-foreground">No crashes found yet.</p>
-        <p className="text-xs text-muted-foreground mt-1">Crashes will appear here as campaigns discover them.</p>
-      </div>
-    );
-  }
+  const filtered = crashes.filter((c) => {
+    if (severityFilter !== "all" && c.severity.toLowerCase() !== severityFilter.toLowerCase()) {
+      return false;
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchType = c.crash_type?.toLowerCase().includes(q);
+      const matchCwe = c.vulnerability_type?.toLowerCase().includes(q);
+      const matchId = c.id?.toLowerCase().includes(q);
+      if (!matchType && !matchCwe && !matchId) return false;
+    }
+    return true;
+  });
 
   return (
-    <div className="flex gap-4">
-      {/* Crash list */}
-      <div className="flex-1 border border-border rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-muted border-b border-border">
-            <tr>
-              <th className="text-left px-4 py-2 text-muted-foreground font-medium">Type</th>
-              <th className="text-left px-4 py-2 text-muted-foreground font-medium">State</th>
-              <th className="text-left px-4 py-2 text-muted-foreground font-medium">Severity</th>
-              <th className="text-left px-4 py-2 text-muted-foreground font-medium">Status</th>
-              <th className="text-left px-4 py-2 text-muted-foreground font-medium">Found</th>
-            </tr>
-          </thead>
-          <tbody>
-            {crashes.map((c) => (
-              <tr
-                key={c.id}
-                onClick={() => setSelected(c)}
-                className={`border-b border-border cursor-pointer transition ${
-                  selected?.id === c.id ? "bg-muted" : "hover:bg-muted/50"
+    <div className="space-y-4">
+      {/* Controls / Filter Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-4">
+        <div>
+          <h2 className="text-lg font-bold text-foreground">🔴 Discovered Crash Matrix</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Deduplicated memory safety findings, CWE classifications, and AI exploitability rankings.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search Filter */}
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Filter by type, CWE, or ID…"
+            className="px-3 py-1.5 text-xs font-mono bg-muted border border-border rounded focus:outline-none focus:border-accent-green text-foreground w-48"
+          />
+
+          {/* Severity Filter Buttons */}
+          <div className="flex items-center gap-1 bg-muted p-0.5 rounded border border-border">
+            {(["all", "critical", "high", "medium", "low"] as const).map((sev) => (
+              <button
+                key={sev}
+                onClick={() => setSeverityFilter(sev)}
+                className={`px-2.5 py-1 text-[11px] font-bold uppercase rounded transition ${
+                  severityFilter === sev
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <td className={`px-4 py-3 font-medium ${CRASH_TYPE_COLORS[c.crash_type] ?? "text-foreground"}`}>
-                  {c.crash_type}
-                </td>
-                <td className="px-4 py-3 font-mono text-xs text-muted-foreground truncate max-w-[200px]">
-                  {c.crash_state}
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`px-2 py-0.5 rounded text-xs font-bold border ${SEVERITY_COLORS[c.severity] ?? SEVERITY_COLORS.unknown}`}>
-                    {c.severity}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-xs text-muted-foreground">{c.status}</td>
-                <td className="px-4 py-3 text-xs text-muted-foreground">
-                  {new Date(c.found_at).toLocaleString()}
-                </td>
-              </tr>
+                {sev}
+              </button>
             ))}
-          </tbody>
-        </table>
+          </div>
+
+          <button
+            onClick={loadCrashes}
+            className="px-3 py-1.5 bg-muted hover:bg-muted/80 text-foreground border border-border text-xs rounded transition"
+          >
+            ↻ Refresh
+          </button>
+        </div>
       </div>
 
-      {/* Triage Drawer */}
-      {selected && (
-        <div className="w-[480px] border border-border rounded-lg bg-muted p-4 space-y-4 overflow-y-auto max-h-[80vh]">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-sm">Crash Detail</h3>
-            <button
-              onClick={() => setSelected(null)}
-              className="text-muted-foreground hover:text-foreground text-xs"
-            >
-              ✕ Close
-            </button>
-          </div>
-
-          <div className="space-y-1 text-xs">
-            <p><span className="text-muted-foreground">Type:</span> <span className="font-bold">{selected.crash_type}</span></p>
-            <p><span className="text-muted-foreground">State:</span> <span className="font-mono">{selected.crash_state}</span></p>
-            <p><span className="text-muted-foreground">Severity:</span> <span className="font-bold">{selected.severity}</span></p>
-          </div>
-
-          {selected.gdb_backtrace && (
-            <div>
-              <p className="text-xs text-muted-foreground mb-1 font-medium">GDB Backtrace</p>
-              <pre className="bg-background border border-border rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap">
-                {selected.gdb_backtrace}
-              </pre>
-            </div>
-          )}
-
-          {selected.sanitizer_log && (
-            <div>
-              <p className="text-xs text-muted-foreground mb-1 font-medium">Sanitizer Log</p>
-              <pre className="bg-background border border-border rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap text-accent-red">
-                {selected.sanitizer_log}
-              </pre>
-            </div>
-          )}
-
-          {selected.reproducer_path && (
-            <a
-              href={`/api/v1/crashes/${selected.id}/reproducer`}
-              className="inline-flex items-center gap-2 px-3 py-1.5 bg-accent-blue/20 text-accent-blue border border-accent-blue/30 rounded text-xs font-medium hover:bg-accent-blue/30 transition"
-            >
-              ↓ Download Reproducer
-            </a>
-          )}
+      {loading ? (
+        <div className="border border-border rounded-lg p-8 text-center text-muted-foreground text-xs font-mono">
+          Querying crash triage database…
         </div>
+      ) : !filtered.length ? (
+        <div className="border border-border rounded-lg p-12 text-center space-y-2">
+          <div className="text-xl">🛡️</div>
+          <p className="text-sm font-bold text-foreground">No matching crashes found</p>
+          <p className="text-xs text-muted-foreground">
+            {crashes.length > 0
+              ? "Try adjusting your search query or severity filter."
+              : "Crashes will appear here as active fuzzing campaigns uncover vulnerabilities."}
+          </p>
+        </div>
+      ) : (
+        <div className="border border-border rounded-lg overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-muted border-b border-border">
+              <tr>
+                <th className="text-left px-4 py-2.5 text-muted-foreground font-medium">Crash Type</th>
+                <th className="text-left px-4 py-2.5 text-muted-foreground font-medium">CWE Classification</th>
+                <th className="text-left px-4 py-2.5 text-muted-foreground font-medium">Severity / CVSS</th>
+                <th className="text-left px-4 py-2.5 text-muted-foreground font-medium">Signal</th>
+                <th className="text-left px-4 py-2.5 text-muted-foreground font-medium">Found At</th>
+                <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((c) => (
+                <tr
+                  key={c.id}
+                  onClick={() => setSelectedCrash({ id: c.id, campaignId: c.campaign_id })}
+                  className="border-b border-border cursor-pointer hover:bg-muted/40 transition"
+                >
+                  <td className={`px-4 py-3 font-mono font-bold ${CRASH_TYPE_COLORS[c.crash_type] ?? "text-foreground"}`}>
+                    {c.crash_type}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-accent-blue">
+                    {c.vulnerability_type || "CWE-Unknown"}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
+                        SEVERITY_COLORS[c.severity?.toLowerCase()] ?? SEVERITY_COLORS.unknown
+                      }`}>
+                        {c.severity}
+                      </span>
+                      {c.severity_score !== undefined && (
+                        <span className="font-mono text-muted-foreground">({c.severity_score}/10)</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-muted-foreground">
+                    {c.signal || "SIGSEGV"}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-muted-foreground">
+                    {c.found_at || c.created_at ? new Date(c.found_at || c.created_at!).toLocaleString() : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedCrash({ id: c.id, campaignId: c.campaign_id });
+                      }}
+                      className="px-2.5 py-1 bg-muted hover:bg-muted/80 text-foreground border border-border rounded text-[11px] font-mono transition"
+                    >
+                      Inspect →
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Slide-over Crash Detail Modal */}
+      {selectedCrash && (
+        <CrashDetailModal
+          crashId={selectedCrash.id}
+          campaignId={selectedCrash.campaignId}
+          onClose={() => setSelectedCrash(null)}
+        />
       )}
     </div>
   );
