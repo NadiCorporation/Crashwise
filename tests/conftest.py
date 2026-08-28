@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from crashwise.agents.harness_synth.llm import set_chat_model_override
+from crashwise.core.config import get_settings
 
 
 class FailingChatModel:
@@ -18,6 +19,17 @@ class FailingChatModel:
 
     async def ainvoke(self, *args, **kwargs):
         raise RuntimeError("LLM not configured in tests")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_test_environment(monkeypatch: pytest.MonkeyPatch):
+    """Ensure tests run isolated from local .env settings and external services."""
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    monkeypatch.setenv("REDIS_ENABLED", "false")
+    monkeypatch.setenv("AI_PROVIDER", "")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)

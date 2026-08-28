@@ -264,12 +264,14 @@ def _detect_provider(model_name: str, base_url: str | None, settings: Settings) 
     lower = model_name.lower()
     if lower.startswith("claude"):
         return "anthropic"
-    if base_url or settings.openai_api_base:
+    if base_url:
         return "openai_compatible"
     if lower.startswith(("deepseek", "llama", "qwen", "mistral", "ollama", "vllm", "openrouter")):
         return "openai_compatible"
     if lower.startswith(("gpt-", "o1-", "o3-")):
         return "openai_custom" if settings.openai_api_base else "openai"
+    if settings.openai_api_base:
+        return "openai_compatible"
     return "openai"
 
 
