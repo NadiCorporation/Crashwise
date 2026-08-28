@@ -249,6 +249,7 @@ async def validate_harness(state: HarnessState) -> HarnessState:
             break
 
     extra_includes = [state.source_path.parent, target_root]
+    extra_link_args: list[str] = []
     rpath_dirs: set[Path] = set()
     for lib in target_root.rglob("*.a"):
         if "CMakeFiles" not in str(lib) and "test" not in str(lib).lower():
