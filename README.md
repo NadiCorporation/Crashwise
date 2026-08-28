@@ -14,7 +14,7 @@ Automated vulnerability discovery for C/C++ targets via LLM-driven harness synth
 | **Fuzzers** | AFL++, libFuzzer |
 | **Sanitizers** | ASan, UBSan |
 | **Orchestration** | Temporal |
-| **Status** | Pre-alpha |
+| **Status** | Production-Ready (v1.3.0) |
 
 ```bash
 crashwise run https://github.com/madler/zlib
