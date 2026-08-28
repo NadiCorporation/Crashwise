@@ -42,12 +42,35 @@ export function LiveTelemetry() {
     };
   }, []);
 
+  const isFuzzing = (data?.global_execs_per_sec ?? 0) > 0;
+  const activeCount = data?.active_campaigns ?? 0;
+
   const stats = [
-    { label: "EXEC/S", value: data?.global_execs_per_sec?.toLocaleString() ?? "—", color: "text-accent-green" },
-    { label: "TOTAL EXECS", value: data?.total_executions?.toLocaleString() ?? "—", color: "text-foreground" },
-    { label: "EDGES", value: data?.unique_edges?.toLocaleString() ?? "—", color: "text-accent-blue" },
-    { label: "CRASHES", value: data?.crashes_found?.toString() ?? "0", color: data?.crashes_found ? "text-accent-red" : "text-muted-foreground" },
-    { label: "UPTIME", value: `${Math.floor(uptime / 60)}m ${uptime % 60}s`, color: "text-muted-foreground" },
+    {
+      label: "EXEC/S",
+      value: isFuzzing ? data!.global_execs_per_sec.toLocaleString() : "0 (IDLE)",
+      color: isFuzzing ? "text-accent-green animate-pulse" : "text-muted-foreground",
+    },
+    {
+      label: "TOTAL EXECS",
+      value: data?.total_executions ? data.total_executions.toLocaleString() : "0",
+      color: "text-foreground",
+    },
+    {
+      label: "EDGES",
+      value: data?.unique_edges ? data.unique_edges.toLocaleString() : "0",
+      color: "text-accent-blue",
+    },
+    {
+      label: "CRASHES",
+      value: data?.crashes_found ? data.crashes_found.toString() : "0",
+      color: data?.crashes_found ? "text-accent-red" : "text-muted-foreground",
+    },
+    {
+      label: "STATUS / UPTIME",
+      value: `${activeCount > 0 ? `${activeCount} active` : "Idle"} • ${Math.floor(uptime / 60)}m ${uptime % 60}s`,
+      color: activeCount > 0 ? "text-accent-green" : "text-muted-foreground",
+    },
   ];
 
   return (

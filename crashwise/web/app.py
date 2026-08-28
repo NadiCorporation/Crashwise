@@ -202,14 +202,16 @@ async def telemetry_stream():
                     select(func.count()).select_from(Crash)
                 )).scalar() or 0
 
-                # Exec/s: sum executions / sum duration for recent runs
-                recent = (await session.execute(
-                    select(
-                        func.coalesce(func.sum(FuzzingRun.executions), 0),
-                        func.coalesce(func.sum(FuzzingRun.duration_seconds), 0),
-                    ).where(FuzzingRun.duration_seconds > 0)
-                )).one()
-                execs_per_sec = int(int(recent[0]) / float(recent[1])) if recent[1] and float(recent[1]) > 0 else 0
+                # Exec/s: Only non-zero when campaigns are actively running
+                execs_per_sec = 0
+                if active > 0:
+                    recent = (await session.execute(
+                        select(
+                            func.coalesce(func.sum(FuzzingRun.executions), 0),
+                            func.coalesce(func.sum(FuzzingRun.duration_seconds), 0),
+                        ).where(FuzzingRun.duration_seconds > 0)
+                    )).one()
+                    execs_per_sec = int(int(recent[0]) / float(recent[1])) if recent[1] and float(recent[1]) > 0 else 0
 
                 return {
                     "global_execs_per_sec": execs_per_sec,
