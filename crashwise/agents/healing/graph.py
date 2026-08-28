@@ -506,12 +506,12 @@ def _select_system_prompt(state: HealingState) -> str:
     if state.mode == HealingMode.BUILD:
         repo_clause = f"\nREPO: {state.repo_url}" if state.repo_url else ""
         return _BUILD_SYSTEM_PROMPT.format(
-            workspace_path=state.workspace_path,
+            workspace_path="/workspace",
             repo_clause=repo_clause,
         )
     if state.mode == HealingMode.REPAIR:
         return _REPAIR_SYSTEM_PROMPT.format(
-            workspace_path=state.workspace_path,
+            workspace_path="/workspace",
             crash_id=state.crash_id or "unknown",
         )
     raise ValueError(f"unsupported HealingMode: {state.mode!r}")
@@ -524,10 +524,9 @@ def _seed_conversation(state: HealingState) -> list[AnyMessage]:
         seed.append(
             HumanMessage(
                 content=(
-                    "Begin the adaptive build. Discover the build system inside "
-                    f"{state.workspace_path}, install missing system dependencies, "
-                    "inject the required sanitizer + coverage flags, and produce a "
-                    "clean instrumented binary. Call signal_completion when done."
+                    "Begin the adaptive build. Discover the build system in /workspace, "
+                    "install missing system dependencies, inject the required sanitizer + "
+                    "coverage flags, and produce a clean instrumented binary. Call signal_completion when done."
                 )
             )
         )

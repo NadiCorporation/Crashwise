@@ -259,10 +259,16 @@ class OpenHandsSandbox:
 
         # The workspace is mounted at /workspace in the container and at
         # self.workspace_path on the host. Resolve the host path.
-        if path.startswith("/workspace"):
+        if path.startswith("/workspace/"):
             host_path = self.workspace_path / path[len("/workspace/"):]
-        else:
+        elif path == "/workspace":
+            host_path = self.workspace_path
+        elif not Path(path).is_absolute():
+            host_path = self.workspace_path / path
+        elif str(path).startswith(str(self.workspace_path)):
             host_path = Path(path)
+        else:
+            host_path = self.workspace_path / Path(path).name
 
         try:
             content = host_path.read_text(encoding="utf-8", errors="replace")
