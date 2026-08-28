@@ -133,3 +133,4 @@ build_cache/
 node_modules/
 crashwise/web/frontend/node_modules/
 crashwise/web/frontend/.next/
+crashwise/web/frontend/out/

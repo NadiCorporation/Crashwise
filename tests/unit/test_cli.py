@@ -208,27 +208,31 @@ def test_api_with_custom_port_and_reload() -> None:
 # ── dashboard command ────────────────────────────────────────────────────────
 
 
-def test_dashboard_launches_streamlit() -> None:
+def test_dashboard_launches_unified_server() -> None:
+    with patch("crashwise.cli.uvicorn.run") as mock_uvicorn:
+        result = runner.invoke(app, ["dashboard", "--no-open"])
+        assert result.exit_code == 0
+        mock_uvicorn.assert_called_once()
+        call_kwargs = mock_uvicorn.call_args.kwargs
+        assert call_kwargs["host"] == "0.0.0.0"
+        assert call_kwargs["port"] == 8000
+
+
+def test_dashboard_ui_alias() -> None:
+    with patch("crashwise.cli.uvicorn.run") as mock_uvicorn:
+        result = runner.invoke(app, ["ui", "--port", "9000", "--no-open"])
+        assert result.exit_code == 0
+        mock_uvicorn.assert_called_once()
+        call_kwargs = mock_uvicorn.call_args.kwargs
+        assert call_kwargs["port"] == 9000
+
+
+def test_dashboard_dev_mode() -> None:
     with patch("crashwise.cli.subprocess.run") as mock_run:
-        result = runner.invoke(app, ["dashboard"])
+        result = runner.invoke(app, ["dashboard", "--dev", "--port", "3000"])
         assert result.exit_code == 0
         mock_run.assert_called_once()
         cmd_list = mock_run.call_args.args[0]
-        assert any("streamlit" in str(x) for x in cmd_list)
-        assert any("app.py" in str(x) for x in cmd_list)
+        assert "npm" in cmd_list[0]
+        assert "dev" in cmd_list
 
-
-def test_dashboard_with_api_url() -> None:
-    with patch("crashwise.cli.subprocess.run") as mock_run:
-        result = runner.invoke(app, ["dashboard", "--api-url", "http://api:8000"])
-        assert result.exit_code == 0
-        mock_run.assert_called_once()
-        env = mock_run.call_args.kwargs["env"]
-        assert env["CRASHWISE_API_URL"] == "http://api:8000"
-
-
-def test_dashboard_not_found() -> None:
-    with patch("pathlib.Path.exists", return_value=False):
-        result = runner.invoke(app, ["dashboard"])
-        assert result.exit_code == 1
-        assert "Dashboard not found" in result.output

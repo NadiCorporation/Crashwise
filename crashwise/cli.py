@@ -14,7 +14,7 @@ Commands
 * ``crashwise run``       — Submit a fuzzing workflow.
 * ``crashwise worker``    — Start a Temporal worker.
 * ``crashwise api``       — Launch the FastAPI management server.
-* ``crashwise dashboard`` — Launch the Streamlit intelligence dashboard.
+* ``crashwise dashboard`` — Launch the unified Web Command Center dashboard (alias: ``ui``).
 * ``crashwise signal``    — Send a God-Mode signal (force_pivot, inject_seed,
                             pause_hunt, resume_hunt) to a live campaign.
 """
@@ -895,31 +895,64 @@ def api(
 @app.command()
 def dashboard(
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind address"),
-    port: int = typer.Option(8501, "--port", "-p", help="Bind port"),
-    api_url: str | None = typer.Option(
-        None, "--api-url", help="Base URL for the management API"
+    port: int = typer.Option(8000, "--port", "-p", help="Bind port"),
+    dev: bool = typer.Option(
+        False, "--dev", help="Launch Next.js in hot-reloading development mode"
+    ),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Open dashboard in default web browser"
     ),
 ) -> None:
-    """Launch the Streamlit intelligence dashboard."""
+    """Launch the unified CrashWise Web Command Center dashboard."""
     configure_logging()
-    dashboard_path = Path(__file__).parent / "dashboard" / "app.py"
-    if not dashboard_path.exists():
-        console.print(f"[bold red]Dashboard not found:[/] {dashboard_path}")
-        raise typer.Exit(code=1)
+    frontend_dir = Path(__file__).parent / "web" / "frontend"
 
-    env = os.environ.copy()
-    if api_url:
-        env["CRASHWISE_API_URL"] = api_url
+    if dev:
+        if not (frontend_dir / "package.json").exists():
+            console.print(f"[bold red]Frontend directory not found:[/] {frontend_dir}")
+            raise typer.Exit(code=1)
+        console.print(
+            f"[bold cyan]Launching Next.js UI development server on http://{host}:{port}...[/]"
+        )
+        cmd = ["npm", "run", "dev", "--", "-p", str(port), "-H", host]
+        subprocess.run(cmd, cwd=str(frontend_dir), check=False)
+        return
 
-    log.info("dashboard.starting", host=host, port=port, api_url=api_url)
-    cmd = [
-        sys.executable, "-m", "streamlit", "run", str(dashboard_path),
-        "--server.address", host,
-        "--server.port", str(port),
-        "--server.headless", "true",
-        "--browser.gatherUsageStats", "false",
-    ]
-    subprocess.run(cmd, env=env, check=False)
+    url = f"http://{'localhost' if host == '0.0.0.0' else host}:{port}"
+    console.print(
+        f"[bold green]Starting CrashWise Web Command Center on {url}[/]"
+    )
+    if open_browser:
+        try:
+            import webbrowser
+
+            webbrowser.open(url)
+        except Exception:
+            pass
+
+    uvicorn.run(
+        "crashwise.api.main:app",
+        host=host,
+        port=port,
+        reload=False,
+        workers=1,
+        log_level=get_settings().log_level.lower(),
+    )
+
+
+@app.command(name="ui")
+def ui(
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind address"),
+    port: int = typer.Option(8000, "--port", "-p", help="Bind port"),
+    dev: bool = typer.Option(
+        False, "--dev", help="Launch Next.js in hot-reloading development mode"
+    ),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Open dashboard in default web browser"
+    ),
+) -> None:
+    """Alias for 'crashwise dashboard' — Launch the Web Command Center."""
+    dashboard(host=host, port=port, dev=dev, open_browser=open_browser)
 
 
 @app.command()

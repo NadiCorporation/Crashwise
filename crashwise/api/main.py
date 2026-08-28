@@ -1066,6 +1066,14 @@ async def stream_logs(
     )
 
 
+# ── Mount Next.js Web UI Static Frontend ─────────────────────────────────────
+_frontend_out_dir = Path(__file__).resolve().parent.parent / "web" / "frontend" / "out"
+if _frontend_out_dir.is_dir() and (_frontend_out_dir / "index.html").is_file():
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=str(_frontend_out_dir), html=True), name="frontend")
+
+
 __all__ = [
     "CampaignCreateRequest",
     "ConfigUpdateRequest",

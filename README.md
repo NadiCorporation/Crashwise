@@ -73,7 +73,7 @@ See [docs/INSTALL.md](docs/INSTALL.md) for full setup.
 | `crashwise setup` | Auto-install missing build tools across Debian/Ubuntu, Arch, Fedora/RHEL, and Alpine |
 | `crashwise worker` | Start a Temporal worker polling the task queue |
 | `crashwise api` | Launch the FastAPI management server & SSE telemetry backend |
-| `crashwise dashboard` | Launch the Streamlit dashboard or Next.js 14 Control Plane on `localhost:3000` |
+| `crashwise dashboard` / `ui` | Launch the unified Next.js 14 Web Command Center control plane on `localhost:8000` |
 | `crashwise signal <id> <signal>` | Dispatch God-Mode signals (`pause_hunt`, `resume_hunt`, `force_pivot`, `inject_seed`) |
 | `crashwise exploit <crash_id>` | Synthesize, compile, and verify standalone C PoC exploit for a crash |
 | `crashwise info` / `version` | Display runtime configuration and version metadata |

@@ -94,9 +94,6 @@ dependencies = [
     "redis>=5.0.0",
     "async-timeout>=4.0.0",
 
-    # Intelligence Dashboard
-    "streamlit>=1.40.0",
-
     # Manifest parsing
     "pyyaml>=6.0.0",
 
