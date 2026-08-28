@@ -26,7 +26,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -1074,22 +1074,109 @@ async def restart_services() -> dict[str, Any]:
     }
 
 
+# ── Live SSE Telemetry Stream ───────────────────────────────────────────────
+
+@app.get("/api/v1/telemetry/stream", tags=["telemetry"])
+@app.get("/telemetry/stream", tags=["telemetry"])
+async def stream_telemetry() -> StreamingResponse:
+    """Server-Sent Events stream of real-time fuzzing and cluster statistics."""
+    from sqlalchemy import func, select
+    from crashwise.core.database import Campaign, Crash, FuzzingRun, get_session
+
+    async def _compute_telemetry() -> dict[str, Any]:
+        try:
+            async with get_session() as session:
+                row = (await session.execute(
+                    select(
+                        func.coalesce(func.sum(FuzzingRun.executions), 0),
+                        func.coalesce(func.max(FuzzingRun.coverage_edges), 0),
+                    )
+                )).one()
+                total_execs = int(row[0])
+                unique_edges = int(row[1])
+
+                active = (await session.execute(
+                    select(func.count()).where(Campaign.status == "running")
+                )).scalar() or 0
+
+                crash_count = (await session.execute(
+                    select(func.count()).select_from(Crash)
+                )).scalar() or 0
+
+                # Compute dynamic execs/sec for running campaigns
+                execs_per_sec = 0
+                if active > 0:
+                    recent = (await session.execute(
+                        select(
+                            func.coalesce(func.sum(FuzzingRun.executions), 0),
+                            func.coalesce(func.sum(FuzzingRun.duration_seconds), 0),
+                        ).where(FuzzingRun.duration_seconds > 0)
+                    )).one()
+                    if recent[1] and float(recent[1]) > 0:
+                        execs_per_sec = int(int(recent[0]) / float(recent[1]))
+
+                return {
+                    "global_execs_per_sec": execs_per_sec,
+                    "total_executions": total_execs,
+                    "unique_edges": unique_edges,
+                    "crashes_found": crash_count,
+                    "active_campaigns": active,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+        except Exception:
+            return {
+                "global_execs_per_sec": 0,
+                "total_executions": 0,
+                "unique_edges": 0,
+                "crashes_found": 0,
+                "active_campaigns": 0,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+
+    async def _telemetry_generator() -> AsyncIterator[str]:
+        while True:
+            data = await _compute_telemetry()
+            yield f"data: {json.dumps(data)}\n\n"
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(
+        _telemetry_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ── Live Log Stream ────────────────────────────────────────────────────────
 
 @app.get("/api/logs/stream", tags=["logs"])
 async def stream_logs(
     campaign_id: str | None = None,
-    tail: int = 50,
+    tail: int = 100,
     max_events: int | None = None,
 ) -> StreamingResponse:
-    """Stream live logs from CRASHWISE_LOG_FILE as SSE events with optional filtering."""
-    log_file_path = os.environ.get("CRASHWISE_LOG_FILE", "crashwise.log")
+    """Stream live logs from active log files as SSE events with optional filtering."""
+    def _find_log_file() -> Path:
+        explicit = os.environ.get("CRASHWISE_LOG_FILE")
+        if explicit and Path(explicit).exists():
+            return Path(explicit)
+        for candidate in [
+            Path("/tmp/crashwise-worker.log"),
+            Path("crashwise.log"),
+            Path("/tmp/crashwise-api.log"),
+        ]:
+            if candidate.exists() and candidate.stat().st_size > 0:
+                return candidate
+        return Path(explicit or "/tmp/crashwise-worker.log")
 
     async def _log_generator() -> AsyncIterator[str]:
-        p = Path(log_file_path)
+        p = _find_log_file()
         events_emitted = 0
 
-        yield f"data: {json.dumps({'timestamp': datetime.now().isoformat(), 'line': f'[System] Log stream attached to {log_file_path}', 'level': 'INFO'})}\n\n"
+        yield f"data: {json.dumps({'timestamp': datetime.now(UTC).isoformat(), 'line': f'[System] Log stream attached to {p.resolve()}', 'level': 'INFO'})}\n\n"
         events_emitted += 1
         if max_events is not None and events_emitted >= max_events:
             return
@@ -1102,19 +1189,21 @@ async def stream_logs(
                 initial_lines = lines[-tail:] if len(lines) > tail else lines
                 for line_item in initial_lines:
                     if campaign_id is None or campaign_id in line_item:
-                        yield f"data: {json.dumps({'timestamp': datetime.now().isoformat(), 'line': line_item})}\n\n"
+                        yield f"data: {json.dumps({'timestamp': datetime.now(UTC).isoformat(), 'line': line_item})}\n\n"
                         events_emitted += 1
                         if max_events is not None and events_emitted >= max_events:
                             return
                 last_pos = p.stat().st_size
             except Exception as e:
-                yield f"data: {json.dumps({'timestamp': datetime.now().isoformat(), 'line': f'[System Error] {e}', 'level': 'ERROR'})}\n\n"
+                yield f"data: {json.dumps({'timestamp': datetime.now(UTC).isoformat(), 'line': f'[System Error] {e}', 'level': 'ERROR'})}\n\n"
                 events_emitted += 1
                 if max_events is not None and events_emitted >= max_events:
                     return
 
         while True:
             await asyncio.sleep(0.5)
+            # Re-check file in case it was created/swapped
+            p = _find_log_file()
             if p.exists() and p.is_file():
                 with suppress(Exception):
                     curr_size = p.stat().st_size
@@ -1125,7 +1214,7 @@ async def stream_logs(
                             last_pos = curr_size
                             for line in new_text.splitlines():
                                 if line.strip() and (campaign_id is None or campaign_id in line):
-                                    yield f"data: {json.dumps({'timestamp': datetime.now().isoformat(), 'line': line})}\n\n"
+                                    yield f"data: {json.dumps({'timestamp': datetime.now(UTC).isoformat(), 'line': line})}\n\n"
                                     events_emitted += 1
                                     if max_events is not None and events_emitted >= max_events:
                                         return
