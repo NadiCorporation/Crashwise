@@ -1038,6 +1038,42 @@ async def update_system_config(req: ConfigUpdateRequest) -> dict[str, Any]:
     }
 
 
+@app.post("/api/restart", tags=["system"])
+@app.post("/api/config/restart", tags=["config"])
+async def restart_services() -> dict[str, Any]:
+    """Trigger a graceful restart of Crashwise services (API & Worker)."""
+    import subprocess
+
+    get_settings.cache_clear()
+
+    async def _async_restart() -> None:
+        await asyncio.sleep(0.6)
+        restart_cmd = os.environ.get("CRASHWISE_RESTART_CMD")
+        if restart_cmd:
+            subprocess.Popen(restart_cmd, shell=True)
+            return
+
+        if Path("/tmp/start_services.sh").is_file():
+            subprocess.Popen(
+                "pkill -9 -f 'crashwise (api|worker)' || true; sleep 1; /tmp/start_services.sh",
+                shell=True,
+            )
+            return
+
+        try:
+            subprocess.Popen(
+                ["bash", "-c", "pkill -9 -f 'crashwise (api|worker)' || true; sleep 1; nohup crashwise api > /tmp/crashwise-api.log 2>&1 & nohup crashwise worker > /tmp/crashwise-worker.log 2>&1 &"]
+            )
+        except Exception as err:
+            log.error("api.restart_failed", error=str(err))
+
+    asyncio.create_task(_async_restart())
+    return {
+        "ok": True,
+        "message": "Service restart initiated. The control plane will be temporarily unreachable while processes reload.",
+    }
+
+
 # ── Live Log Stream ────────────────────────────────────────────────────────
 
 @app.get("/api/logs/stream", tags=["logs"])

@@ -46,6 +46,46 @@ export function SystemConfig() {
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [restartBanner, setRestartBanner] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
+  const [restartStatus, setRestartStatus] = useState<string | null>(null);
+
+  const handleRestart = async () => {
+    setRestarting(true);
+    setRestartStatus("Initiating service restart…");
+    try {
+      await fetch("/api/restart", { method: "POST" });
+    } catch {
+      // API may drop connection immediately on restart, which is expected
+    }
+
+    setRestartStatus("Services restarting… Reconnecting (attempt 1/15)…");
+    let attempts = 0;
+    const maxAttempts = 15;
+
+    const checkInterval = setInterval(async () => {
+      attempts++;
+      setRestartStatus(`Services restarting… Reconnecting (attempt ${attempts}/${maxAttempts})…`);
+      try {
+        const resp = await fetch("/health");
+        if (resp.ok) {
+          clearInterval(checkInterval);
+          setRestarting(false);
+          setRestartStatus(null);
+          setRestartBanner(null);
+          setSaveSuccess("✓ Crashwise services restarted successfully! All updated configuration values are active.");
+          fetchConfig();
+        }
+      } catch {
+        // Still offline
+      }
+
+      if (attempts >= maxAttempts) {
+        clearInterval(checkInterval);
+        setRestarting(false);
+        setRestartStatus("Reconnection timed out. Please verify services manually or refresh page.");
+      }
+    }, 1500);
+  };
 
   // Form values
   const [temporalHost, setTemporalHost] = useState("");
@@ -239,12 +279,37 @@ export function SystemConfig() {
 
       {/* Restart Required Banner */}
       {restartBanner && (
-        <div className="p-4 border border-accent-orange/50 bg-accent-orange/10 rounded-lg space-y-1 text-accent-orange">
-          <div className="flex items-center gap-2 font-bold text-xs">
-            <span>⚠</span>
-            <span>RESTART REQUIRED</span>
+        <div className="p-4 border border-accent-orange/50 bg-accent-orange/10 rounded-lg space-y-2 text-accent-orange">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2 font-bold text-xs">
+              <span>⚠</span>
+              <span>RESTART REQUIRED</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleRestart}
+              disabled={restarting}
+              className="px-3.5 py-1.5 bg-accent-orange text-background font-bold text-xs rounded hover:opacity-90 transition disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+            >
+              {restarting ? (
+                <>
+                  <span className="w-2.5 h-2.5 rounded-full border-2 border-background border-t-transparent animate-spin" />
+                  <span>Restarting Services…</span>
+                </>
+              ) : (
+                <>
+                  <span>🔄</span>
+                  <span>Restart Services Now</span>
+                </>
+              )}
+            </button>
           </div>
           <p className="text-xs font-mono">{restartBanner}</p>
+          {restartStatus && (
+            <p className="text-[11px] font-mono text-muted-foreground pt-1 border-t border-accent-orange/20 animate-pulse">
+              {restartStatus}
+            </p>
+          )}
         </div>
       )}
 
