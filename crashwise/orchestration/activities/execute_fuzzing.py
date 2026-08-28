@@ -136,8 +136,6 @@ async def _real_execute(
 
     # Guard: if harness_path doesn't exist or is a directory, we can't fuzz.
     if not harness_path.is_file():
-        from temporalio.exceptions import ApplicationError
-
         raise ApplicationError(
             f"NoHarnessBinary: harness not found or not a file: {harness_path}",
             non_retryable=True,

@@ -728,7 +728,7 @@ class DockerManager:
         """Verify Docker daemon is installed AND responsive.
 
         Checks both binary presence and daemon responsiveness via
-        'docker info'. A hanging daemon is detected by a 10-second timeout.
+        'docker info'. A hanging daemon is detected by a 30-second timeout.
         """
         if not shutil.which("docker"):
             return False
@@ -738,10 +738,10 @@ class DockerManager:
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            await asyncio.wait_for(proc.communicate(), timeout=10.0)
+            await asyncio.wait_for(proc.communicate(), timeout=30.0)
             return proc.returncode == 0
         except TimeoutError:
-            log.error("docker.daemon_timeout", detail="docker info timed out after 10s")
+            log.error("docker.daemon_timeout", detail="docker info timed out after 30s")
             return False
         except Exception:
             return False
