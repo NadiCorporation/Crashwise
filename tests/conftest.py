@@ -27,6 +27,9 @@ def _isolate_test_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
     monkeypatch.setenv("REDIS_ENABLED", "false")
     monkeypatch.setenv("AI_PROVIDER", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("OPENAI_API_BASE", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
