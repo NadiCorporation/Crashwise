@@ -102,9 +102,19 @@ async def run_adaptive_build_activity(
     )
 
     _validate_campaign_id(campaign_id)
-    _validate_repo_url(repo_url)
-
     workspace = _allocate_workspace(campaign_id, mode="build")
+
+    # Pre-clone the repo into the workspace so the sandbox has the codebase on attempt 1.
+    if not (workspace / ".git").exists() and not any(workspace.iterdir()):
+        try:
+            clone_proc = await asyncio.create_subprocess_exec(
+                "git", "clone", "--depth", "1", repo_url, str(workspace),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(clone_proc.communicate(), timeout=60.0)
+        except Exception as clone_exc:
+            log.warning("healing.build.preclone_failed", error=str(clone_exc)[:200])
 
     sandbox: OpenHandsSandbox | None = None
     heartbeat_task: asyncio.Task[None] | None = None

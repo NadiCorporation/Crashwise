@@ -484,7 +484,7 @@ class MainFuzzingWorkflow:
                         if hasattr(payload.fuzzer_type, "value")
                         else str(payload.fuzzer_type)
                     )
-                    synth_out: SynthesizeHarnessOutput = await workflow.execute_activity(
+                    raw_synth = await workflow.execute_activity(
                         "synthesize_harness",
                         SynthesizeHarnessInput(
                             workspace_path=target_workdir,
@@ -492,8 +492,14 @@ class MainFuzzingWorkflow:
                             max_retries=4,
                             campaign_id=healing_campaign_id,
                         ),
+                        result_type=SynthesizeHarnessOutput,
                         start_to_close_timeout=timedelta(minutes=15),
                         retry_policy=RetryPolicy(maximum_attempts=2),
+                    )
+                    synth_out: SynthesizeHarnessOutput = (
+                        raw_synth
+                        if isinstance(raw_synth, SynthesizeHarnessOutput)
+                        else SynthesizeHarnessOutput.model_validate(raw_synth)
                     )
                     if synth_out.success and synth_out.harness_path:
                         harness_path = synth_out.harness_path
