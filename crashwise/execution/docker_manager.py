@@ -213,13 +213,18 @@ class DockerManager:
         # Disk quota: --storage-opt requires overlay2 on xfs with pquota.
         # Try with it; if Docker rejects it, retry without.
         _storage_opt_args = ["--storage-opt", f"size={get_settings().docker_disk_quota}"]
+        harness_parent = job.harness_path.parent
+        target_root = harness_parent.parent if harness_parent.name == "harness" else harness_parent
+
         # AFL forkserver needs SYS_PTRACE; libFuzzer does not.
         if is_afl:
             cmd.extend(["--cap-add", "SYS_PTRACE"])
         cmd.extend(
             [
                 "-v",
-                f"{job.harness_path.parent}:/work:ro",
+                f"{harness_parent}:/work:ro",
+                "-v",
+                f"{target_root}:/target:ro",
                 "-v",
                 f"{job.corpus_dir}:/corpus:rw",
                 "-v",
@@ -230,10 +235,37 @@ class DockerManager:
         # to the same host directory so triage can harvest them uniformly.
         if job.crashes_dir is not None:
             cmd.extend(["-v", f"{job.crashes_dir}:/crashes:rw"])
+
+        # Dynamically discover all directories with shared libraries in target and harness
+        ld_dirs = [
+            "/target",
+            "/target/build",
+            "/target/build/lib",
+            "/target/lib",
+            "/work",
+            "/work/build",
+            "/work/build/lib",
+            "/work/lib",
+            "/usr/local/lib",
+        ]
+        if target_root.exists():
+            for so_file in target_root.rglob("*.so*"):
+                try:
+                    rel_parent = so_file.parent.relative_to(target_root)
+                    container_dir = f"/target/{rel_parent}".rstrip("/")
+                    if container_dir not in ld_dirs:
+                        ld_dirs.append(container_dir)
+                except ValueError:
+                    pass
+
+        default_ld_path = ":".join(dict.fromkeys(ld_dirs))
+        existing_ld_path = job.env_vars.get("LD_LIBRARY_PATH", "")
+        combined_ld_path = f"{default_ld_path}:{existing_ld_path}".rstrip(":")
+
         for key, val in job.env_vars.items():
-            cmd.extend(["-e", f"{key}={val}"])
-        # Ensure dynamically linked harness can find libs from the build tree.
-        cmd.extend(["-e", "LD_LIBRARY_PATH=/work/build:/work/build/lib:/work/lib:/usr/local/lib"])
+            if key != "LD_LIBRARY_PATH":
+                cmd.extend(["-e", f"{key}={val}"])
+        cmd.extend(["-e", f"LD_LIBRARY_PATH={combined_ld_path}"])
 
         # Entrypoint: run the harness.
         harness_in_container = f"/work/{job.harness_path.name}"
