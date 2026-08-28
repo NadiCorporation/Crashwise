@@ -513,8 +513,8 @@ async def _persist_run(
             run = FuzzingRun(
                 campaign_id=UUID(payload.campaign_id),
                 iteration=payload.iteration,
-                started_at=datetime.now(tz=UTC),
-                finished_at=datetime.now(tz=UTC),
+                started_at=datetime.now(tz=UTC).replace(tzinfo=None),
+                finished_at=datetime.now(tz=UTC).replace(tzinfo=None),
                 executions=output.executions,
                 duration_seconds=output.duration_seconds,
                 coverage_edges=output.coverage_edges,
