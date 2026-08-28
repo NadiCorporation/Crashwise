@@ -25,77 +25,145 @@ export function CampaignsTable() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [stoppingAll, setStoppingAll] = useState(false);
+  const [stoppingIds, setStoppingIds] = useState<Record<string, boolean>>({});
+
+  const fetchCampaigns = () => {
+    fetch("/campaigns")
+      .then((r) => r.json())
+      .then(setCampaigns)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
-    const poll = () => {
-      fetch("/campaigns")
-        .then((r) => r.json())
-        .then(setCampaigns)
-        .catch(() => {})
-        .finally(() => setLoading(false));
-    };
-    poll();
-    const interval = setInterval(poll, 3000);
+    fetchCampaigns();
+    const interval = setInterval(fetchCampaigns, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleStopCampaign = async (id: string, name: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!confirm(`Force stop campaign "${name}" (${id.slice(0, 8)}…)?`)) return;
+    setStoppingIds((prev) => ({ ...prev, [id]: true }));
+    try {
+      const resp = await fetch(`/campaigns/${id}/stop`, { method: "POST" });
+      if (resp.ok) {
+        fetchCampaigns();
+      } else {
+        alert(`Failed to stop campaign: ${resp.status}`);
+      }
+    } catch (err) {
+      alert(`Network error stopping campaign: ${err}`);
+    } finally {
+      setStoppingIds((prev) => ({ ...prev, [id]: false }));
+    }
+  };
+
+  const handleStopAll = async () => {
+    const runningCount = campaigns.filter((c) => c.status === "running" || c.status === "pending").length;
+    if (!confirm(`Force stop ALL ${runningCount} active running campaigns?`)) return;
+    setStoppingAll(true);
+    try {
+      const resp = await fetch("/campaigns/stop-all", { method: "POST" });
+      if (resp.ok) {
+        fetchCampaigns();
+      } else {
+        alert(`Failed to stop campaigns: ${resp.status}`);
+      }
+    } catch (err) {
+      alert(`Network error stopping campaigns: ${err}`);
+    } finally {
+      setStoppingAll(false);
+    }
+  };
 
   if (loading) return <p className="text-muted-foreground text-xs">Loading…</p>;
   if (!campaigns.length) return <p className="text-muted-foreground text-xs">No campaigns. Run: crashwise run &lt;repo-url&gt;</p>;
 
+  const runningCount = campaigns.filter((c) => c.status === "running" || c.status === "pending").length;
+
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <table className="w-full text-xs">
-        <thead className="bg-muted border-b border-border">
-          <tr>
-            <th className="text-left px-3 py-2 text-muted-foreground font-medium">Target</th>
-            <th className="text-left px-3 py-2 text-muted-foreground font-medium">Engine</th>
-            <th className="text-left px-3 py-2 text-muted-foreground font-medium">Status</th>
-            <th className="text-right px-3 py-2 text-muted-foreground font-medium">Runs</th>
-            <th className="text-right px-3 py-2 text-muted-foreground font-medium">Seeds</th>
-            <th className="text-right px-3 py-2 text-muted-foreground font-medium"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {campaigns.map((c) => (
-            <>
-              <tr key={c.id} className="border-b border-border hover:bg-muted/50 transition cursor-pointer" onClick={() => setExpanded(expanded === c.id ? null : c.id)}>
-                <td className="px-3 py-2.5 font-medium">{c.target_name}</td>
-                <td className="px-3 py-2.5">
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                    c.fuzzer_type === "afl++" ? "bg-accent-orange/20 text-accent-orange" : "bg-accent-blue/20 text-accent-blue"
-                  }`}>
-                    {c.fuzzer_type}
-                  </span>
-                </td>
-                <td className="px-3 py-2.5">
-                  <span className={`inline-flex items-center gap-1 ${STATUS_STYLES[c.status] ?? "text-muted-foreground"}`}>
-                    {c.status === "running" && <span className="w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse" />}
-                    {c.status === "failed" && <span className="w-1.5 h-1.5 rounded-full bg-accent-red" />}
-                    {c.status}
-                  </span>
-                </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{c.run_count}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{c.seed_count}</td>
-                <td className="px-3 py-2.5 text-right text-muted-foreground">
-                  {expanded === c.id ? "▲" : "▼"}
-                </td>
-              </tr>
-              {expanded === c.id && (
-                <tr key={`${c.id}-detail`}>
-                  <td colSpan={6} className="px-3 py-3 bg-muted/30">
-                    <CampaignDetail campaign={c} />
+    <div className="space-y-2">
+      {runningCount > 0 && (
+        <div className="flex justify-end mb-1">
+          <button
+            type="button"
+            onClick={handleStopAll}
+            disabled={stoppingAll}
+            className="px-3 py-1 bg-accent-red/20 text-accent-red hover:bg-accent-red/30 border border-accent-red/30 rounded text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+          >
+            <span>🛑</span>
+            <span>{stoppingAll ? "Stopping Campaigns…" : `Force Stop All Running (${runningCount})`}</span>
+          </button>
+        </div>
+      )}
+
+      <div className="border border-border rounded-lg overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-muted border-b border-border">
+            <tr>
+              <th className="text-left px-3 py-2 text-muted-foreground font-medium">Target</th>
+              <th className="text-left px-3 py-2 text-muted-foreground font-medium">Engine</th>
+              <th className="text-left px-3 py-2 text-muted-foreground font-medium">Status</th>
+              <th className="text-right px-3 py-2 text-muted-foreground font-medium">Runs</th>
+              <th className="text-right px-3 py-2 text-muted-foreground font-medium">Seeds</th>
+              <th className="text-right px-3 py-2 text-muted-foreground font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {campaigns.map((c) => (
+              <>
+                <tr key={c.id} className="border-b border-border hover:bg-muted/50 transition cursor-pointer" onClick={() => setExpanded(expanded === c.id ? null : c.id)}>
+                  <td className="px-3 py-2.5 font-medium">{c.target_name}</td>
+                  <td className="px-3 py-2.5">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                      c.fuzzer_type === "afl++" ? "bg-accent-orange/20 text-accent-orange" : "bg-accent-blue/20 text-accent-blue"
+                    }`}>
+                      {c.fuzzer_type}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <span className={`inline-flex items-center gap-1 ${STATUS_STYLES[c.status] ?? "text-muted-foreground"}`}>
+                      {c.status === "running" && <span className="w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse" />}
+                      {c.status === "failed" && <span className="w-1.5 h-1.5 rounded-full bg-accent-red" />}
+                      {c.status === "cancelled" && <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />}
+                      {c.status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{c.run_count}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{c.seed_count}</td>
+                  <td className="px-3 py-2.5 text-right flex items-center justify-end gap-2">
+                    {(c.status === "running" || c.status === "pending") && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleStopCampaign(c.id, c.target_name, e)}
+                        disabled={stoppingIds[c.id]}
+                        className="px-2 py-0.5 text-[10px] font-bold uppercase rounded bg-accent-red/20 text-accent-red hover:bg-accent-red/30 transition border border-accent-red/30"
+                      >
+                        {stoppingIds[c.id] ? "Stopping…" : "🛑 Stop"}
+                      </button>
+                    )}
+                    <span className="text-muted-foreground">{expanded === c.id ? "▲" : "▼"}</span>
                   </td>
                 </tr>
-              )}
-            </>
-          ))}
-        </tbody>
-      </table>
+                {expanded === c.id && (
+                  <tr key={`${c.id}-detail`}>
+                    <td colSpan={6} className="px-3 py-3 bg-muted/30">
+                      <CampaignDetail campaign={c} onStop={() => handleStopCampaign(c.id, c.target_name)} />
+                    </td>
+                  </tr>
+                )}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-function CampaignDetail({ campaign }: { campaign: Campaign }) {
+function CampaignDetail({ campaign, onStop }: { campaign: Campaign; onStop?: () => void }) {
   const [detail, setDetail] = useState<any>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -122,6 +190,7 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
   if (!detail) return <p className="text-muted-foreground text-xs">Loading…</p>;
 
   const isFailed = campaign.status === "failed" || campaign.status === "stalled";
+  const isRunning = campaign.status === "running" || campaign.status === "pending";
   const runs = detail.runs || [];
   const lastRun = runs[runs.length - 1];
 
@@ -154,11 +223,20 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
         </div>
       )}
 
-      <div className="flex justify-end pt-2">
+      <div className="flex items-center justify-end gap-2 pt-2">
+        {isRunning && onStop && (
+          <button
+            type="button"
+            onClick={onStop}
+            className="px-3 py-1.5 text-[10px] font-bold uppercase rounded bg-accent-red/20 text-accent-red hover:bg-accent-red/30 transition border border-accent-red/30"
+          >
+            🛑 Force Stop Campaign
+          </button>
+        )}
         <button
           onClick={handleDelete}
-          disabled={deleting || campaign.status === "running"}
-          className="px-3 py-1.5 text-[10px] font-bold uppercase rounded bg-accent-red/20 text-accent-red hover:bg-accent-red/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+          disabled={deleting}
+          className="px-3 py-1.5 text-[10px] font-bold uppercase rounded bg-muted hover:bg-muted/80 text-muted-foreground transition disabled:opacity-40"
         >
           {deleting ? "Deleting…" : "🗑 Delete Campaign"}
         </button>

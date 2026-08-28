@@ -348,7 +348,12 @@ async def get_campaign(campaign_id: UUID) -> dict[str, Any]:
     tags=["campaigns"],
 )
 async def delete_campaign(campaign_id: UUID) -> Response:
-    """Delete a single campaign and all its runs/seeds/crashes."""
+    """Delete a single campaign and all its runs/seeds/crashes, terminating running workflows."""
+    workflow_id = f"crashwise-campaign-{campaign_id}"
+    with suppress(Exception):
+        client = await connect()
+        handle = client.get_workflow_handle(workflow_id)
+        await handle.terminate(reason="Campaign deleted by operator")
 
     async with get_session() as session:
         campaign = await get_campaign_by_id(session, campaign_id)
@@ -357,6 +362,65 @@ async def delete_campaign(campaign_id: UUID) -> Response:
         await session.delete(campaign)
         await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post(
+    "/campaigns/{campaign_id}/stop",
+    tags=["campaigns"],
+)
+@app.post(
+    "/campaigns/{campaign_id}/cancel",
+    tags=["campaigns"],
+)
+async def stop_campaign(campaign_id: UUID) -> dict[str, Any]:
+    """Force stop / terminate an active running campaign and update database status."""
+    workflow_id = f"crashwise-campaign-{campaign_id}"
+    with suppress(Exception):
+        client = await connect()
+        handle = client.get_workflow_handle(workflow_id)
+        await handle.terminate(reason="Operator force-stopped campaign from dashboard")
+
+    async with get_session() as session:
+        campaign = await get_campaign_by_id(session, campaign_id)
+        if campaign is None:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        campaign.status = "cancelled"
+        await session.commit()
+
+    return {"ok": True, "campaign_id": str(campaign_id), "message": f"Campaign {campaign_id} force stopped"}
+
+
+@app.post(
+    "/campaigns/stop-all",
+    tags=["campaigns"],
+)
+async def stop_all_campaigns() -> dict[str, Any]:
+    """Force stop / terminate all active running campaigns in Temporal and update database."""
+    async with get_session() as session:
+        running = (await session.execute(
+            select(Campaign).where(Campaign.status.in_(["running", "pending", "stalled"]))
+        )).scalars().all()
+
+        stopped_count = 0
+        client = None
+        with suppress(Exception):
+            client = await connect()
+
+        for c in running:
+            workflow_id = f"crashwise-campaign-{c.id}"
+            if client:
+                with suppress(Exception):
+                    handle = client.get_workflow_handle(workflow_id)
+                    await handle.terminate(reason="Operator force-stopped all campaigns from dashboard")
+            c.status = "cancelled"
+            stopped_count += 1
+
+        await session.commit()
+        return {
+            "ok": True,
+            "stopped_count": stopped_count,
+            "message": f"Force stopped {stopped_count} active campaign(s)",
+        }
 
 
 @app.delete(
@@ -840,7 +904,7 @@ class SignalRequest(BaseModel):
     """Payload to send a God-Mode signal to a running workflow."""
 
     workflow_id: str = Field(..., min_length=1)
-    signal: str = Field(..., pattern=r"^(pause_hunt|resume_hunt|force_pivot|inject_seed)$")
+    signal: str = Field(..., pattern=r"^(pause_hunt|resume_hunt|force_pivot|inject_seed|terminate)$")
     payload: Any = Field(default=None)
 
 
@@ -861,7 +925,18 @@ async def send_campaign_signal(req: SignalRequest) -> SignalResponse:
     try:
         client = await connect()
         handle = client.get_workflow_handle(req.workflow_id)
-        if req.signal == "resume_hunt":
+        if req.signal == "terminate":
+            await handle.terminate(reason=str(req.payload) if req.payload else "Operator terminated from God-Mode")
+            if req.workflow_id.startswith("crashwise-campaign-"):
+                raw_id = req.workflow_id.replace("crashwise-campaign-", "")
+                with suppress(Exception):
+                    camp_uuid = UUID(raw_id)
+                    async with get_session() as session:
+                        camp = await get_campaign_by_id(session, camp_uuid)
+                        if camp:
+                            camp.status = "cancelled"
+                            await session.commit()
+        elif req.signal == "resume_hunt":
             await handle.signal("pause_hunt", False)
         elif req.signal == "pause_hunt":
             await handle.signal("pause_hunt", bool(req.payload) if req.payload is not None else True)

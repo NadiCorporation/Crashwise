@@ -145,7 +145,7 @@ export default function DashboardPage() {
                     <span className="text-xs text-muted-foreground font-mono">{wfId.slice(0, 40)}…</span>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <button
                       onClick={() => sendSignal(wfId, "pause_hunt", true)}
                       className="px-3 py-2 bg-accent-orange/20 text-accent-orange rounded text-xs font-bold hover:bg-accent-orange/30 transition border border-accent-orange/30"
@@ -163,6 +163,16 @@ export default function DashboardPage() {
                       className="px-3 py-2 bg-accent-blue/20 text-accent-blue rounded text-xs font-bold hover:bg-accent-blue/30 transition border border-accent-blue/30"
                     >
                       🔀 FORCE PIVOT
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Force terminate workflow "${wfId}"?`)) {
+                          sendSignal(wfId, "terminate", "Operator terminated from God-Mode");
+                        }
+                      }}
+                      className="px-3 py-2 bg-accent-red/20 text-accent-red rounded text-xs font-bold hover:bg-accent-red/30 transition border border-accent-red/30"
+                    >
+                      🛑 TERMINATE
                     </button>
                   </div>
                 </div>
