@@ -249,13 +249,16 @@ async def validate_harness(state: HarnessState) -> HarnessState:
             break
 
     extra_includes = [state.source_path.parent, target_root]
-    extra_link_args: list[str] = []
+    rpath_dirs: set[Path] = set()
     for lib in target_root.rglob("*.a"):
         if "CMakeFiles" not in str(lib) and "test" not in str(lib).lower():
             extra_link_args.append(str(lib))
     for lib in target_root.rglob("*.so"):
         if "CMakeFiles" not in str(lib) and "test" not in str(lib).lower():
             extra_link_args.append(str(lib))
+            rpath_dirs.add(lib.parent)
+    for rd in sorted(rpath_dirs):
+        extra_link_args.extend(["-Wl,-rpath", str(rd)])
     # Add common include dirs.
     for subdir in ("include", "src", "build", "lib", "libarchive"):
         inc = target_root / subdir
@@ -275,6 +278,7 @@ async def validate_harness(state: HarnessState) -> HarnessState:
         not any(a.endswith(".a") for a in extra_link_args)
         and state.source_path.exists()
         and state.source_path.suffix in (".c", ".cpp", ".cc")
+        and not any(a.endswith(".so") for a in extra_link_args)
     ):
         extra_link_args.append(str(state.source_path))
     extra_link_args.extend(["-lm", "-lz", "-lpthread", "-lssl", "-lcrypto"])

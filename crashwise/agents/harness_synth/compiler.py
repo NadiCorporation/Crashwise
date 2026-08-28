@@ -203,12 +203,21 @@ async def sanity_check(
         "-handle_abrt=0",
     ]
 
+    env = dict(os.environ)
+    env["ASAN_OPTIONS"] = "abort_on_error=0:detect_leaks=0"
+    ld_paths = [str(binary_path.parent)]
+    if binary_path.parent.parent.exists():
+        for p in binary_path.parent.parent.rglob("*.so"):
+            ld_paths.append(str(p.parent))
+    current_ld = env.get("LD_LIBRARY_PATH", "")
+    env["LD_LIBRARY_PATH"] = ":".join(list(dict.fromkeys(ld_paths)) + ([current_ld] if current_ld else []))
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env={"ASAN_OPTIONS": "abort_on_error=0:detect_leaks=0"},
+            env=env,
         )
         try:
             stdout_bytes, _ = await asyncio.wait_for(
