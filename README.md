@@ -5,16 +5,21 @@
 
 # CrashWise
 
+> [!WARNING]
+> **🧪 EXPERIMENTAL RESEARCH PROTOTYPE — ACTIVE PRE-ALPHA DEVELOPMENT**
+> CrashWise is an **experimental research prototype** under active development and real-world testing. It is **NOT** a mature or production-ready product. Workflows, APIs, heuristics, LLM prompts, and command interfaces are rapidly evolving. Use exclusively for security research, evaluation, and sandbox testing.
+
 Automated vulnerability discovery for C/C++ targets via LLM-driven harness synthesis, coverage-guided fuzzing (AFL++/libFuzzer), and crash triage.
 
 | | |
 |---|---|
-| **Runtime** | Python 3.11+ |
+| **Development Status** | 🧪 **Pre-Alpha / Experimental** (`v0.2.0-dev`) |
+| **Runtime** | Python 3.11+ / Linux |
 | **License** | MIT |
 | **Fuzzers** | AFL++, libFuzzer |
 | **Sanitizers** | ASan, UBSan |
 | **Orchestration** | Temporal |
-| **Status** | Production-Ready (v1.3.0) |
+| **Stability** | ⚠️ Work In Progress (Breaking Changes Expected) |
 
 ```bash
 crashwise run https://github.com/madler/zlib
