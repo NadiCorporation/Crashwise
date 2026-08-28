@@ -905,6 +905,27 @@ def check_build_libfuzzer() -> CheckResult:
     )
 
 
+def check_build_gdb() -> CheckResult:
+    """Check GDB debugger availability for self-correction ReAct loops."""
+    path = _which("gdb")
+    if not path:
+        distro = detect_distro().family
+        pkgs = _CHECK_PACKAGES_BY_DISTRO.get(
+            distro, _CHECK_PACKAGES_BY_DISTRO["debian"]
+        ).get("build.gdb", ["gdb"])
+        return CheckResult(
+            name="build.gdb",
+            status=CheckStatus.WARN,
+            message="GDB not found on host (needed for crash self-correction loops).",
+            remediation=_install_hint(distro, pkgs),
+        )
+    return CheckResult(
+        name="build.gdb",
+        status=CheckStatus.OK,
+        message="GDB found on host.",
+    )
+
+
 async def check_service_temporal(
     host: str = "localhost",
     port: int = 7233,
@@ -1164,6 +1185,7 @@ async def run_all_checks(
         check_build_llvm(),
         check_build_afl(),
         check_build_libfuzzer(),
+        check_build_gdb(),
     ])
 
     # Services (async)
@@ -1197,6 +1219,7 @@ _CHECK_PACKAGES_BY_DISTRO: dict[str, dict[str, list[str]]] = {
         "build.gcc": ["gcc", "g++"],
         "build.llvm": ["llvm-dev", "lld"],
         "build.afl++": ["afl++"],
+        "build.gdb": ["gdb"],
     },
     "arch": {
         # Arch core / extra repo names — pacman.
@@ -1213,6 +1236,7 @@ _CHECK_PACKAGES_BY_DISTRO: dict[str, dict[str, list[str]]] = {
         # Listed here so ``get_missing_packages`` still names it for
         # display, but the install script special-cases Arch+AUR.
         "build.afl++": ["aflplusplus"],
+        "build.gdb": ["gdb"],
     },
     "fedora": {
         "runtime.docker": ["docker", "docker-compose-plugin"],
@@ -1223,6 +1247,7 @@ _CHECK_PACKAGES_BY_DISTRO: dict[str, dict[str, list[str]]] = {
         "build.gcc": ["gcc", "gcc-c++"],
         "build.llvm": ["llvm-devel", "lld"],
         "build.afl++": ["american-fuzzy-lop"],
+        "build.gdb": ["gdb"],
     },
     "alpine": {
         "runtime.docker": ["docker", "docker-cli-compose"],
@@ -1233,6 +1258,7 @@ _CHECK_PACKAGES_BY_DISTRO: dict[str, dict[str, list[str]]] = {
         "build.gcc": ["gcc", "g++", "musl-dev"],
         "build.llvm": ["llvm-dev", "lld"],
         "build.afl++": ["afl++"],
+        "build.gdb": ["gdb"],
     },
 }
 

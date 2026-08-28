@@ -184,11 +184,11 @@ Mission: produce a clean instrumented build of the target at
 WORKSPACE: {workspace_path}{repo_clause}
 
 Required instrumentation flags (inject into BOTH CFLAGS and CXXFLAGS):
-    -fsanitize=address,undefined -fsanitize-coverage=trace-pc-guard
+    -fsanitize=address,undefined -fsanitize=fuzzer-no-link
     -g -O1 -fno-omit-frame-pointer
 
 Required environment:
-    CC=clang  CXX=clang++  LDFLAGS='-fsanitize=address,undefined'
+    CC=clang  CXX=clang++  LDFLAGS='-fsanitize=address,undefined -fsanitize=fuzzer-no-link'
 
 Operating procedure:
 1. Discover the build system (look for CMakeLists.txt, Makefile, meson.build,
