@@ -805,7 +805,7 @@ class SignalRequest(BaseModel):
     """Payload to send a God-Mode signal to a running workflow."""
 
     workflow_id: str = Field(..., min_length=1)
-    signal: str = Field(..., pattern=r"^(pause_hunt|force_pivot|inject_seed)$")
+    signal: str = Field(..., pattern=r"^(pause_hunt|resume_hunt|force_pivot|inject_seed)$")
     payload: Any = Field(default=None)
 
 
@@ -826,7 +826,17 @@ async def send_campaign_signal(req: SignalRequest) -> SignalResponse:
     try:
         client = await connect()
         handle = client.get_workflow_handle(req.workflow_id)
-        await handle.signal(req.signal, req.payload)
+        if req.signal == "resume_hunt":
+            await handle.signal("pause_hunt", False)
+        elif req.signal == "pause_hunt":
+            await handle.signal("pause_hunt", bool(req.payload) if req.payload is not None else True)
+        elif req.signal == "force_pivot":
+            await handle.signal("force_pivot", str(req.payload) if req.payload is not None else "operator request")
+        elif req.signal == "inject_seed":
+            await handle.signal("inject_seed", req.payload if isinstance(req.payload, dict) else {})
+        else:
+            await handle.signal(req.signal, req.payload)
+
         log.info(
             "api.signal_sent",
             workflow_id=req.workflow_id,

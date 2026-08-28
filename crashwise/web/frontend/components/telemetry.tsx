@@ -16,14 +16,30 @@ export function LiveTelemetry() {
   const [uptime, setUptime] = useState(0);
 
   useEffect(() => {
-    const es = new EventSource("/api/v1/telemetry/stream");
-    es.onmessage = (event) => {
-      try { setData(JSON.parse(event.data)); } catch {}
-    };
-    es.onerror = () => es.close();
+    let es: EventSource | null = null;
+    let reconnectTimer: NodeJS.Timeout | null = null;
 
+    const connect = () => {
+      if (es) es.close();
+      es = new EventSource("/api/v1/telemetry/stream");
+      es.onmessage = (event) => {
+        try {
+          setData(JSON.parse(event.data));
+        } catch {}
+      };
+      es.onerror = () => {
+        if (es) es.close();
+        reconnectTimer = setTimeout(connect, 3000);
+      };
+    };
+
+    connect();
     const timer = setInterval(() => setUptime((u) => u + 1), 1000);
-    return () => { es.close(); clearInterval(timer); };
+    return () => {
+      if (es) es.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearInterval(timer);
+    };
   }, []);
 
   const stats = [
