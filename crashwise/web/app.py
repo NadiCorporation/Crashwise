@@ -29,7 +29,7 @@ from crashwise.web.models import Base, CrashTestCase, FuzzingCampaign
 
 log = get_logger(__name__)
 
-app = FastAPI(title="CrashWise Control Plane", version="1.1.0")
+app = FastAPI(title="CrashWise Control Plane", version="1.3.0")
 
 _engine = None
 _session_factory: async_sessionmaker | None = None

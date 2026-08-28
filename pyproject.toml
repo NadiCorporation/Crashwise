@@ -6,7 +6,7 @@
 
 [project]
 name = "crashwise"
-version = "0.1.0"
+version = "1.3.0"
 description = "Autonomous AI-powered platform for zero-day fuzzing, vulnerability discovery, and automated crash triage."
 readme = "README.md"
 license = { file = "LICENSE" }

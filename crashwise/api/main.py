@@ -242,7 +242,7 @@ async def lifespan(app: FastAPI) -> Any:
 app = FastAPI(
     title="CrashWise API",
     description="Management interface for autonomous fuzzing campaigns",
-    version="1.1.0",
+    version="1.3.0",
     lifespan=lifespan,
 )
 
