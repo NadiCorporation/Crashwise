@@ -713,6 +713,11 @@ def find_public_api(workdir: Path, *, max_results: int = 10) -> list[EntryPoint]
     candidates: list[EntryPoint] = []
     all_function_names: set[str] = set()
 
+    _EXCLUDED_PARTS = {
+        "test", "tests", "fuzz", "fuzzing", "build", "CMakeFiles",
+        "examples", "example", "docs", "doc", "sample", "samples", "vendor", "third_party",
+    }
+
     header_files: list[Path] = []
     for d in header_dirs:
         for h in d.rglob("*.h"):
@@ -720,7 +725,7 @@ def find_public_api(workdir: Path, *, max_results: int = 10) -> list[EntryPoint]
                 rel_parts = h.relative_to(d).parts[:-1]
             except ValueError:
                 rel_parts = h.parts[:-1]
-            if any(part.startswith(".") for part in rel_parts):
+            if any(part.startswith(".") or part.lower() in _EXCLUDED_PARTS for part in rel_parts):
                 continue
             header_files.append(h)
 

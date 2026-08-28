@@ -399,24 +399,29 @@ def _find_best_source_for_synthesis(workdir: Path) -> str | None:
         )
         # Find the .c file that implements this function.
         source_exts = {".c", ".cpp", ".cc", ".cxx"}
+        skip_dirs = {
+            "test", "tests", "fuzz", "fuzzing", "examples", "example",
+            "docs", "doc", "sample", "samples", "third_party", "vendor",
+            ".git", "build", "CMakeFiles",
+        }
         # Prioritize files whose name matches the function (compress→compress.c).
         candidates_by_name: list[Path] = []
         candidates_by_def: list[Path] = []
         for p in workdir.rglob("*"):
             if not p.is_file() or p.suffix.lower() not in source_exts:
                 continue
-            if ".git" in str(p) or "test" in p.parts:
+            if any(part.startswith(".") or part.lower() in skip_dirs for part in p.parts):
                 continue
-            if best_api.name.lower() in p.stem.lower():
+            if best_api.name.lower() in p.stem.lower() or p.stem.lower() in best_api.name.lower():
                 candidates_by_name.append(p)
                 continue
             try:
-                content = p.read_text(encoding="utf-8", errors="replace")[:16000]
+                content = p.read_text(encoding="utf-8", errors="replace")[:32000]
             except OSError:
                 continue
-            # Match function DEFINITION (has opening brace).
-            pattern = rf"^\w[\w\s\*]*\b{re.escape(best_api.name)}\s*\([^)]*\)\s*\{{"
-            if re.search(pattern, content, re.MULTILINE):
+            # Match function DEFINITION (function name followed by arguments and opening brace).
+            pattern = rf"\b{re.escape(best_api.name)}\s*\([^;{{]*\)\s*\{{"
+            if re.search(pattern, content, re.DOTALL | re.MULTILINE):
                 candidates_by_def.append(p)
         # Prefer name-matched file, then definition-matched.
         best_match = (candidates_by_name or candidates_by_def or [None])[0]

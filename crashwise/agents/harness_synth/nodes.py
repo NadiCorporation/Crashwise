@@ -253,6 +253,9 @@ async def validate_harness(state: HarnessState) -> HarnessState:
     for lib in target_root.rglob("*.a"):
         if "CMakeFiles" not in str(lib) and "test" not in str(lib).lower():
             extra_link_args.append(str(lib))
+    for lib in target_root.rglob("*.so"):
+        if "CMakeFiles" not in str(lib) and "test" not in str(lib).lower():
+            extra_link_args.append(str(lib))
     # Add common include dirs.
     for subdir in ("include", "src", "build", "lib", "libarchive"):
         inc = target_root / subdir
