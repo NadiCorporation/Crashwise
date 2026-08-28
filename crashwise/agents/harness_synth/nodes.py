@@ -509,25 +509,25 @@ def _check_target_redefinition(harness_code: str, source_path: Path) -> str | No
 
     # Read target source to find its function names.
     try:
-        target_content = source_path.read_text(encoding="utf-8", errors="replace")[:16000]
+        target_content = source_path.read_text(encoding="utf-8", errors="replace")[:32000]
     except OSError:
         return None  # Can't check — allow.
 
-    # Find function definitions in the target.
+    # Find top-level function definitions in the target source file.
     target_funcs: set[str] = set()
-    for m in _re.finditer(r"^\w[\w\s\*]*\s+(\w+)\s*\([^)]*\)\s*\{", target_content, _re.MULTILINE):
+    for m in _re.finditer(r"^[a-zA-Z_][\w\*\s]+\s+([a-zA-Z_]\w*)\s*\([^;{}]*\)\s*\{", target_content, _re.MULTILINE):
         name = m.group(1)
-        if name not in ("main", "if", "for", "while", "switch"):
+        if name not in ("main", "if", "for", "while", "switch", "catch", "LLVMFuzzerTestOneInput"):
             target_funcs.add(name)
 
     if not target_funcs:
         return None
 
-    # Check if the harness redefines any target function.
-    for m in _re.finditer(r"^\w[\w\s\*]*\s+(\w+)\s*\([^)]*\)\s*\{", harness_code, _re.MULTILINE):
+    # Check if the harness redefines any target function at top-level.
+    for m in _re.finditer(r"^[a-zA-Z_][\w\*\s]+\s+([a-zA-Z_]\w*)\s*\([^;{}]*\)\s*\{", harness_code, _re.MULTILINE):
         name = m.group(1)
-        if name == "LLVMFuzzerTestOneInput":
-            continue  # This is expected.
+        if name in ("LLVMFuzzerTestOneInput", "main", "if", "for", "while", "switch", "catch"):
+            continue
         if name in target_funcs:
             return f"Harness redefines target function '{name}' — target source is read-only"
 

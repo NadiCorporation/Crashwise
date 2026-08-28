@@ -37,9 +37,9 @@ Hard rules:
      No prose, no commentary, no markdown headings — just the code block.
   2. The harness MUST define exactly:
         extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
-  3. Inline the target function's source (or #include the original file
-     directly with `#include "<basename>"`) so no separate build step is
-     required. Prefer #include — it's safer and keeps the diff small.
+  3. Do NOT redefine, stub, or copy target function definitions into the harness.
+     Always #include the target headers (or header files from the project) and
+     call the APIs directly. The target library is already compiled and linked.
   4. Use `<fuzzer/FuzzedDataProvider.h>` (`FuzzedDataProvider fdp(data, size);`)
      to partition fuzzed input into structured fields:
        - Integers/enums: `fdp.ConsumeIntegral<T>()`, `fdp.ConsumeIntegralInRange<T>(min, max)`, `fdp.ConsumeEnum<T>()`
