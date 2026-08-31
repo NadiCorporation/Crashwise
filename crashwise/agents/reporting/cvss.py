@@ -4,7 +4,7 @@
 
 Uses a hybrid approach:
     1. **Heuristic rules** map bug types and exploitability scores to
-       CVSS metric values.
+       CVSS metric values with 4-tier severity alignment (Critical, High, Medium, Low).
     2. **AI provider** (optional) refines the vector when available.
 
 The calculator is conservative: when data is sparse it defaults to
@@ -65,11 +65,15 @@ _BUG_TYPE_CVSS: dict[str, dict[str, str]] = {
     },
     "null-pointer-dereference": {
         "AV": "N", "AC": "H", "PR": "N", "UI": "N",
-        "S": "U", "C": "N", "I": "N", "A": "H",
+        "S": "U", "C": "N", "I": "N", "A": "L",
+    },
+    "null-deref-read": {
+        "AV": "N", "AC": "H", "PR": "N", "UI": "N",
+        "S": "U", "C": "N", "I": "N", "A": "L",
     },
     "divide-by-zero": {
         "AV": "N", "AC": "H", "PR": "N", "UI": "N",
-        "S": "U", "C": "N", "I": "N", "A": "H",
+        "S": "U", "C": "N", "I": "N", "A": "L",
     },
     "uninitialized-read": {
         "AV": "N", "AC": "L", "PR": "N", "UI": "N",
@@ -211,7 +215,6 @@ def _compute_base_score(vector: str) -> float:
     ac = _METRIC_SCORES["AC"].get(metrics.get("AC", "L"), 0.77)
     pr = _METRIC_SCORES["PR"].get(metrics.get("PR", "N"), 0.85)
     ui = _METRIC_SCORES["UI"].get(metrics.get("UI", "N"), 0.85)
-    s = _METRIC_SCORES["S"].get(metrics.get("S", "U"), 6.42)
     c = _METRIC_SCORES["C"].get(metrics.get("C", "N"), 0.0)
     i = _METRIC_SCORES["I"].get(metrics.get("I", "N"), 0.0)
     a = _METRIC_SCORES["A"].get(metrics.get("A", "N"), 0.0)

@@ -179,6 +179,7 @@ def analyze_campaign(state: FuzzingCampaignState) -> FuzzingCampaignState:
         state.status = CampaignStatus.STALLED
         state.should_continue = True
         state.mutation_hint = _generate_mutation_hint(state, stall_reasons)
+        state.last_stall_reasons = stall_reasons
         log.warning(
             "feedback.stall_detected",
             iteration=state.iteration,
@@ -200,6 +201,101 @@ def analyze_campaign(state: FuzzingCampaignState) -> FuzzingCampaignState:
         edges=last.edges_hit,
         exec_per_sec=last.exec_per_sec,
     )
+    return state
+
+
+async def agentic_enrich(
+    state: FuzzingCampaignState,
+    *,
+    harness_code: str = "",
+    target_source_snippet: str = "",
+    fuzzer_type: str = "libfuzzer",
+    target_domain: str = "",
+    target_name: str = "",
+) -> FuzzingCampaignState:
+    """Enrich a stalled campaign state with LLM-powered analysis.
+
+    Called by the ``analyze_progress`` activity after ``analyze_campaign``
+    detects a stall. Invokes the agentic feedback analyzer to replace the
+    rule-based ``mutation_hint`` with a reasoned diagnosis and strategy.
+
+    Falls back gracefully when the LLM is unavailable — the rule-based
+    hint from ``analyze_campaign`` is preserved.
+
+    Parameters
+    ----------
+    state:
+        Campaign state with ``status == STALLED`` and ``last_stall_reasons``
+        populated by ``analyze_campaign``.
+    harness_code:
+        Current harness source code.
+    target_source_snippet:
+        Relevant target source around uncovered areas.
+    fuzzer_type:
+        ``"libfuzzer"`` or ``"aflpp"``.
+    target_domain:
+        Target domain from profiler (image, network, crypto, etc.).
+    target_name:
+        Target name (zlib, libpng, etc.).
+
+    Returns
+    -------
+    Updated state with enriched ``mutation_hint``.
+    """
+    if state.status != CampaignStatus.STALLED:
+        return state
+
+    stall_reasons = getattr(state, "last_stall_reasons", [])
+    if not stall_reasons:
+        return state
+
+    from crashwise.agents.feedback.agentic_analyzer import (
+        IterationSnapshot,
+        agentic_analyze,
+    )
+
+    history: list[IterationSnapshot] = []
+    if state.iteration_history:
+        for entry in state.iteration_history:
+            history.append(
+                IterationSnapshot(
+                    iteration=entry.get("iteration", 0),
+                    edges_hit=entry.get("edges_hit", 0),
+                    exec_per_sec=entry.get("exec_per_sec", 0.0),
+                    corpus_count=entry.get("corpus_count", 0),
+                    stability=entry.get("stability", 0.0),
+                    crash_count=entry.get("crash_count", 0),
+                )
+            )
+
+    result = await agentic_analyze(
+        coverage=state.last_coverage,
+        best_coverage=state.best_coverage,
+        harness_code=harness_code,
+        stall_reasons=stall_reasons,
+        iteration_history=history,
+        fuzzer_type=fuzzer_type,
+        target_domain=target_domain,
+        target_name=target_name,
+        target_source_snippet=target_source_snippet,
+        current_iteration=state.iteration,
+    )
+
+    if result.used_llm and result.mutation_hint:
+        state.mutation_hint = result.mutation_hint
+        log.info(
+            "feedback.agentic_enrichment_applied",
+            iteration=state.iteration,
+            confidence=result.confidence,
+            category=result.root_cause_category,
+        )
+    else:
+        log.info(
+            "feedback.agentic_enrichment_skipped",
+            iteration=state.iteration,
+            reason="llm_unavailable" if not result.used_llm else "empty_hint",
+        )
+
     return state
 
 
@@ -276,4 +372,4 @@ def _float_or(val: str | None, default: float) -> float:
         return default
 
 
-__all__ = ["analyze_campaign", "parse_afl_stats", "parse_libfuzzer_stats"]
+__all__ = ["agentic_enrich", "analyze_campaign", "parse_afl_stats", "parse_libfuzzer_stats"]

@@ -21,7 +21,7 @@ from typing import Any
 
 from crashwise.core.config import get_settings
 from crashwise.core.logging import get_logger
-from crashwise.core.models import FuzzJob, FuzzerType
+from crashwise.core.models import FuzzerType, FuzzJob
 
 log = get_logger(__name__)
 
@@ -160,6 +160,8 @@ class DockerManager:
         # Prepare host paths.
         job.output_dir.mkdir(parents=True, exist_ok=True)
         job.corpus_dir.mkdir(parents=True, exist_ok=True)
+        if job.crashes_dir is not None:
+            job.crashes_dir.mkdir(parents=True, exist_ok=True)
 
         # B13: defensively remove any stale container with the same name
         # before starting (Temporal activity retries reuse job_id; a worker
@@ -178,6 +180,7 @@ class DockerManager:
             "docker",
             "run",
             "-d",
+            "--init",
             "--name",
             container_name,
             # B3 — sandbox hardening.
@@ -210,21 +213,59 @@ class DockerManager:
         # Disk quota: --storage-opt requires overlay2 on xfs with pquota.
         # Try with it; if Docker rejects it, retry without.
         _storage_opt_args = ["--storage-opt", f"size={get_settings().docker_disk_quota}"]
+        harness_parent = job.harness_path.parent
+        target_root = harness_parent.parent if harness_parent.name == "harness" else harness_parent
+
         # AFL forkserver needs SYS_PTRACE; libFuzzer does not.
         if is_afl:
             cmd.extend(["--cap-add", "SYS_PTRACE"])
         cmd.extend(
             [
                 "-v",
-                f"{job.harness_path.parent}:/work:ro",
+                f"{harness_parent}:/work:ro",
+                "-v",
+                f"{target_root}:/target:ro",
                 "-v",
                 f"{job.corpus_dir}:/corpus:rw",
                 "-v",
                 f"{job.output_dir}:/out:rw",
             ]
         )
+        # Unified crash directory: both fuzzers write their crash artefacts
+        # to the same host directory so triage can harvest them uniformly.
+        if job.crashes_dir is not None:
+            cmd.extend(["-v", f"{job.crashes_dir}:/crashes:rw"])
+
+        # Dynamically discover all directories with shared libraries in target and harness
+        ld_dirs = [
+            "/target",
+            "/target/build",
+            "/target/build/lib",
+            "/target/lib",
+            "/work",
+            "/work/build",
+            "/work/build/lib",
+            "/work/lib",
+            "/usr/local/lib",
+        ]
+        if target_root.exists():
+            for so_file in target_root.rglob("*.so*"):
+                try:
+                    rel_parent = so_file.parent.relative_to(target_root)
+                    container_dir = f"/target/{rel_parent}".rstrip("/")
+                    if container_dir not in ld_dirs:
+                        ld_dirs.append(container_dir)
+                except ValueError:
+                    pass
+
+        default_ld_path = ":".join(dict.fromkeys(ld_dirs))
+        existing_ld_path = job.env_vars.get("LD_LIBRARY_PATH", "")
+        combined_ld_path = f"{default_ld_path}:{existing_ld_path}".rstrip(":")
+
         for key, val in job.env_vars.items():
-            cmd.extend(["-e", f"{key}={val}"])
+            if key != "LD_LIBRARY_PATH":
+                cmd.extend(["-e", f"{key}={val}"])
+        cmd.extend(["-e", f"LD_LIBRARY_PATH={combined_ld_path}"])
 
         # Entrypoint: run the harness.
         harness_in_container = f"/work/{job.harness_path.name}"
@@ -255,6 +296,10 @@ class DockerManager:
                     "-max_len=4096",
                     "-print_final_stats=1",
                     "-detect_leaks=0",
+                    # Route crash reproducers into the unified /crashes mount
+                    # (mapped to workdir/crashes) so triage harvests them the
+                    # same way it harvests AFL++ /out/crashes.
+                    "-artifact_prefix=/crashes/",
                 ]
             )
 
@@ -369,7 +414,7 @@ class DockerManager:
                 stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             else:
                 stdout, _ = await proc.communicate()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
             return -1
@@ -436,18 +481,22 @@ class DockerManager:
 
         preserve_dir.mkdir(parents=True, exist_ok=True)
 
-        # Try common corpus locations inside the container.
-        corpus_paths = ["/corpus", "/out/queue", "/out/corpus", "/tmp/corpus"]
+        # Try common corpus locations inside the container. AFL++ stores its
+        # coverage frontier in /out/queue (new interesting seeds), while
+        # libFuzzer grows its corpus in-place under /corpus. We copy the
+        # *contents* (trailing "/.") so the destination directory is directly
+        # reusable as a seed corpus for the next iteration.
+        corpus_paths = ["/out/queue", "/corpus", "/out/corpus", "/tmp/corpus"]
         for src in corpus_paths:
             proc = await asyncio.create_subprocess_exec(
                 "docker",
                 "cp",
-                f"{container_id}:{src}",
+                f"{container_id}:{src}/.",
                 str(preserve_dir),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await proc.communicate()
+            _, _stderr = await proc.communicate()
             if proc.returncode == 0:
                 log.info(
                     "docker.preserve_corpus.copied",
@@ -554,22 +603,39 @@ class DockerManager:
         )
         return False
 
-    async def logs(self, job_id: str, *, tail: int = 100) -> str:
-        """Fetch the last N lines of container stdout+stderr."""
+    async def logs(self, job_id: str, *, tail: int = 100, stderr: bool = False) -> str:
+        """Fetch the last N lines of container stdout+stderr.
+
+        Args:
+            job_id: The job identifier
+            tail: Number of lines to fetch
+            stderr: If True, fetch only stderr; if False, fetch stdout+stderr combined
+        """
         container_id = self._containers.get(job_id)
         if not container_id:
             return ""
-        proc = await asyncio.create_subprocess_exec(
-            "docker",
-            "logs",
-            "--tail",
-            str(tail),
-            container_id,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await proc.communicate()
-        return stdout.decode("utf-8", errors="replace")
+
+        cmd = ["docker", "logs", "--tail", str(tail)]
+        if stderr:
+            # Fetch only stderr by redirecting stdout to /dev/null
+            cmd.extend([container_id])
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr_output = await proc.communicate()
+            return stderr_output.decode("utf-8", errors="replace")
+        else:
+            # Fetch combined stdout+stderr
+            cmd.extend([container_id])
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await proc.communicate()
+            return stdout.decode("utf-8", errors="replace")
 
     async def is_alive(self, job_id: str) -> bool:
         """Check whether the container is still running."""
@@ -587,6 +653,34 @@ class DockerManager:
         )
         stdout, _ = await proc.communicate()
         return stdout.decode("utf-8", errors="replace").strip() == "true"
+
+    async def get_exit_code(self, job_id: str) -> int | None:
+        """Get the exit code of a stopped container.
+
+        Returns:
+            The exit code as an integer, or None if the container is still running
+            or doesn't exist.
+        """
+        container_id = self._containers.get(job_id)
+        if not container_id:
+            return None
+
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "inspect",
+            "-f",
+            "{{.State.ExitCode}}",
+            container_id,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        exit_code_str = stdout.decode("utf-8", errors="replace").strip()
+
+        try:
+            return int(exit_code_str)
+        except (ValueError, TypeError):
+            return None
 
     async def stats(self, job_id: str) -> dict[str, Any]:
         """Return container CPU / memory stats (best-effort)."""
@@ -665,21 +759,20 @@ class DockerManager:
     async def _docker_available(self) -> bool:
         """Verify Docker daemon is installed AND responsive.
 
-        Checks both binary presence and daemon responsiveness via
-        'docker info'. A hanging daemon is detected by a 10-second timeout.
+        Checks binary presence and daemon responsiveness via 'docker version'.
         """
         if not shutil.which("docker"):
             return False
         try:
             proc = await asyncio.create_subprocess_exec(
-                "docker", "info",
+                "docker", "version",
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            await asyncio.wait_for(proc.communicate(), timeout=10.0)
+            await asyncio.wait_for(proc.communicate(), timeout=30.0)
             return proc.returncode == 0
-        except asyncio.TimeoutError:
-            log.error("docker.daemon_timeout", detail="docker info timed out after 10s")
+        except TimeoutError:
+            log.error("docker.daemon_timeout", detail="docker version timed out after 30s")
             return False
         except Exception:
             return False
@@ -732,7 +825,7 @@ class DockerManager:
             _, stderr = await asyncio.wait_for(
                 pull_proc.communicate(), timeout=300.0  # 5-minute pull timeout.
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Kill the stuck pull process.
             with contextlib.suppress(ProcessLookupError):
                 pull_proc.kill()
@@ -748,6 +841,6 @@ class DockerManager:
 
 __all__ = [
     "DockerManager",
-    "parse_libfuzzer_log_tail",
     "parse_afl_fuzzer_stats",
+    "parse_libfuzzer_log_tail",
 ]

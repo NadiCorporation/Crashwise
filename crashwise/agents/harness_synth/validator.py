@@ -342,7 +342,27 @@ async def syntax_check_harness(source_code: str) -> ValidationResult:
         ))
         return result
 
-    lang = "c++" if any(kw in source_code for kw in ("class ", "namespace ", "template", "std::")) else "c"
+    lang = (
+        "c++"
+        if any(
+            kw in source_code
+            for kw in (
+                "class ",
+                "namespace ",
+                "template",
+                "std::",
+                "FuzzedDataProvider",
+                "<fuzzer/",
+                "<vector>",
+                "<string>",
+                "<memory>",
+                "bool",
+                "reinterpret_cast",
+                "static_cast",
+            )
+        )
+        else "c"
+    )
     suffix = ".cpp" if lang == "c++" else ".c"
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as tmp:
@@ -368,7 +388,7 @@ async def syntax_check_harness(source_code: str) -> ValidationResult:
             ))
             result.passed = False
             log.warning("harness_validator.syntax_check_failed", error=first_error[:200])
-    except asyncio.TimeoutError:
+    except TimeoutError:
         result.issues.append(ValidationIssue(
             severity="block",
             category="syntax",
@@ -428,4 +448,4 @@ def _strip_comments_and_strings(source: str) -> str:
     return result
 
 
-__all__ = ["ValidationIssue", "ValidationResult", "validate_harness", "validate_harness_full", "syntax_check_harness"]
+__all__ = ["ValidationIssue", "ValidationResult", "syntax_check_harness", "validate_harness", "validate_harness_full"]

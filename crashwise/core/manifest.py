@@ -144,7 +144,7 @@ class CrashwiseManifest(BaseModel):
     reporting: ReportingSection = Field(default_factory=ReportingSection)
 
     @classmethod
-    def from_file(cls, path: Path) -> "CrashwiseManifest":
+    def from_file(cls, path: Path) -> CrashwiseManifest:
         """Load and validate a manifest from a YAML file."""
         if not path.exists():
             raise FileNotFoundError(f"Manifest not found: {path}")

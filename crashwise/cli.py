@@ -14,7 +14,7 @@ Commands
 * ``crashwise run``       — Submit a fuzzing workflow.
 * ``crashwise worker``    — Start a Temporal worker.
 * ``crashwise api``       — Launch the FastAPI management server.
-* ``crashwise dashboard`` — Launch the Streamlit intelligence dashboard.
+* ``crashwise dashboard`` — Launch the unified Web Command Center dashboard (alias: ``ui``).
 * ``crashwise signal``    — Send a God-Mode signal (force_pivot, inject_seed,
                             pause_hunt, resume_hunt) to a live campaign.
 """
@@ -26,6 +26,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import typer
 import uvicorn
@@ -36,12 +37,11 @@ from crashwise import __version__
 from crashwise.core.config import get_settings
 from crashwise.core.database import close_db, init_db
 from crashwise.core.logging import configure_logging, get_logger
-from crashwise.core.manifest import CrashwiseManifest, load_manifest_or_none
-from crashwise.core.models import FuzzerType, FuzzingInput
+from crashwise.core.manifest import load_manifest_or_none
+from crashwise.core.models import FuzzerType, FuzzingInput, FuzzingOutput
 from crashwise.orchestration.client import (
     TemporalConnectionError,
     connect,
-    execute_main_workflow,
     start_main_workflow,
 )
 from crashwise.orchestration.worker import run_worker
@@ -67,16 +67,136 @@ def version() -> None:
 
 
 @app.command()
-def configure() -> None:
-    """Interactive LLM provider setup wizard.
+def configure(
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="Run non-interactively and apply CLI options directly to .env",
+    ),
+    env_file: Path = typer.Option(
+        Path(".env"),
+        "--env-file",
+        help="Path to .env configuration file",
+    ),
+    api_port: int | None = typer.Option(
+        None,
+        "--api-port",
+        help="CrashWise API server port (CRASHWISE_API_PORT)",
+    ),
+    temporal_host: str | None = typer.Option(
+        None,
+        "--temporal-host",
+        help="Temporal orchestrator host:port (TEMPORAL_HOST)",
+    ),
+    temporal_namespace: str | None = typer.Option(
+        None,
+        "--temporal-namespace",
+        help="Temporal namespace (TEMPORAL_NAMESPACE)",
+    ),
+    temporal_task_queue: str | None = typer.Option(
+        None,
+        "--temporal-task-queue",
+        help="Temporal task queue (TEMPORAL_TASK_QUEUE)",
+    ),
+    database_url: str | None = typer.Option(
+        None,
+        "--database-url",
+        help="SQLAlchemy database URL (DATABASE_URL)",
+    ),
+    redis_url: str | None = typer.Option(
+        None,
+        "--redis-url",
+        help="Redis URL (REDIS_URL)",
+    ),
+    worker_name: str | None = typer.Option(
+        None,
+        "--worker-name",
+        help="Worker name identifier (WORKER_NAME)",
+    ),
+    workdir: Path | None = typer.Option(
+        None,
+        "--workdir",
+        help="Root target workdir path (CRASHWISE_WORKDIR)",
+    ),
+    build_timeout: int | None = typer.Option(
+        None,
+        "--build-timeout",
+        help="Target build timeout in seconds (CRASHWISE_BUILD_TIMEOUT)",
+    ),
+    llm_provider: str | None = typer.Option(
+        None,
+        "--llm-provider",
+        help="LLM provider for agentic workflows (anthropic/openai/ollama/custom)",
+    ),
+    llm_model: str | None = typer.Option(
+        None,
+        "--llm-model",
+        help="LLM model name (CRASHWISE_LLM_MODEL)",
+    ),
+    llm_api_key: str | None = typer.Option(
+        None,
+        "--llm-api-key",
+        help="API key for agentic LLM provider",
+    ),
+    openai_api_base: str | None = typer.Option(
+        None,
+        "--openai-api-base",
+        help="Custom OpenAI-compatible base URL (OPENAI_API_BASE)",
+    ),
+    ai_provider: str | None = typer.Option(
+        None,
+        "--ai-provider",
+        help="AI provider for crash triage (ollama/venice/openai_compatible/none)",
+    ),
+    ai_model: str | None = typer.Option(
+        None,
+        "--ai-model",
+        help="AI model for crash triage (AI_MODEL)",
+    ),
+    ai_api_key: str | None = typer.Option(
+        None,
+        "--ai-api-key",
+        help="API key for crash triage (AI_API_KEY)",
+    ),
+    ollama_url: str | None = typer.Option(
+        None,
+        "--ollama-url",
+        help="Ollama base URL (OLLAMA_URL)",
+    ),
+) -> None:
+    """Configure CrashWise AI providers, infrastructure, and runtime settings.
 
-    Guides you through choosing AI providers for agentic workflows
-    (harness synthesis, evolution) and crash triage (root-cause analysis).
-    Saves configuration to .env in the current directory.
+    Runs interactive wizard by default, or accepts flags in --non-interactive mode.
+    Saves configuration to .env (or custom --env-file).
     """
-    from crashwise.core.configure import run_configure_wizard
+    if non_interactive:
+        from crashwise.core.configure import run_configure_non_interactive
 
-    run_configure_wizard()
+        saved = run_configure_non_interactive(
+            env_path=env_file,
+            api_port=api_port,
+            temporal_host=temporal_host,
+            temporal_namespace=temporal_namespace,
+            temporal_task_queue=temporal_task_queue,
+            database_url=database_url,
+            redis_url=redis_url,
+            worker_name=worker_name,
+            workdir=workdir,
+            build_timeout=build_timeout,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            llm_api_key=llm_api_key,
+            openai_api_base=openai_api_base,
+            ai_provider=ai_provider,
+            ai_model=ai_model,
+            ai_api_key=ai_api_key,
+            ollama_url=ollama_url,
+        )
+        console.print(f"[bold green]Configuration saved to[/] {saved}")
+    else:
+        from crashwise.core.configure import run_configure_wizard
+
+        run_configure_wizard(env_path=env_file)
 
 
 @app.command()
@@ -108,16 +228,15 @@ def init(
       3. Create database tables.
     """
     configure_logging()
-    from crashwise.core.database import close_db, init_db
     from crashwise.core.discovery import discover_project
-    from crashwise.core.manifest import CrashwiseManifest, MANIFEST_FILENAME
+    from crashwise.core.manifest import MANIFEST_FILENAME
 
     target_dir = target_dir.resolve()
     if not target_dir.is_dir():
         console.print(f"[bold red]Not a directory:[/] {target_dir}")
         raise typer.Exit(code=1)
 
-    console.print(f"[bold cyan]CrashWise Project Initialisation[/]")
+    console.print("[bold cyan]CrashWise Project Initialisation[/]")
     console.print(f"Target directory: {target_dir}")
     console.print()
 
@@ -183,7 +302,6 @@ def doctor(
     """Run system health diagnostics (the Sentinel)."""
     from crashwise.core.sentinel import (
         CheckStatus,
-        generate_setup_script,
         get_missing_packages,
         run_all_checks,
     )
@@ -313,7 +431,7 @@ def setup(
                 console.print(
                     "[bold red]bash not found. Cannot execute setup script.[/]"
                 )
-                raise typer.Exit(code=1)
+                raise typer.Exit(code=1) from None
 
     # ── Post-install: docker group + daemon socket ────────────────────
     _interactive_post_install(yes=yes)
@@ -541,10 +659,24 @@ def run(
     branch: str | None = typer.Option(None, "--branch", "-b"),
     harness: str | None = typer.Option(None, "--harness", "-H"),
     sanitizers: str = typer.Option("address,undefined", "--sanitizers", "-s"),
+    custom_flags: str | None = typer.Option(None, "--custom-flags", help="Custom AFL++ or libFuzzer flags"),
+    model: str | None = typer.Option(None, "--model", help="LLM model (e.g. deepseek-chat, claude-sonnet-4-5, gpt-4o)"),
+    temperature: float | None = typer.Option(None, "--temperature", help="LLM temperature (0.0 to 2.0)"),
+    base_url: str | None = typer.Option(None, "--base-url", help="OpenAI-compatible base URL (e.g. https://api.deepseek.com)"),
+    api_key: str | None = typer.Option(None, "--api-key", help="LLM API key"),
+    reasoning_effort: str | None = typer.Option(None, "--reasoning-effort", help="Reasoning effort ('low', 'medium', 'high')"),
+    max_synth_retries: int = typer.Option(4, "--max-synth-retries", help="Max harness synthesis retry attempts"),
+    enable_mab: bool = typer.Option(False, "--mab", help="Enable Multi-Armed Bandit strategy switching"),
+    mab_algorithm: str = typer.Option("thompson", "--mab-algorithm", help="MAB algorithm ('thompson' or 'ucb1')"),
+    enable_self_healing: bool = typer.Option(False, "--self-healing", help="Enable autonomous build & patch repair agent"),
+    max_repair_attempts: int = typer.Option(10, "--max-repair-attempts", help="Max healing agent iterations"),
     host: str | None = typer.Option(None, "--host"),
     namespace: str | None = typer.Option(None, "--namespace"),
     task_queue: str | None = typer.Option(None, "--task-queue"),
-    manifest: Path | None = typer.Option(None, "--manifest", "-m", help="Path to crashwise.yaml"),
+    name: str | None = typer.Option(None, "--name", help="Target name or identifier"),
+    subdir: str | None = typer.Option(None, "--subdir", "--target-subdir", help="Subdirectory inside repo to target"),
+    clone_depth: int = typer.Option(1, "--clone-depth", help="Git clone depth (0 for full clone)", min=0),
+    manifest: Path | None = typer.Option(None, "--manifest", help="Path to crashwise.yaml"),
     skip_preflight: bool = typer.Option(
         False,
         "--skip-preflight",
@@ -600,26 +732,39 @@ def run(
         console.print(f"  Project: [green]{manifest_obj.project.name}[/] ({manifest_obj.project.language})")
         console.print(f"  Build:   [green]{manifest_obj.build.system}[/]")
 
-    payload = FuzzingInput.model_validate(
-        {
-            "target_repo": target_repo,
-            "fuzzer_type": fuzzer,
-            "timeout_seconds": timeout_seconds,
-            "target_branch": branch,
-            "harness_path": harness,
-            "sanitizers": sanitizers,
-        }
-    )
+    payload_dict: dict[str, Any] = {
+        "target_repo": target_repo,
+        "target_name": name,
+        "target_subdir": subdir,
+        "target_clone_depth": clone_depth,
+        "fuzzer_type": fuzzer,
+        "timeout_seconds": timeout_seconds,
+        "target_branch": branch,
+        "harness_path": harness,
+        "sanitizers": sanitizers,
+        "custom_fuzzer_flags": custom_flags,
+        "llm_model": model,
+        "llm_temperature": temperature,
+        "llm_base_url": base_url,
+        "llm_api_key": api_key,
+        "reasoning_effort": reasoning_effort,
+        "max_synth_retries": max_synth_retries,
+        "enable_mab": enable_mab,
+        "mab_algorithm": mab_algorithm,
+        "enable_self_healing": enable_self_healing,
+        "healing_max_attempts": max_repair_attempts,
+    }
+    payload = FuzzingInput.model_validate(payload_dict)
     console.print("[bold cyan]Submitting MainFuzzingWorkflow[/]")
     console.print(JSON(payload.model_dump_json(indent=2)))
 
-    api_url = os.environ.get("CRASHWISE_API_URL", "http://localhost:8000")
+    api_url = os.environ.get("CRASHWISE_API_URL") or get_settings().crashwise_api_url
 
     # Try submitting via the API (creates campaign record + starts workflow).
     async def _submit_via_api() -> tuple[str, str] | None:
         import httpx
 
-        target_name = target_repo.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+        target_name = name or target_repo.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
         try:
             async with httpx.AsyncClient(timeout=10) as http:
                 resp = await http.post(
@@ -627,9 +772,24 @@ def run(
                     json={
                         "target_repo": target_repo,
                         "target_name": target_name,
+                        "target_subdir": subdir,
+                        "target_clone_depth": clone_depth,
                         "fuzzer_type": fuzzer.value,
                         "timeout_seconds": timeout_seconds,
+                        "target_branch": branch,
+                        "harness_path": harness,
                         "sanitizers": sanitizers,
+                        "custom_fuzzer_flags": custom_flags,
+                        "llm_model": model,
+                        "llm_temperature": temperature,
+                        "llm_base_url": base_url,
+                        "llm_api_key": api_key,
+                        "reasoning_effort": reasoning_effort,
+                        "max_synth_retries": max_synth_retries,
+                        "enable_mab": enable_mab,
+                        "mab_algorithm": mab_algorithm,
+                        "enable_self_healing": enable_self_healing,
+                        "healing_max_attempts": max_repair_attempts,
                     },
                 )
                 resp.raise_for_status()
@@ -665,12 +825,11 @@ def run(
         console.print(f"\n[bold cyan]⏳ Workflow running...[/] (timeout: {timeout_seconds}s)")
         console.print("[dim]Waiting for result. Use --detach to submit and exit immediately.[/]\n")
         try:
-            async def _await_result() -> "FuzzingOutput":
-                from crashwise.core.models import FuzzingOutput
+            async def _await_result() -> FuzzingOutput:
 
                 client = await connect(host=host, namespace=namespace)
                 handle = client.get_workflow_handle(workflow_id)
-                return await handle.result()
+                return cast(FuzzingOutput, await handle.result())
 
             result = asyncio.run(_await_result())
             console.print("[bold green]✓ Workflow complete![/]")
@@ -736,31 +895,64 @@ def api(
 @app.command()
 def dashboard(
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind address"),
-    port: int = typer.Option(8501, "--port", "-p", help="Bind port"),
-    api_url: str | None = typer.Option(
-        None, "--api-url", help="Base URL for the management API"
+    port: int = typer.Option(8000, "--port", "-p", help="Bind port"),
+    dev: bool = typer.Option(
+        False, "--dev", help="Launch Next.js in hot-reloading development mode"
+    ),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Open dashboard in default web browser"
     ),
 ) -> None:
-    """Launch the Streamlit intelligence dashboard."""
+    """Launch the unified CrashWise Web Command Center dashboard."""
     configure_logging()
-    dashboard_path = Path(__file__).parent / "dashboard" / "app.py"
-    if not dashboard_path.exists():
-        console.print(f"[bold red]Dashboard not found:[/] {dashboard_path}")
-        raise typer.Exit(code=1)
+    frontend_dir = Path(__file__).parent / "web" / "frontend"
 
-    env = os.environ.copy()
-    if api_url:
-        env["CRASHWISE_API_URL"] = api_url
+    if dev:
+        if not (frontend_dir / "package.json").exists():
+            console.print(f"[bold red]Frontend directory not found:[/] {frontend_dir}")
+            raise typer.Exit(code=1)
+        console.print(
+            f"[bold cyan]Launching Next.js UI development server on http://{host}:{port}...[/]"
+        )
+        cmd = ["npm", "run", "dev", "--", "-p", str(port), "-H", host]
+        subprocess.run(cmd, cwd=str(frontend_dir), check=False)
+        return
 
-    log.info("dashboard.starting", host=host, port=port, api_url=api_url)
-    cmd = [
-        sys.executable, "-m", "streamlit", "run", str(dashboard_path),
-        "--server.address", host,
-        "--server.port", str(port),
-        "--server.headless", "true",
-        "--browser.gatherUsageStats", "false",
-    ]
-    subprocess.run(cmd, env=env, check=False)
+    url = f"http://{'localhost' if host == '0.0.0.0' else host}:{port}"
+    console.print(
+        f"[bold green]Starting CrashWise Web Command Center on {url}[/]"
+    )
+    if open_browser:
+        try:
+            import webbrowser
+
+            webbrowser.open(url)
+        except Exception:
+            pass
+
+    uvicorn.run(
+        "crashwise.api.main:app",
+        host=host,
+        port=port,
+        reload=False,
+        workers=1,
+        log_level=get_settings().log_level.lower(),
+    )
+
+
+@app.command(name="ui")
+def ui(
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind address"),
+    port: int = typer.Option(8000, "--port", "-p", help="Bind port"),
+    dev: bool = typer.Option(
+        False, "--dev", help="Launch Next.js in hot-reloading development mode"
+    ),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Open dashboard in default web browser"
+    ),
+) -> None:
+    """Alias for 'crashwise dashboard' — Launch the Web Command Center."""
+    dashboard(host=host, port=port, dev=dev, open_browser=open_browser)
 
 
 @app.command()
@@ -904,7 +1096,7 @@ def exploit(
                 crash_id=crash_id,
                 raw_text=crash.stack_trace,
                 signal=crash.signal,
-                stack_trace=crash.stack_trace,
+                asan_output=crash.stack_trace,
             )
 
             result = await generate_exploit(report, target_func="")
@@ -950,15 +1142,15 @@ def exploit(
                 await session.commit()
 
                 if verify_result.compiled:
-                    console.print(f"[bold green]Compilation:[/] OK")
+                    console.print("[bold green]Compilation:[/] OK")
                 else:
-                    console.print(f"[bold red]Compilation:[/] FAILED")
+                    console.print("[bold red]Compilation:[/] FAILED")
                     console.print(f"  {verify_result.stderr[:500]}")
 
                 if verify_result.crash_reproduced:
                     console.print(f"[bold green]Crash reproduced:[/] YES ({verify_result.signal_received})")
                 else:
-                    console.print(f"[bold yellow]Crash reproduced:[/] NO")
+                    console.print("[bold yellow]Crash reproduced:[/] NO")
 
     try:
         asyncio.run(_generate())

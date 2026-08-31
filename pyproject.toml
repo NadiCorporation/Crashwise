@@ -6,11 +6,11 @@
 
 [project]
 name = "crashwise"
-version = "0.1.0"
-description = "Autonomous AI-powered platform for zero-day fuzzing, vulnerability discovery, and automated crash triage."
+version = "0.2.0.dev0"
+description = "Autonomous AI-powered platform for zero-day fuzzing, vulnerability discovery, and automated crash triage (Experimental Pre-Alpha)."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
     { name = "Yahya Toubali" },
     { name = "CrashWise Contributors" },
@@ -87,15 +87,20 @@ dependencies = [
     # Distributed storage (Cloudflare R2 / S3-compatible)
     "aioboto3>=13.0.0",
 
+    # Healing Engine (openhands-sdk)
+    "openhands-sdk>=0.39",
+
     # Distributed state (Redis)
     "redis>=5.0.0",
     "async-timeout>=4.0.0",
 
-    # Intelligence Dashboard
-    "streamlit>=1.40.0",
-
     # Manifest parsing
     "pyyaml>=6.0.0",
+
+    # AST-based code analysis (Tree-sitter C/C++)
+    "tree-sitter>=0.24.0",
+    "tree-sitter-c>=0.23.0",
+    "tree-sitter-cpp>=0.23.0",
 ]
 
 [project.urls]
@@ -124,6 +129,7 @@ dev = [
     "pytest-cov>=5.0.0",
     "types-pyyaml>=6.0.12",
     "pre-commit>=3.8.0",
+    "paramiko>=5.0.0",
 ]
 
 # ── Ruff (lint + format) ──────────────────────────────────────────────────────

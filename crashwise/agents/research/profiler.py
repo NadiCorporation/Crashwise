@@ -147,7 +147,7 @@ async def profile_target(payload: ProfileTargetInput) -> ProfileTargetOutput:
     loc_info = _run_cloc(workdir)
 
     # 3. Regex-based analysis across all source files.
-    domain_votes: dict[TargetDomain, int] = {d: 0 for d in TargetDomain}
+    domain_votes: dict[TargetDomain, int] = dict.fromkeys(TargetDomain, 0)
     dangerous_found: set[DangerousFunction] = set()
     attack_surface: set[str] = set()
     total_complexity = 0

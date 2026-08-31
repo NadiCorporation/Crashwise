@@ -12,7 +12,6 @@ from uuid import uuid4
 from sqlalchemy import (
     Column,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,

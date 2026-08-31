@@ -17,8 +17,12 @@ Usage::
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+
+# Re-export asynccontextmanager for get_session
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -35,9 +39,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
-# Re-export asynccontextmanager for get_session
-from contextlib import asynccontextmanager
 
 from crashwise.core.config import get_settings
 from crashwise.core.logging import get_logger
@@ -74,12 +75,12 @@ class Campaign(Base):
     )
 
     # Relationships
-    runs: Mapped[list["FuzzingRun"]] = relationship(
+    runs: Mapped[list[FuzzingRun]] = relationship(
         back_populates="campaign",
         cascade="all, delete-orphan",
         lazy="selectin",
     )
-    seeds: Mapped[list["Seed"]] = relationship(
+    seeds: Mapped[list[Seed]] = relationship(
         back_populates="campaign",
         cascade="all, delete-orphan",
         lazy="selectin",
@@ -105,7 +106,7 @@ class FuzzingRun(Base):
 
     # Relationships
     campaign: Mapped[Campaign] = relationship(back_populates="runs")
-    crashes: Mapped[list["Crash"]] = relationship(
+    crashes: Mapped[list[Crash]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
         lazy="selectin",
@@ -153,7 +154,7 @@ class Crash(Base):
 
     # Relationships
     run: Mapped[FuzzingRun | None] = relationship(back_populates="crashes")
-    seed: Mapped["Seed | None"] = relationship(back_populates="crashes")
+    seed: Mapped[Seed | None] = relationship(back_populates="crashes")
 
 
 class Seed(Base):
@@ -208,32 +209,48 @@ class CampaignKV(Base):
     )
 
 
-# ── Lifecycle helpers ────────────────────────────────────────────────────────
+def _ensure_engine() -> tuple[Any, Any]:
+    """Ensure engine and session factory are initialized with proper pooling."""
+    global _engine, _session_factory
+
+    if _engine is None or _session_factory is None:
+        settings = get_settings()
+        engine_kwargs: dict[str, Any] = {
+            "echo": False,
+            "future": True,
+        }
+        # Configure connection pool for non-SQLite databases (PostgreSQL/MySQL)
+        if "sqlite" not in settings.database_url:
+            engine_kwargs.update({
+                "pool_size": 20,
+                "max_overflow": 10,
+                "pool_pre_ping": True,
+                "pool_recycle": 300,
+            })
+
+        _engine = create_async_engine(settings.database_url, **engine_kwargs)
+        _session_factory = async_sessionmaker(
+            bind=_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+
+    return _engine, _session_factory
+
 
 async def init_db(*, drop: bool = False) -> None:
-    """Create all tables.  Call once at application startup.
+    """Create all tables. Call once at application startup.
 
     Parameters
     ----------
     drop:
         If ``True``, drop existing tables first (useful for tests).
     """
-    global _engine, _session_factory
-
+    engine, _ = _ensure_engine()
     settings = get_settings()
-    _engine = create_async_engine(
-        settings.database_url,
-        echo=False,
-        future=True,
-    )
-    _session_factory = async_sessionmaker(
-        bind=_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
-    )
 
-    async with _engine.begin() as conn:
+    async with engine.begin() as conn:
         if drop:
             log.warning("database.dropping_tables")
             await conn.run_sync(Base.metadata.drop_all)
@@ -243,11 +260,12 @@ async def init_db(*, drop: bool = False) -> None:
 
 
 async def close_db() -> None:
-    """Dispose of the engine.  Call at shutdown."""
-    global _engine
+    """Dispose of the engine. Call at shutdown."""
+    global _engine, _session_factory
     if _engine is not None:
         await _engine.dispose()
         _engine = None
+        _session_factory = None
         log.info("database.closed")
 
 
@@ -261,10 +279,9 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             session.add(campaign)
             await session.commit()
     """
-    if _session_factory is None:
-        raise RuntimeError("Database not initialised. Call init_db() first.")
+    _, session_factory = _ensure_engine()
 
-    async with _session_factory() as session:
+    async with session_factory() as session:
         try:
             yield session
         except Exception:
@@ -320,13 +337,13 @@ async def get_crashes_for_campaign(
 __all__ = [
     "Base",
     "Campaign",
-    "FuzzingRun",
     "Crash",
+    "FuzzingRun",
     "Seed",
-    "init_db",
     "close_db",
-    "get_session",
-    "get_campaigns",
     "get_campaign_by_id",
+    "get_campaigns",
     "get_crashes_for_campaign",
+    "get_session",
+    "init_db",
 ]

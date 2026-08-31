@@ -9,14 +9,21 @@ emits a structured :class:`TriageOutput`.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from temporalio import activity
 
 from crashwise.agents.triage.analyzer import triage_batch
-from crashwise.agents.triage.models import CrashReport, StackFrame
+from crashwise.agents.triage.dedup import compute_stack_hash
+from crashwise.agents.triage.models import CrashReport, StackFrame, TriageResult
 from crashwise.core.logging import get_logger
-from crashwise.core.models import CrashSeverity, TriageInput, TriageOutput
+from crashwise.core.models import (
+    CrashSeverity,
+    TriagedCrashRef,
+    TriageInput,
+    TriageOutput,
+)
 
 log = get_logger(__name__)
 
@@ -29,9 +36,9 @@ def _parse_gdb_backtrace(raw: str) -> list[StackFrame]:
     """
     frames: list[StackFrame] = []
     # Pattern 1: #0  function(args) at file:line
-    pat1 = __import__("re").compile(r"#\d+\s+(.+?)\s+at\s+([^:]+):(\d+)")
+    pat1 = re.compile(r"#\d+\s+(.+?)\s+at\s+([^:]+):(\d+)")
     # Pattern 2: #0  0xaddr in function () from module
-    pat2 = __import__("re").compile(
+    pat2 = re.compile(
         r"#\d+\s+(0x[0-9a-fA-F]+\s+)?in\s+(.+?)\s+\(\)\s+(from\s+(.+))?"
     )
 
@@ -63,6 +70,62 @@ def _parse_gdb_backtrace(raw: str) -> list[StackFrame]:
     return frames
 
 
+# Canonical clang/libgcc AddressSanitizer frame layout:
+#     #0 0x4e6c1d in inflate_fast /src/zlib/inflate.c:232:3
+#     #1 0x7f8b2c3a4d11 in parse_packet (libparser.so+0x4d11)
+# The optional trailing ":col" is intentionally ignored.
+_ASAN_FRAME_RE = re.compile(
+    r"#\d+\s+0x[0-9a-fA-F]+\s+in\s+(?P<func>.+?)\s+"
+    r"(?P<file>[^\s]+?):(?P<line>\d+)"
+)
+
+# Degenerate form with no source location:  #0 0xADDR in func
+_ASAN_FRAME_NOFILE_RE = re.compile(
+    r"#\d+\s+0x[0-9a-fA-F]+\s+in\s+(?P<func>\S+)"
+)
+
+
+def _parse_asan_backtrace(raw: str) -> list[StackFrame]:
+    """Parse AddressSanitizer stack frames.
+
+    Handles the canonical ``#0 0xADDR in func /path/file.c:line`` layout
+    emitted by ASAN (which :func:`_parse_gdb_backtrace` does not), plus the
+    degenerate ``#0 0xADDR in func`` form when no source location is present.
+    Function offsets (``func+0x123``) are stripped for hash stability.
+    """
+    frames: list[StackFrame] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        m = _ASAN_FRAME_RE.search(line)
+        if m:
+            func = _strip_asan_offset(m.group("func").strip())
+            frames.append(
+                StackFrame(
+                    function=func,
+                    file=m.group("file").strip(),
+                    line=int(m.group("line")),
+                )
+            )
+            continue
+        m2 = _ASAN_FRAME_NOFILE_RE.search(line)
+        if m2:
+            frames.append(StackFrame(function=_strip_asan_offset(m2.group("func").strip())))
+    return frames
+
+
+def _strip_asan_offset(func: str) -> str:
+    """Remove a trailing ``+0x…`` intra-function offset from an ASAN symbol."""
+    return re.sub(r"\+0x[0-9a-fA-F]+$", "", func).strip()
+
+
+def _extract_stack_frames(raw: str) -> list[StackFrame]:
+    """Extract stack frames from a log blob, preferring ASAN over GDB format."""
+    asan_frames = _parse_asan_backtrace(raw)
+    if asan_frames:
+        return asan_frames
+    return _parse_gdb_backtrace(raw)
+
+
 def _harvest_reports(crashes_dir: Path, logs_path: Path | None = None) -> list[CrashReport]:
     """Walk ``crashes_dir`` and build :class:`CrashReport` objects.
 
@@ -80,13 +143,7 @@ def _harvest_reports(crashes_dir: Path, logs_path: Path | None = None) -> list[C
     if logs_path and logs_path.exists():
         try:
             log_text = logs_path.read_text(encoding="utf-8", errors="replace")
-            # Split on ASAN error boundaries to get individual crash reports.
-            import re
-            asan_pattern = re.compile(
-                r"(=+\d+=+ERROR: AddressSanitizer:.*?)(?==+\d+=+ERROR:|SUMMARY: AddressSanitizer)",
-                re.DOTALL,
-            )
-            # Simpler fallback: find all ASAN blocks.
+            # Simpler approach: find all ASAN blocks.
             idx = 0
             while True:
                 start = log_text.find("ERROR: AddressSanitizer", idx)
@@ -107,10 +164,8 @@ def _harvest_reports(crashes_dir: Path, logs_path: Path | None = None) -> list[C
             continue
         raw = entry.read_text(encoding="utf-8", errors="replace")
 
-        # Heuristic: if the file itself looks like a GDB/ASAN log, parse it.
-        gdb_frames: list[StackFrame] = []
-        if "#0" in raw and ("in " in raw or "at " in raw):
-            gdb_frames = _parse_gdb_backtrace(raw)
+        # Prefer ASAN frame parsing (real ASAN output), fall back to GDB.
+        stack_frames: list[StackFrame] = _extract_stack_frames(raw)
 
         # Extract ASAN block from the file itself (if it's a log, not binary).
         asan_block = ""
@@ -126,15 +181,16 @@ def _harvest_reports(crashes_dir: Path, logs_path: Path | None = None) -> list[C
         if not asan_block and log_asan_blocks:
             # Use the next available ASAN block (order matches crash order).
             asan_block = log_asan_blocks.pop(0)
-            gdb_frames = gdb_frames or _parse_gdb_backtrace(asan_block)
+            if not stack_frames:
+                stack_frames = _extract_stack_frames(asan_block)
 
         reports.append(
             CrashReport(
                 crash_id=entry.name,
                 raw_text=raw if asan_block in raw else asan_block or raw,
                 asan_output=asan_block,
-                gdb_output=asan_block if gdb_frames else "",
-                stack_frames=gdb_frames,
+                gdb_output=asan_block if stack_frames else "",
+                stack_frames=stack_frames,
                 crash_file=entry,
             )
         )
@@ -162,6 +218,7 @@ async def triage_results(payload: TriageInput) -> TriageOutput:
             severity=severity,
             summary=f"No crash artefacts found in {payload.crashes_dir}; {payload.crash_count} crash(es) reported by fuzzer.",
             triaged_crash_count=payload.crash_count,
+            unique_crashes=[],
         )
 
     results = await triage_batch(reports)
@@ -187,12 +244,18 @@ async def triage_results(payload: TriageInput) -> TriageOutput:
                 f"  • {report.crash_id}: {result.bug_type.value} — {result.root_cause[:120]}"
             )
 
+    # Build the workflow-visible per-crash references for every *unique*
+    # crash. Phase 22 healing engine consumes these so the workflow can
+    # invoke ``run_autonomous_repair_activity`` *before* persistence.
+    unique_crashes = _build_unique_crash_refs(reports, results)
+
     output = TriageOutput(
         severity=CrashSeverity(max_sev)
         if max_sev in {s.value for s in CrashSeverity}
         else CrashSeverity.UNKNOWN,
         summary="\n".join(summary_parts),
         triaged_crash_count=distinct,
+        unique_crashes=unique_crashes,
     )
 
     log.info(
@@ -201,10 +264,13 @@ async def triage_results(payload: TriageInput) -> TriageOutput:
         distinct=distinct,
         duplicates=duplicates,
         max_severity=max_sev,
+        defer_persistence=payload.defer_persistence,
     )
 
-    # Persist crashes to DB when campaign_id is provided.
-    if payload.campaign_id is not None and results:
+    # Persist crashes to DB when campaign_id is provided AND the workflow
+    # has not asked us to defer (Phase 22: the workflow takes over so it
+    # can interleave the per-crash autonomous repair step).
+    if payload.campaign_id is not None and results and not payload.defer_persistence:
         await _persist_crashes(payload.campaign_id, reports, results)
 
     return output
@@ -213,14 +279,19 @@ async def triage_results(payload: TriageInput) -> TriageOutput:
 async def _persist_crashes(
     campaign_id: str,
     reports: list[CrashReport],
-    results: list,
+    results: list[TriageResult],
 ) -> None:
     """Write triaged crashes to the DB, with Redis dedup cache."""
-    from datetime import UTC, datetime
-    from uuid import UUID
-
     from crashwise.core.database import Crash, get_session
-    from crashwise.core.redis import incr_crash_counter, is_stack_hash_known
+    from crashwise.core.redis import (
+        claim_stack_hash,
+        incr_crash_counter,
+        release_stack_hash,
+    )
+
+    # Track hashes we claim so a failed commit can release them — without
+    # this a transient DB outage would permanently dedup crashes away.
+    claimed_hashes: list[str] = []
 
     try:
         async with get_session() as session:
@@ -229,36 +300,29 @@ async def _persist_crashes(
                 if result.duplicate_of is not None:
                     continue  # Skip duplicates.
 
-                stack_hash = ""
-                if report.stack_frames:
-                    # Simple hash of function names.
-                    import hashlib
+                stack_hash = _compute_stack_hash(report)
+                if not stack_hash:
+                    continue
 
-                    stack_str = "|".join(
-                        f.function for f in report.stack_frames
-                    )
-                    stack_hash = hashlib.sha256(
-                        stack_str.encode()
-                    ).hexdigest()[:16]
-
-                # Fast-path dedup via Redis.
-                if await is_stack_hash_known(campaign_id, stack_hash):
+                # Atomic fast-path dedup via Redis. Claim returns False when
+                # the hash was already known (duplicate).
+                if not await claim_stack_hash(campaign_id, stack_hash):
                     log.debug(
                         "triage_results.redis_dedup",
                         campaign_id=campaign_id,
                         stack_hash=stack_hash,
                     )
                     continue
+                claimed_hashes.append(stack_hash)
 
                 crash = Crash(
-                    # run_id is nullable for now — we link by campaign.
+                    # run_id is nullable here — the active workflow persists
+                    # crashes (with run_id) via persist_triaged_crash instead.
                     crash_type=result.bug_type.value,
-                    severity=result.severity.value,
-                    stack_trace="\n".join(
-                        str(f) for f in report.stack_frames
-                    ),
+                    severity=result.severity,
+                    stack_trace="\n".join(str(f) for f in report.stack_frames),
                     stack_hash=stack_hash,
-                    signal=result.signal or "",
+                    signal=report.signal or "",
                     logs_path=str(report.crash_file) if report.crash_file else "",
                 )
                 session.add(crash)
@@ -267,11 +331,12 @@ async def _persist_crashes(
                 # Operation Hydra Phase 5: Persist to web control plane.
                 try:
                     from crashwise.web.hooks import persist_crash_to_web
+
                     await persist_crash_to_web(
                         campaign_id=campaign_id,
                         crash_type=result.bug_type.value,
                         crash_state=f"{report.crash_file}:{report.stack_frames[0] if report.stack_frames else 'unknown'}",
-                        severity=result.severity.value,
+                        severity=result.severity,
                         sanitizer_log="\n".join(str(f) for f in report.stack_frames),
                         gdb_backtrace="",
                         reproducer_path=str(report.crash_file) if report.crash_file else "",
@@ -288,7 +353,69 @@ async def _persist_crashes(
                 count=persisted,
             )
     except Exception:
+        # Roll back the Redis claims so these crashes can be retried later.
+        for stack_hash in claimed_hashes:
+            await release_stack_hash(campaign_id, stack_hash)
         log.warning("triage_results.db_persist_failed", exc_info=True)
+
+
+def _compute_stack_hash(report: CrashReport) -> str:
+    """Deterministic SHA256 of the normalised stack frames.
+
+    Delegates to :func:`crashwise.agents.triage.dedup.compute_stack_hash`
+    so the hash stored in the DB and the hash used by the in-batch
+    :class:`~crashwise.agents.triage.dedup.CrashDeduper` are identical.
+    """
+    if not report.stack_frames:
+        return ""
+    return compute_stack_hash(report)
+
+
+def _build_unique_crash_refs(
+    reports: list[CrashReport],
+    results: list[TriageResult],
+) -> list[TriagedCrashRef]:
+    """Project unique reports/results into wire-friendly refs for the workflow.
+
+    Duplicates (per ``TriageResult.duplicate_of``) are filtered out so
+    the workflow's per-crash repair loop only spends LLM budget on
+    net-new findings.
+    """
+    refs: list[TriagedCrashRef] = []
+    for report, result in zip(reports, results, strict=True):
+        if result.duplicate_of is not None:
+            continue
+
+        # Choose the richest available text blob as the asan_log payload
+        # the repair agent will diagnose. Prefer ASAN, then GDB, then raw.
+        log_blob = report.asan_output or report.gdb_output or report.raw_text
+
+        # Clamp to the model's max_length so model_validate doesn't reject
+        # genuinely-large fuzzer logs at the wire boundary. We keep the
+        # tail (where the most recent crash context lives) when truncating.
+        if len(log_blob) > 65_536:
+            log_blob = log_blob[-65_536:]
+
+        stack_trace = "\n".join(str(f) for f in report.stack_frames)
+        if len(stack_trace) > 8_192:
+            stack_trace = stack_trace[:8_192]
+
+        refs.append(
+            TriagedCrashRef(
+                crash_id=report.crash_id,
+                stack_hash=_compute_stack_hash(report),
+                asan_log=log_blob,
+                crash_file_path=str(report.crash_file) if report.crash_file else "",
+                bug_type=result.bug_type.value,
+                severity=CrashSeverity(result.severity)
+                if result.severity in {s.value for s in CrashSeverity}
+                else CrashSeverity.UNKNOWN,
+                signal=str(report.signal or "")[:32],
+                stack_trace=stack_trace,
+                root_cause=result.root_cause[:4_096],
+            )
+        )
+    return refs
 
 
 def _severity_from_count(n: int) -> CrashSeverity:

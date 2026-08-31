@@ -5,16 +5,21 @@
 
 # CrashWise
 
+> [!WARNING]
+> **🧪 EXPERIMENTAL RESEARCH PROTOTYPE — ACTIVE PRE-ALPHA DEVELOPMENT**
+> CrashWise is an **experimental research prototype** under active development and real-world testing. It is **NOT** a mature or production-ready product. Workflows, APIs, heuristics, LLM prompts, and command interfaces are rapidly evolving. Use exclusively for security research, evaluation, and sandbox testing.
+
 Automated vulnerability discovery for C/C++ targets via LLM-driven harness synthesis, coverage-guided fuzzing (AFL++/libFuzzer), and crash triage.
 
 | | |
 |---|---|
-| **Runtime** | Python 3.11+ |
+| **Development Status** | 🧪 **Pre-Alpha / Experimental** (`v0.2.0-dev`) |
+| **Runtime** | Python 3.11+ / Linux |
 | **License** | MIT |
 | **Fuzzers** | AFL++, libFuzzer |
 | **Sanitizers** | ASan, UBSan |
 | **Orchestration** | Temporal |
-| **Status** | Pre-alpha |
+| **Stability** | ⚠️ Work In Progress (Breaking Changes Expected) |
 
 ```bash
 crashwise run https://github.com/madler/zlib
@@ -65,38 +70,82 @@ See [docs/INSTALL.md](docs/INSTALL.md) for full setup.
 
 | Command | Description |
 |---|---|
-| `crashwise init` | Detect build system, generate `crashwise.yaml` manifest |
-| `crashwise run <repo-url>` | Submit fuzzing campaign (blocking) |
-| `crashwise run --detach <url>` | Submit and return immediately |
-| `crashwise doctor` | Validate system prerequisites |
-| `crashwise setup` | Install missing build dependencies |
-| `crashwise dashboard` | Launch Streamlit UI on `localhost:8501` |
-| `crashwise signal <id> pause_hunt` | Pause a running campaign |
-| `crashwise signal <id> force_pivot` | Force MAB strategy switch |
+| `crashwise init` | Detect build system, generate `crashwise.yaml` manifest & create DB tables |
+| `crashwise configure` | Interactive & headless setup wizard for LLM providers and infrastructure (`--non-interactive`) |
+| `crashwise run <repo-url>` | Submit fuzzing campaign (supports `--target-subdir`, `--target-clone-depth`) |
+| `crashwise run --detach <url>` | Submit campaign and return immediately with workflow ID |
+| `crashwise doctor` | Run system health diagnostics (Docker, compilers, memory, services across distros) |
+| `crashwise setup` | Auto-install missing build tools across Debian/Ubuntu, Arch, Fedora/RHEL, and Alpine |
+| `crashwise worker` | Start a Temporal worker polling the task queue |
+| `crashwise api` | Launch the FastAPI management server & SSE telemetry backend |
+| `crashwise dashboard` / `ui` | Launch the unified Next.js 14 Web Command Center control plane on `localhost:8000` |
+| `crashwise signal <id> <signal>` | Dispatch God-Mode signals (`pause_hunt`, `resume_hunt`, `force_pivot`, `inject_seed`) |
+| `crashwise exploit <crash_id>` | Synthesize, compile, and verify standalone C PoC exploit for a crash |
+| `crashwise info` / `version` | Display runtime configuration and version metadata |
 
 ---
 
 ## Configuration
 
-### Required
+### Multi-Provider LLM Setup (Vendor-Neutral)
 
-| Variable | Description |
-|---|---|
-| `CRASHWISE_LLM_MODEL` | Model identifier for harness synthesis |
-| `ANTHROPIC_API_KEY` | API key (or equivalent for chosen provider) |
+CrashWise connects to any LLM provider via standard OpenAI-compatible interfaces or native providers. Configure your preferred model in `.env` or pass CLI flags directly at runtime:
 
-### Optional
+```bash
+# DeepSeek (Tested on staging)
+OPENAI_API_BASE=https://api.deepseek.com
+OPENAI_API_KEY=sk-...
+MODEL_NAME=deepseek-chat
+TEMPERATURE=0.0
+
+# Anthropic Claude
+CRASHWISE_LLM_MODEL=claude-sonnet-4-5
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Ollama / Local vLLM
+OPENAI_API_BASE=http://localhost:11434/v1
+OPENAI_API_KEY=ollama
+MODEL_NAME=llama3.1:8b
+```
+
+### Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `AI_PROVIDER` | _(disabled)_ | Crash triage backend: `ollama`, `venice`, `openai_compatible` |
-| `AI_MODEL` | — | Model for triage (e.g., `llama3.1:8b`) |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama endpoint |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./crashwise.db` | Async SQLAlchemy URL |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis for distributed state |
+| `MODEL_NAME` / `CRASHWISE_LLM_MODEL` | `claude-sonnet-4-5` | Primary model for autonomous harness synthesis and repair |
+| `OPENAI_API_BASE` | — | OpenAI-compatible custom base URL (DeepSeek, Ollama, vLLM, Venice) |
+| `OPENAI_API_KEY` | — | API key for OpenAI-compatible endpoint |
+| `TEMPERATURE` / `CRASHWISE_LLM_TEMPERATURE` | `0.0` | Sampling temperature for deterministic harness synthesis |
+| `MAX_TOKENS` | `4096` | Max token budget per turn |
+| `REASONING_EFFORT` | `medium` | Reasoning effort parameter (`low`, `medium`, `high`) for reasoning models |
+| `AI_PROVIDER` | `openai_compatible` | Crash triage backend (`openai_compatible`, `ollama`, `venice`) |
+| `CRASHWISE_WORKDIR` | `/tmp/crashwise` | Working directory root for target cloning and build sandboxes |
+| `CRASHWISE_BUILD_TIMEOUT` | `900` | Target build timeout in seconds |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./crashwise.db` | Async SQLAlchemy URL (`postgresql+asyncpg://...` in prod) |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis for distributed state, heartbeats, and dedup |
 | `TEMPORAL_HOST` | `localhost:7233` | Temporal server address |
+| `CRASHWISE_API_PORT` | `8000` | FastAPI management server listening port |
 
-Supported LLM providers: Anthropic, OpenAI, NVIDIA NIM, Together AI, Groq, Ollama, vLLM, any OpenAI-compatible endpoint.
+### Granular CLI Knobs
+
+```bash
+crashwise run <target> \
+  --target-subdir "components/parser" \
+  --target-clone-depth 1 \
+  --fuzzer libfuzzer \
+  --sanitizers address,undefined \
+  --custom-flags "-dict=json.dict -max_len=1024" \
+  --model deepseek-chat \
+  --base-url https://api.deepseek.com \
+  --api-key sk-... \
+  --temperature 0.0 \
+  --reasoning-effort medium \
+  --max-synth-retries 4 \
+  --mab \
+  --mab-algorithm thompson \
+  --self-healing \
+  --max-repair-attempts 10
+```
 
 ---
 
@@ -104,23 +153,26 @@ Supported LLM providers: Anthropic, OpenAI, NVIDIA NIM, Together AI, Groq, Ollam
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  CLI / API / Dashboard                                        │
+│  CLI / FastAPI Gateway (:8000) / Next.js Dashboard (:3000)   │
 ├──────────────────────────────────────────────────────────────┤
-│  Temporal Workflows (durable, retryable)                      │
-│  └─ MainFuzzingWorkflow → 23 Activities                      │
+│  Temporal Workflows (durable, replayable)                    │
+│  ├─ MainFuzzingWorkflow → 28 Registered Activities          │
+│  └─ VerifyPatchWorkflow (autonomous fix verification)        │
 ├──────────────────────────────────────────────────────────────┤
-│  AI Agents (LangGraph)                                        │
+│  Cognitive AI Agents (LangGraph)                             │
 │  ├─ Harness Synthesis (analyze → generate → validate → retry)│
-│  ├─ Coverage Analysis (blocker identification + dict gen)     │
-│  ├─ Crash Triage (ASAN/GDB → severity → dedup)              │
-│  └─ Exploit Generation (PoC synthesis)                        │
+│  ├─ Healing Engine (autonomous build + crasher repair)       │
+│  ├─ Coverage Feedback & Analysis (blocker isolation)         │
+│  ├─ Crash Triage (ASAN/GDB → CWE classification → dedup)    │
+│  ├─ Exploit Generation (standalone PoC synthesis)            │
+│  └─ Cross-Campaign Knowledge Base (pattern learning)         │
 ├──────────────────────────────────────────────────────────────┤
-│  Execution (Docker sandbox)                                   │
+│  Execution Sandboxes (Hardened)                              │
 │  ├─ AFL++ (multi-strategy, Thompson Sampling MAB)            │
 │  ├─ libFuzzer (in-process, coverage-guided)                  │
 │  └─ QEMU/KVM (kernel targets)                               │
 ├──────────────────────────────────────────────────────────────┤
-│  Storage: PostgreSQL │ Redis │ R2/S3 │ SQLite (dev)          │
+│  Storage: PostgreSQL 16 │ Redis 7 │ Cloudflare R2/S3 │ SQLite│
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -145,14 +197,15 @@ Supported LLM providers: Anthropic, OpenAI, NVIDIA NIM, Together AI, Groq, Ollam
 
 Every fuzzer container runs with:
 
-| Constraint | Value |
-|---|---|
-| Network | `--network none` |
-| Filesystem | `--read-only` |
-| Capabilities | `--cap-drop ALL` |
-| PIDs | `--pids-limit 1024` |
-| Scratch | Size-capped tmpfs on `/tmp` and `/dev/shm` |
-| Disk quota | `--storage-opt size=5G` (overlay2+xfs+pquota) |
+| Constraint | Value | Rationale |
+|---|---|---|
+| Process init | `--init` | Tini init at PID 1 for clean child process reaping |
+| Network | `--network none` | Prevents data exfiltration and external calls |
+| Filesystem | `--read-only` | Prevents tampering with container binaries |
+| Capabilities | `--cap-drop ALL` | Drops all Linux capabilities (least privilege) |
+| PIDs | `--pids-limit 1024` | Protects against fork bombs and runaway processes |
+| Scratch | Size-capped tmpfs on `/tmp` and `/dev/shm` | Ephemeral high-speed memory scratch |
+| Disk quota | `--storage-opt size=5G` (overlay2+xfs+pquota) | Caps maximum disk consumption per run |
 
 > AFL++ containers additionally receive `--cap-add SYS_PTRACE` for forkserver operation.
 
@@ -172,12 +225,14 @@ See [docs/architecture.md](docs/architecture.md) for the full technical referenc
 
 | Compatible | Requires Manual Tuning | Unsupported |
 |---|---|---|
-| C/C++ libraries with CMake/Make/Meson | Bazel builds, complex monorepos | Closed-source binaries |
-| Parser libraries (image, archive, crypto, font) | Custom toolchains, autotools edge cases | Windows-only (MSVC) |
-| Projects with existing fuzz harnesses | Deeply nested struct-init APIs | Managed languages |
-| Standard `(buf, size)` entry points | Callback-driven APIs (SAX parsers) | Network daemons (stateful protocols) |
+| C/C++ libraries with CMake / Make / Meson / Bazel | Custom exotic proprietary toolchains | Closed-source binaries without symbols |
+| Monorepos & sub-projects (`--target-subdir`) | Deeply nested struct-init APIs | Windows-only (MSVC) |
+| Multi-library CMake trees (automatic target ranking) | Callback-driven APIs (SAX parsers) | Managed languages (Java/C#) |
+| Parser libraries (image, archive, crypto, font, JSON) | Complex kernel state machines | Network daemons (stateful protocols) |
+| Projects with existing fuzz harnesses | | |
+| Standard `(buf, size)` entry points | | |
 
-Validated targets: zlib, libpng, libjpeg-turbo, freetype, openssl, libxml2, harfbuzz, libarchive, pcre2.
+Validated targets: libtgvoip (Telegram VoIP json11), zlib, libpng, libjpeg-turbo, freetype, openssl, libxml2, harfbuzz, libarchive, pcre2, re2, libevent.
 
 ---
 

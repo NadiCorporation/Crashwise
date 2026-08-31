@@ -3,65 +3,38 @@
 # Self-contained fuzz-node with every fuzzer and build dependency pre-installed.
 #
 # Usage:
-#   docker build -f Dockerfile.worker -t crashwise-worker .
-#   docker run --rm -it --privileged crashwise-worker crashwise worker
+#   docker build -f Dockerfile.worker -t crashwise-worker:latest .
+#   docker run --rm -it --privileged crashwise-worker:latest crashwise worker
 #
-# This image is designed to be the "heavy lifter" — the host only needs Docker;
-# all compilation and fuzzing happens inside this perfectly tuned container.
+# This image is designed to be the "heavy lifter" — running on Ubuntu 24.04 LTS
+# with GLIBC 2.38, Clang 18, LLVM 18, AFL++ 4.09c, Python 3.12, and CMake.
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Stage 1 — AFL++ Builder
+# Stage 1 — Python Builder (uv on Ubuntu 24.04)
 # ═══════════════════════════════════════════════════════════════════════════════
-FROM debian:bookworm-slim AS afl-builder
+FROM ubuntu:24.04 AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    git \
-    wget \
-    ca-certificates \
-    cmake \
-    clang \
-    llvm \
-    lld \
-    libclang-rt-dev \
-    python3 \
-    python3-dev \
-    libtool \
-    autoconf \
-    automake \
-    bison \
-    flex \
-    libglib2.0-dev \
-    libpixman-1-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Build AFL++ from source (latest stable)
-WORKDIR /opt
-RUN git clone --depth 1 --branch v4.21c https://github.com/AFLplusplus/AFLplusplus.git \
-    && cd AFLplusplus \
-    && make -j$(nproc) \
-    && make install
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Stage 2 — Python Builder (uv)
-# ═══════════════════════════════════════════════════════════════════════════════
-FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS py-builder
-
-ENV UV_COMPILE_BYTECODE=1 \
+ENV DEBIAN_FRONTEND=noninteractive \
+    UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    UV_PYTHON_DOWNLOADS=0 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install system build deps for Python packages.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libffi-dev \
     git \
+    python3 \
+    python3-dev \
+    python3-venv \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock LICENSE README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -72,17 +45,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Stage 3 — Runtime (Master Worker)
+# Stage 2 — Runtime (Master Worker)
 # ═══════════════════════════════════════════════════════════════════════════════
-FROM debian:bookworm-slim AS runtime
+FROM ubuntu:24.04 AS runtime
 
-# AFL++ helper libs / runtimes live under HELPER_PATH = /usr/local/lib/afl
-# (set by AFL++'s GNUmakefile). AFL_PATH must point THERE so afl-cc and the
-# forkserver can find afl-as / runtime objects — NOT at /usr/local/bin.
-ENV PYTHONDONTWRITEBYTECODE=1 \
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:/usr/local/bin:$PATH" \
-    AFL_PATH="/usr/local/lib/afl" \
+    AFL_PATH="/usr/lib/afl" \
     CC="clang" \
     CXX="clang++"
 
@@ -90,7 +61,7 @@ WORKDIR /app
 
 # Install ALL runtime dependencies in one layer.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Core build tools
+    # Core build tools & sanitizers
     build-essential \
     cmake \
     clang \
@@ -99,83 +70,51 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lld \
     llvm \
     llvm-dev \
-    libclang-rt-14-dev \
     gcc \
     g++ \
+    # AFL++ native package
+    afl++ \
     # Common target build dependencies
     zlib1g-dev \
     liblzma-dev \
     libbz2-dev \
     libssl-dev \
     libxml2-dev \
-    # Version control
+    # Version control & utilities
     git \
-    # Python runtime
-    #
-    # ``libpython3.11`` (the embeddable shared library) is intentionally
-    # added alongside ``python3``: AFL++ is built with Python custom-
-    # mutator support in ``afl-builder`` (python3-dev was present), which
-    # makes ``afl-fuzz`` dynamically link against ``libpython3.11.so.1.0``.
-    # The plain ``python3`` package on bookworm-slim only pulls in
-    # ``libpython3.11-stdlib`` / ``libpython3.11-minimal`` — *not* the
-    # embeddable shared library — so afl-fuzz fails at startup with
-    # "cannot open shared object file" without this line.
-    libpython3.11 \
     python3 \
     python3-pip \
     python3-venv \
-    # Docker CLI (so the worker can spawn fuzzer sibling containers)
+    tini \
+    # Docker CLI (so worker can spawn sibling containers if needed)
     ca-certificates \
     curl \
     gnupg \
     lsb-release \
     && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     # Cleanup
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Copy AFL++ from builder.
-#
-# AFL++'s Makefile installs to:
-#   BIN_PATH    = $(PREFIX)/bin           → /usr/local/bin/afl-*
-#   HELPER_PATH = $(PREFIX)/lib/afl       → /usr/local/lib/afl/
-#   MISC_PATH   = $(PREFIX)/share/afl     → /usr/local/share/afl/
-#                                            (testcases, dictionaries, injections.dic)
-#
-# Do NOT use ``share/aflplusplus`` — that path has never existed; it's a
-# common confusion with the GitHub repo name.
-COPY --from=afl-builder /usr/local/bin/afl-* /usr/local/bin/
-COPY --from=afl-builder /usr/local/lib/afl /usr/local/lib/afl/
-COPY --from=afl-builder /usr/local/share/afl /usr/local/share/afl/
+# Copy built virtual environment and application code from builder stage
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/crashwise /app/crashwise
 
-# Copy Python environment from builder.
-COPY --from=py-builder /app/.venv /app/.venv
-COPY --from=py-builder /app/crashwise /app/crashwise
-
-# Fix venv python symlink: py-builder uses /usr/local/bin/python3 (uv image)
-# but runtime has python3 at /usr/bin/python3 (debian bookworm-slim).
-RUN ln -sf /usr/bin/python3 /app/.venv/bin/python
-
-# Verify key tools are present.
-#
-# AFL++ has no dedicated --version flag. ``-V`` is fuzz duration (takes a
-# seconds argument). ``-h`` (help) prints the version banner and exits 0,
-# which simultaneously verifies the binary loads (i.e. libpython3.11 is
-# resolvable) and reports the build's feature flags.  We pipe to ``head``
-# to keep the build log compact.
+# Verify key tools are present
 RUN afl-fuzz -h 2>&1 | head -1 \
     && afl-cc --version 2>&1 | head -1 \
     && clang --version | head -1 \
     && cmake --version | head -1 \
-    && python3 --version \
+    && /app/.venv/bin/python --version \
     && docker --version
 
-# Health check.
+# Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD crashwise version || exit 1
+    CMD /app/.venv/bin/python -c "import crashwise; print(crashwise.__version__)" || exit 1
 
-# Default: start the Temporal worker.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
 CMD ["crashwise", "worker"]

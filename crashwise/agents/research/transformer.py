@@ -15,10 +15,19 @@ import binascii
 import re
 from pathlib import Path
 
+from crashwise.agents.research.seed_corpus import (
+    create_elf_seed,
+    create_gzip_seed,
+    create_jpeg_seed,
+    create_png_seed,
+    create_zip_seed,
+    generate_seeds,
+)
 from crashwise.core.logging import get_logger
 from crashwise.core.models import SeedMetadata
 
 log = get_logger(__name__)
+
 
 # ── Regex patterns for payload extraction ────────────────────────────────────
 
@@ -171,9 +180,11 @@ def _extract_hex_escapes(source: str) -> bytes | None:
     # Pick the longest match — usually the actual payload.
     longest = max(matches, key=len)
     try:
-        return longest.encode().decode("unicode_escape").encode("latin-1")
+        decoded_text = str(longest.encode().decode("unicode_escape"))
+        return decoded_text.encode("latin-1")
     except (UnicodeDecodeError, ValueError):
         return None
+
 
 
 def _extract_base64(source: str) -> bytes | None:
@@ -190,27 +201,29 @@ def _synthesize_payload(metadata: SeedMetadata) -> bytes:
     """Create a minimal payload when no explicit bytes are found in the PoC."""
     target = metadata.target_name.lower()
 
-    # Format-specific magic headers.
+    # Format-specific magic headers with valid checksums
     if "png" in target:
-        # Minimal PNG signature + IHDR chunk.
-        return (
-            b"\x89PNG\r\n\x1a\n"
-            b"\x00\x00\x00\x0dIHDR"
-            b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
-        )
+        return create_png_seed()
     if "jpeg" in target or "jpg" in target:
-        return b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+        return create_jpeg_seed()
     if "pdf" in target:
         return b"%PDF-1.4\n1 0 obj\n<<\n/Type /Catalog\n>>\nendobj\n"
     if "zip" in target:
-        return b"PK\x03\x04" + b"\x00" * 26
-    if "gzip" in target or "zlib" in target:
-        return b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03"
+        return create_zip_seed()
+    if "gzip" in target or "gz" in target:
+        return create_gzip_seed()
+    if "zlib" in target:
+        return generate_seeds("zlib")[0]
     if "elf" in target:
-        return b"\x7fELF\x01\x01\x01" + b"\x00" * 9
+        return create_elf_seed(is_64bit=True)
+
+    seeds = generate_seeds(target)
+    if seeds:
+        return seeds[0]
 
     # Generic: a few nulls + some ASCII to trigger parsers.
     return b"\x00\x00\x00\x00CRASHWISE\xff\xfe\xfd\xfc"
+
 
 
 def _synthesize_seed(metadata: SeedMetadata, output_dir: Path) -> Path:

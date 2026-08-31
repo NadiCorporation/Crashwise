@@ -23,9 +23,45 @@ All other dependencies (Docker, Clang, GCC, LLVM, AFL++) are provisioned by `cra
 
 ```bash
 git clone https://github.com/yahyatoubali/Crashwise.git && cd Crashwise
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+uv sync  # or: python -m venv .venv && source .venv/bin/activate && pip install -e .
 crashwise version
+```
+
+---
+
+## LLM Provider Setup & Configuration
+
+Configure your preferred LLM provider and infrastructure settings via the interactive or headless wizard:
+
+```bash
+# Interactive configuration wizard
+crashwise configure
+
+# Headless / CI configuration
+crashwise configure --non-interactive \
+  --temporal-host=localhost:7233 \
+  --api-port=8000 \
+  --database-url=sqlite+aiosqlite:///./crashwise.db \
+  --workdir=/tmp/crashwise
+```
+
+Or configure `.env` directly:
+
+```bash
+# DeepSeek (OpenAI-compatible)
+OPENAI_API_BASE=https://api.deepseek.com
+OPENAI_API_KEY=sk-...
+MODEL_NAME=deepseek-chat
+TEMPERATURE=0.0
+
+# Anthropic Claude
+CRASHWISE_LLM_MODEL=claude-sonnet-4-5
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Ollama / Local vLLM
+OPENAI_API_BASE=http://localhost:11434/v1
+OPENAI_API_KEY=ollama
+MODEL_NAME=llama3.1:8b
 ```
 
 ---
@@ -37,9 +73,9 @@ crashwise setup
 ```
 
 This command:
-1. Detects the Linux distribution from `/etc/os-release`
-2. Installs Docker, Docker Compose v2, CMake, Clang, LLD, GCC, LLVM via the native package manager
-3. Installs AFL++ (from AUR on Arch, from `universe` on Ubuntu)
+1. Detects the Linux distribution from `/etc/os-release` (Alpine, Arch, Debian, Fedora, RHEL, Ubuntu)
+2. Installs Docker, Docker Compose v2, CMake, Clang, LLD, GCC, LLVM via the native package manager (`apk`, `pacman`, `apt`, `dnf`)
+3. Installs AFL++ (from AUR on Arch, from `universe` on Ubuntu, packages on Alpine/Fedora)
 4. Adds the current user to the `docker` group if missing
 5. Starts the Docker daemon if stopped
 
@@ -60,6 +96,12 @@ crashwise doctor
 ---
 
 ## Distro-Specific Notes
+
+### Alpine Linux
+
+```bash
+apk add python3 py3-pip git build-base cmake clang llvm
+```
 
 ### Arch Linux
 
@@ -103,9 +145,12 @@ This starts:
 | Service | Port | Purpose |
 |---|---|---|
 | Temporal Server | 7233 | Workflow orchestration (gRPC) |
-| Temporal UI | 8233 | Web interface |
-| PostgreSQL | 5432 | Persistence |
-| Redis | 6379 | Distributed state |
+| Temporal UI | 8233 | Workflow timeline & debug interface |
+| PostgreSQL | 5432 | Relational persistence |
+| Redis | 6379 | Distributed state, heartbeats, deduplication |
+| MinIO | 9000 / 9001 | S3-compatible artifact storage |
+| CrashWise API | 8000 | FastAPI REST API & SSE telemetry |
+| CrashWise Web UI | 3000 | Next.js 14 7-Tab Production Command Center |
 
 ### Initialize database
 
@@ -115,13 +160,38 @@ crashwise init
 
 ---
 
-## First Campaign
+## Launching Campaigns
 
 ```bash
+# Standard blocking run with automatic harness synthesis
 crashwise run https://github.com/madler/zlib --timeout 600
+
+# Monorepo / sub-directory target scoping & clone depth
+crashwise run https://github.com/google/re2 \
+  --target-subdir "re2" \
+  --target-clone-depth 1 \
+  --timeout 300
+
+# Granular configuration with custom engine flags, LLM routing, and MAB
+crashwise run targets/libtgvoip \
+  --timeout 300 \
+  --fuzzer libfuzzer \
+  --sanitizers address,undefined \
+  --custom-flags "-dict=json.dict -max_len=1024" \
+  --model deepseek-chat \
+  --base-url https://api.deepseek.com \
+  --api-key sk-... \
+  --temperature 0.0 \
+  --mab \
+  --mab-algorithm thompson \
+  --self-healing \
+  --max-repair-attempts 10
+
+# Detached submission
+crashwise run --detach https://github.com/madler/zlib
 ```
 
-The pre-flight gate validates Docker, Clang, and GCC before submission. Override with `--skip-preflight` if running inside the worker container.
+The pre-flight gate validates Docker, Clang, GCC, and LLM connectivity before submission. Override with `--skip-preflight` if running inside the worker container.
 
 ### God-Mode signals (live campaign control)
 
@@ -129,9 +199,10 @@ The pre-flight gate validates Docker, Clang, and GCC before submission. Override
 crashwise signal <workflow_id> force_pivot
 crashwise signal <workflow_id> inject_seed --data filename=poc.bin
 crashwise signal <workflow_id> pause_hunt
+crashwise signal <workflow_id> resume_hunt
 ```
 
-Workflow IDs are printed by `crashwise run` and visible in Temporal UI at `http://localhost:8233`.
+Workflow IDs are printed by `crashwise run` and visible in Temporal UI at `http://localhost:8233` or Next.js Dashboard at `http://localhost:3000`.
 
 ---
 

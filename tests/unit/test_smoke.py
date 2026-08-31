@@ -11,14 +11,14 @@ from crashwise.cli import app
 
 
 def test_package_version() -> None:
-    assert crashwise.__version__ == "0.1.0"
+    assert crashwise.__version__ == "0.2.0.dev0"
 
 
 def test_cli_version_command() -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert "crashwise 0.1.0" in result.stdout
+    assert "crashwise 0.2.0.dev0" in result.stdout
 
 
 def test_cli_info_command() -> None:

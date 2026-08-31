@@ -40,24 +40,23 @@ from crashwise.core.sentinel import (
     run_all_checks,
 )
 
-
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
 def test_run_command_found() -> None:
-    rc, out, err = _run(["echo", "hello"])
+    rc, out, _err = _run(["echo", "hello"])
     assert rc == 0
     assert out == "hello"
 
 
 def test_run_command_not_found() -> None:
-    rc, out, err = _run(["nonexistent_command_xyz"])
+    rc, _out, err = _run(["nonexistent_command_xyz"])
     assert rc == 127
     assert "not found" in err.lower() or err == ""
 
 
 def test_run_command_timeout() -> None:
-    rc, out, err = _run(["sleep", "10"], timeout=0.1)
+    rc, _out, err = _run(["sleep", "10"], timeout=0.1)
     assert rc == -1
     assert "timed out" in err.lower()
 
@@ -425,17 +424,13 @@ def test_check_build_libfuzzer_warn() -> None:
 
 @pytest.mark.anyio
 async def test_check_service_temporal_ok() -> None:
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
+    with patch("socket.socket") as mock_socket_cls:
+        mock_sock = MagicMock()
+        mock_sock.settimeout = MagicMock()
+        mock_sock.connect = MagicMock()  # no exception → reachable
+        mock_sock.close = MagicMock()
+        mock_socket_cls.return_value = mock_sock
 
-    async def _mock_get(*args, **kwargs):
-        return mock_resp
-
-    mock_client = AsyncMock()
-    mock_client.get = _mock_get
-    mock_client.__aenter__.return_value = mock_client  # crucial: __aenter__ must return self
-
-    with patch("httpx.AsyncClient", return_value=mock_client):
         result = await check_service_temporal()
         assert result.status == CheckStatus.OK
 

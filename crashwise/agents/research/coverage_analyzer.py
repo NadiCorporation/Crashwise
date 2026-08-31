@@ -16,9 +16,11 @@ to static regex analysis of the source code.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from pathlib import Path
 
+from crashwise.agents.research.checksum_detector import ChecksumDetector
 from crashwise.core.logging import get_logger
 from crashwise.core.models import (
     BlockerType,
@@ -27,6 +29,7 @@ from crashwise.core.models import (
 )
 
 log = get_logger(__name__)
+
 
 # ── Blocker detection patterns ──────────────────────────────────────────────
 
@@ -76,7 +79,7 @@ _BLOCKER_PATTERNS: list[tuple[BlockerType, re.Pattern[str], str]] = [
     (
         BlockerType.CHECKSUM,
         re.compile(
-            r"if\s*\(\s*(?:crc|checksum|hash|md5|sha)\w*\s*\(",
+            r"if\s*\(\s*(?:.*?\b(?:crc|crc32|adler|adler32|checksum|chksum|csum|hash|md5|sha1|sha256|sha512)\w*\s*\(|.*?(?:%\s*65521|0xEDB88320|0x04C11DB7))",
             re.IGNORECASE,
         ),
         "Checksum or hash validation",
@@ -283,17 +286,14 @@ def _parse_coverage_text(text: str) -> tuple[set[int], set[int]]:
 
         # Simple +/- format
         if line.startswith("+"):
-            try:
+            with contextlib.suppress(ValueError):
                 hit.add(int(line[1:]))
-            except ValueError:
-                pass
         elif line.startswith("-"):
-            try:
+            with contextlib.suppress(ValueError):
                 missed.add(int(line[1:]))
-            except ValueError:
-                pass
 
     return hit, missed
+
 
 
 def _parse_afl_coverage_summary(text: str) -> tuple[set[int], set[int]]:
@@ -348,25 +348,63 @@ def _parse_lcov_format(text: str) -> tuple[set[int], set[int]]:
 
 # ── Blocker identification ───────────────────────────────────────────────────
 
+def _extract_checksum_metadata(line_text: str, func_name: str) -> tuple[str, str, int, int]:
+    """Extract (algorithm, endianness, offset, payload_offset) from line text and function name."""
+    lower_line = line_text.lower()
+    lower_fn = func_name.lower()
+    if "crc" in lower_line or "0xedb88320" in lower_line or "0x04c11db7" in lower_line or "0x82f63b78" in lower_line:
+        endianness = "big" if "png" in lower_fn or "network" in lower_fn else "little"
+        return "crc32", endianness, 0, 4 if "png" in lower_fn else 0
+    if "adler" in lower_line or "65521" in lower_line:
+        return "adler32", "big", 0, 2 if "zlib" in lower_fn else 0
+    if "sha256" in lower_line or "sha_256" in lower_line:
+        return "sha256", "big", 0, 32
+    if "sha1" in lower_line or "sha_1" in lower_line:
+        return "sha1", "big", 0, 20
+    if "sha512" in lower_line or "sha384" in lower_line:
+        return "sha512", "big", 0, 64
+    if "md5" in lower_line:
+        return "md5", "little", 0, 16
+    if "^=" in lower_line or "xor" in lower_line:
+        return "custom_xor", "little", 0, 1
+    if "sum" in lower_line or "+=" in lower_line:
+        return "custom_sum", "little", 0, 1
+    return "crc32", "little", 0, 0
+
+
 def _identify_blocker(line_num: int, line_text: str, source_text: str) -> CoverageBlocker | None:
     """Analyze a single missed line and return a blocker if it matches patterns."""
     stripped = line_text.strip()
     if not (stripped.startswith("if") or stripped.startswith("switch") or stripped.startswith("case")):
         return None
 
-    for btype, pattern, description in _BLOCKER_PATTERNS:
+    for btype, pattern, _description in _BLOCKER_PATTERNS:
         match = pattern.search(line_text)
+
         if match:
             expected = _extract_expected_value(line_text, btype)
             distance = _estimate_distance_from_entry(line_num, source_text)
+            func_name = _find_containing_function(line_num, source_text)
+
+            algo = ""
+            endianness = "little"
+            offset = 0
+            payload_off = 0
+            if btype == BlockerType.CHECKSUM:
+                algo, endianness, offset, payload_off = _extract_checksum_metadata(line_text, func_name)
+
             return CoverageBlocker(
                 blocker_type=btype,
                 line_number=line_num,
-                function_name=_find_containing_function(line_num, source_text),
+                function_name=func_name,
                 condition_text=stripped,
                 expected_value=expected,
                 distance_from_entry=distance,
                 confidence=_confidence_for_type(btype),
+                checksum_algorithm=algo,
+                checksum_offset=offset,
+                checksum_endianness=endianness,
+                payload_offset=payload_off,
             )
 
     return None
@@ -384,6 +422,19 @@ def _extract_expected_value(line_text: str, btype: BlockerType) -> str:
             return f">= {match.group(1)}"
     if btype == BlockerType.NULL_CHECK:
         return "non-null pointer"
+    if btype == BlockerType.CHECKSUM:
+        algo, _, _, _ = _extract_checksum_metadata(line_text, "")
+        algo_names = {
+            "crc32": "valid CRC32",
+            "adler32": "valid Adler32",
+            "sha256": "valid SHA-256",
+            "sha1": "valid SHA-1",
+            "sha512": "valid SHA-512",
+            "md5": "valid MD5",
+            "custom_xor": "valid XOR checksum",
+            "custom_sum": "valid sum checksum",
+        }
+        return algo_names.get(algo, "valid checksum")
     return ""
 
 
@@ -394,7 +445,7 @@ def _confidence_for_type(btype: BlockerType) -> float:
         BlockerType.LENGTH_CHECK: 0.85,
         BlockerType.NULL_CHECK: 0.8,
         BlockerType.FORMAT_CHECK: 0.75,
-        BlockerType.CHECKSUM: 0.7,
+        BlockerType.CHECKSUM: 0.85,
         BlockerType.STATE_MACHINE: 0.65,
         BlockerType.INITIALIZATION: 0.7,
         BlockerType.UNKNOWN: 0.3,
@@ -438,19 +489,56 @@ def _static_blocker_analysis(source_text: str) -> list[CoverageBlocker]:
         for btype, pattern, _ in _BLOCKER_PATTERNS:
             if pattern.search(line):
                 expected = _extract_expected_value(line, btype)
+                func_name = _find_containing_function(i, source_text)
+                algo = ""
+                endianness = "little"
+                offset = 0
+                payload_off = 0
+                if btype == BlockerType.CHECKSUM:
+                    algo, endianness, offset, payload_off = _extract_checksum_metadata(line, func_name)
+
                 blockers.append(
                     CoverageBlocker(
                         blocker_type=btype,
                         line_number=i,
-                        function_name=_find_containing_function(i, source_text),
+                        function_name=func_name,
                         condition_text=stripped,
                         expected_value=expected,
                         distance_from_entry=_estimate_distance_from_entry(i, source_text),
                         confidence=_confidence_for_type(btype) * 0.7,  # lower confidence without coverage
+                        checksum_algorithm=algo,
+                        checksum_offset=offset,
+                        checksum_endianness=endianness,
+                        payload_offset=payload_off,
                     )
                 )
                 break
+
+    # Also detect non-conditional checksum patterns via ChecksumDetector
+    detector_checksums = ChecksumDetector.detect_checksums(source_text)
+    existing_lines = {b.line_number for b in blockers}
+    for cinfo in detector_checksums:
+        if cinfo.line_number not in existing_lines:
+            line_str = lines[cinfo.line_number - 1].strip() if 1 <= cinfo.line_number <= len(lines) else ""
+            blockers.append(
+                CoverageBlocker(
+                    blocker_type=BlockerType.CHECKSUM,
+                    line_number=cinfo.line_number,
+                    function_name=cinfo.function_name or _find_containing_function(cinfo.line_number, source_text),
+                    condition_text=line_str or cinfo.pattern_matched,
+                    expected_value=f"valid {cinfo.algorithm.upper()}",
+                    distance_from_entry=_estimate_distance_from_entry(cinfo.line_number, source_text),
+                    confidence=cinfo.confidence * 0.7,
+                    checksum_algorithm=cinfo.algorithm,
+                    checksum_offset=cinfo.offset,
+                    checksum_endianness=cinfo.endianness,
+                    payload_offset=cinfo.payload_offset,
+                )
+            )
+            existing_lines.add(cinfo.line_number)
+
     return blockers
+
 
 
 # ── Unreachable function detection ───────────────────────────────────────────

@@ -19,14 +19,15 @@ and recreates it (safe for Temporal activity retries).
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
-import subprocess
-from datetime import UTC, datetime
+from contextlib import suppress
 from pathlib import Path
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from crashwise.core.config import get_settings
 from crashwise.core.logging import get_logger
 from crashwise.core.models import SetupTargetInput, SetupTargetOutput
 
@@ -34,8 +35,14 @@ log = get_logger(__name__)
 
 # Maximum time for git clone (large repos like chromium can be slow).
 _CLONE_TIMEOUT_SECONDS: float = 600.0
-# Maximum time for build step.
-_BUILD_TIMEOUT_SECONDS: float = 900.0
+
+
+def _get_build_timeout() -> float:
+    """Return configured target build timeout in seconds."""
+    try:
+        return float(get_settings().crashwise_build_timeout)
+    except Exception:
+        return 900.0
 
 
 @activity.defn(name="setup_target")
@@ -45,20 +52,40 @@ async def setup_target(payload: SetupTargetInput) -> SetupTargetOutput:
     The activity is idempotent within a single workflow attempt: re-running
     against the same workdir wipes and recreates it.
     """
-    info = activity.info()
-    workflow_id = info.workflow_id or "anonymous"
-    workdir_root = Path("/tmp/crashwise") / workflow_id
+    try:
+        info = activity.info()
+        workflow_id = info.workflow_id or "anonymous"
+        attempt = info.attempt
+    except Exception:
+        workflow_id = "anonymous"
+        attempt = 1
+
+    settings = get_settings()
+    workdir_root = settings.crashwise_workdir / workflow_id
     workdir = workdir_root / "target"
 
     log.info(
         "setup_target.start",
         workflow_id=workflow_id,
-        attempt=info.attempt,
+        attempt=attempt,
         target_repo=str(payload.target_repo),
+        target_name=payload.target_name,
+        target_subdir=payload.target_subdir,
+        target_clone_depth=payload.target_clone_depth,
         target_branch=payload.target_branch,
         sanitizers=payload.sanitizers,
         synthesize_harness=payload.synthesize_harness,
     )
+
+    # Enforce path traversal protection on target_subdir upfront
+    if payload.target_subdir:
+        candidate_dir = (workdir / payload.target_subdir).resolve()
+        if not candidate_dir.is_relative_to(workdir.resolve()):
+            raise ApplicationError(
+                f"Path traversal detected in target_subdir: {payload.target_subdir}",
+                type="InvalidSubdirectory",
+                non_retryable=True,
+            )
 
     if workdir.exists():
         log.debug("setup_target.cleanup_existing", workdir=str(workdir))
@@ -70,11 +97,30 @@ async def setup_target(payload: SetupTargetInput) -> SetupTargetOutput:
         repo_url=str(payload.target_repo),
         branch=payload.target_branch,
         workdir=workdir,
+        clone_depth=payload.target_clone_depth,
     )
+
+    # Resolve component directory within monorepo
+    if payload.target_subdir:
+        component_dir = (workdir / payload.target_subdir).resolve()
+        if not component_dir.is_relative_to(workdir.resolve()):
+            raise ApplicationError(
+                f"Path traversal detected in target_subdir: {payload.target_subdir}",
+                type="InvalidSubdirectory",
+                non_retryable=True,
+            )
+        if not component_dir.is_dir():
+            raise ApplicationError(
+                f"Target subdirectory does not exist: {payload.target_subdir}",
+                type="DirectoryNotFound",
+                non_retryable=True,
+            )
+    else:
+        component_dir = workdir
 
     # ── 2. Detect build system and build ─────────────────────────────────
     await _build_target(
-        workdir=workdir,
+        workdir=component_dir,
         sanitizers=payload.sanitizers,
     )
 
@@ -82,7 +128,7 @@ async def setup_target(payload: SetupTargetInput) -> SetupTargetOutput:
     harness_path: Path | None = None
 
     # First: check if the target already has a fuzz harness.
-    existing_harness = _detect_existing_harness(workdir)
+    existing_harness = _detect_existing_harness(component_dir)
     if existing_harness:
         log.info(
             "setup_target.existing_harness_found",
@@ -91,8 +137,9 @@ async def setup_target(payload: SetupTargetInput) -> SetupTargetOutput:
         # Compile the existing harness with sanitizer instrumentation.
         compiled = await _compile_harness(
             harness_source=existing_harness,
-            workdir=workdir,
+            workdir=component_dir,
             sanitizers=payload.sanitizers,
+            target_name=payload.target_name,
         )
         if compiled:
             harness_path = compiled
@@ -102,10 +149,10 @@ async def setup_target(payload: SetupTargetInput) -> SetupTargetOutput:
         # Find the best source file to target for synthesis.
         source_path = payload.target_source_path
         if not source_path:
-            source_path = _find_best_source_for_synthesis(workdir)
+            source_path = _find_best_source_for_synthesis(component_dir)
         if source_path:
             harness_path = await _run_harness_synthesis(
-                workdir=workdir,
+                workdir=component_dir,
                 target_source_path=source_path,
                 max_retries=payload.max_synth_retries,
                 workflow_id=workflow_id,
@@ -113,7 +160,7 @@ async def setup_target(payload: SetupTargetInput) -> SetupTargetOutput:
             )
 
     output = SetupTargetOutput(
-        workdir=workdir,
+        workdir=component_dir,
         commit_sha=commit_sha,
         harness_path=harness_path,
     )
@@ -135,13 +182,38 @@ async def _clone_repo(
     repo_url: str,
     branch: str | None,
     workdir: Path,
+    clone_depth: int = 1,
 ) -> str:
-    """Clone the target repository and return the HEAD commit SHA.
+    """Clone or copy the target repository and return the HEAD commit SHA.
 
-    Uses --depth 1 for speed on initial clone; recursive for submodules.
+    Uses --depth <depth> if clone_depth > 0 for speed; full clone if 0.
     Falls back to full clone if shallow clone fails (some hosts reject it).
+    Supports local filesystem paths and file:// URIs directly.
     """
-    cmd = ["git", "clone", "--recursive", "--depth", "1"]
+    local_path = None
+    if repo_url.startswith("file://"):
+        local_path = Path(repo_url[7:])
+    elif Path(repo_url).exists() and Path(repo_url).is_dir():
+        local_path = Path(repo_url)
+
+    if local_path and local_path.exists():
+        log.info("setup_target.clone.local_path", path=str(local_path))
+        if (local_path / ".git").exists():
+            repo_url = str(local_path.resolve())
+        else:
+            shutil.rmtree(workdir, ignore_errors=True)
+            shutil.copytree(local_path, workdir, symlinks=True, ignore_dangling_symlinks=True)
+            init_proc = await asyncio.create_subprocess_exec(
+                "git", "init", str(workdir),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await init_proc.communicate()
+            return "local-snapshot"
+
+    cmd = ["git", "clone", "--recursive"]
+    if clone_depth > 0:
+        cmd.extend(["--depth", str(clone_depth)])
     if branch:
         cmd.extend(["--branch", branch])
     cmd.extend([repo_url, str(workdir)])
@@ -157,13 +229,13 @@ async def _clone_repo(
         _, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=_CLONE_TIMEOUT_SECONDS
         )
-    except asyncio.TimeoutError:
+    except TimeoutError as err:
         proc.kill()
         raise ApplicationError(
             f"git clone timed out after {_CLONE_TIMEOUT_SECONDS}s for {repo_url}",
             type="CloneTimeout",
             non_retryable=False,
-        )
+        ) from err
 
     if proc.returncode != 0:
         err_text = stderr.decode("utf-8", errors="replace")[:500]
@@ -185,13 +257,13 @@ async def _clone_repo(
                 _, stderr2 = await asyncio.wait_for(
                     proc2.communicate(), timeout=_CLONE_TIMEOUT_SECONDS
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError as err2:
                 proc2.kill()
                 raise ApplicationError(
                     f"git clone (full) timed out for {repo_url}",
                     type="CloneTimeout",
                     non_retryable=False,
-                )
+                ) from err2
             if proc2.returncode != 0:
                 raise ApplicationError(
                     f"git clone failed: {stderr2.decode('utf-8', errors='replace')[:300]}",
@@ -232,7 +304,10 @@ async def _build_target(workdir: Path, sanitizers: str) -> None:
 
     # Construct sanitizer flags.
     san_flags = f"-fsanitize={sanitizers}" if sanitizers else ""
-    cov_flags = "-fsanitize-coverage=trace-pc-guard,trace-cmp"
+    # Use -fsanitize=fuzzer-no-link for coverage instrumentation during build.
+    # The actual fuzzer runtime (-fsanitize=fuzzer) is linked only in the harness.
+    # Note: -fsanitize-coverage=trace-pc-guard is deprecated by modern libFuzzer.
+    cov_flags = "-fsanitize=fuzzer-no-link"
     # Source-based coverage: produces default.profraw at runtime so llvm-cov
     # can generate line-level hit/miss data for ALL fuzzer types (including
     # AFL++). This closes the gap where AFL++ campaigns were permanently
@@ -267,6 +342,21 @@ async def _build_target(workdir: Path, sanitizers: str) -> None:
                 f'cmake -DCMAKE_C_FLAGS="{cmake_flags}" -DCMAKE_CXX_FLAGS="{cmake_flags}" -B',
             )
         )
+    elif profile.build_system == "bazel":
+        san_val = sanitizers if sanitizers else "address,undefined"
+        build_cmd = (
+            f"bazel build --action_env=CC=clang --action_env=CXX=clang++ "
+            f"--copt=-g --copt=-O1 --copt=-fsanitize={san_val} --copt=-fsanitize=fuzzer-no-link "
+            f"--copt=-fprofile-instr-generate --copt=-fcoverage-mapping "
+            f"--linkopt=-fsanitize={san_val} --linkopt=-fprofile-instr-generate //..."
+        )
+    elif profile.build_system == "meson":
+        output_dir = profile.output_dir or "build"
+        reconf_flag = " --reconfigure" if (workdir / output_dir).exists() else ""
+        build_cmd = (
+            f"meson setup {output_dir}{reconf_flag} --wrap-mode=nofallback && "
+            f"meson compile -C {output_dir}"
+        )
     log.info(
         "setup_target.build.start",
         system=profile.build_system,
@@ -285,16 +375,17 @@ async def _build_target(workdir: Path, sanitizers: str) -> None:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    build_timeout = _get_build_timeout()
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=_BUILD_TIMEOUT_SECONDS
+        _stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=build_timeout
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         log.warning(
             "setup_target.build.timeout",
             command=build_cmd[:100],
-            timeout=_BUILD_TIMEOUT_SECONDS,
+            timeout=build_timeout,
         )
         return
 
@@ -310,10 +401,50 @@ async def _build_target(workdir: Path, sanitizers: str) -> None:
     else:
         log.info("setup_target.build.success", system=profile.build_system)
 
+    if profile.build_system == "bazel":
+        _extract_bazel_artifacts(workdir)
+
+
+def _extract_bazel_artifacts(workdir: Path) -> None:
+    """Harvest .a and .so build artifacts from bazel-bin symlink/cache and copy to workdir/lib."""
+    candidate_dirs: list[Path] = []
+    bazel_bin = workdir / "bazel-bin"
+    if bazel_bin.exists() or bazel_bin.is_symlink():
+        candidate_dirs.append(bazel_bin)
+        with suppress(Exception):
+            candidate_dirs.append(bazel_bin.resolve())
+    for p in workdir.glob("bazel-bin*"):
+        if p not in candidate_dirs:
+            candidate_dirs.append(p)
+            with suppress(Exception):
+                candidate_dirs.append(p.resolve())
+
+    lib_dir = workdir / "lib"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    seen: set[str] = set()
+    for bdir in candidate_dirs:
+        if not bdir.exists():
+            continue
+        for ext in ("*.a", "*.so", "*.so.*"):
+            for artifact in bdir.rglob(ext):
+                if not artifact.is_file():
+                    continue
+                if artifact.name in seen:
+                    continue
+                try:
+                    dest = lib_dir / artifact.name
+                    shutil.copy2(artifact.resolve(), dest)
+                    seen.add(artifact.name)
+                    copied += 1
+                except Exception as exc:
+                    log.warning("setup_target.bazel.copy_failed", artifact=str(artifact), error=str(exc))
+
+    log.info("setup_target.bazel.artifacts_extracted", count=copied, dest=str(lib_dir))
+
 
 # ── Harness Detection ────────────────────────────────────────────────────────
-
-import re
 
 _HARNESS_PATTERNS = re.compile(
     r"(fuzz|harness|LLVMFuzzerTestOneInput)",
@@ -376,29 +507,38 @@ def _find_best_source_for_synthesis(workdir: Path) -> str | None:
         )
         # Find the .c file that implements this function.
         source_exts = {".c", ".cpp", ".cc", ".cxx"}
+        skip_dirs = {
+            "test", "tests", "fuzz", "fuzzing", "examples", "example",
+            "docs", "doc", "sample", "samples", "third_party", "vendor",
+            ".git", "build", "CMakeFiles",
+        }
         # Prioritize files whose name matches the function (compress→compress.c).
         candidates_by_name: list[Path] = []
         candidates_by_def: list[Path] = []
         for p in workdir.rglob("*"):
             if not p.is_file() or p.suffix.lower() not in source_exts:
                 continue
-            if ".git" in str(p) or "test" in p.parts:
+            try:
+                rel_parts = [part.lower() for part in p.relative_to(workdir).parts[:-1]]
+            except ValueError:
+                rel_parts = [part.lower() for part in p.parts[:-1]]
+            if any(part.startswith(".") or part in skip_dirs for part in rel_parts):
                 continue
-            if best_api.name.lower() in p.stem.lower():
+            if best_api.name.lower() in p.stem.lower() or p.stem.lower() in best_api.name.lower():
                 candidates_by_name.append(p)
                 continue
             try:
-                content = p.read_text(encoding="utf-8", errors="replace")[:16000]
+                content = p.read_text(encoding="utf-8", errors="replace")[:32000]
             except OSError:
                 continue
-            # Match function DEFINITION (has opening brace).
-            pattern = rf"^\w[\w\s\*]*\b{re.escape(best_api.name)}\s*\([^)]*\)\s*\{{" 
-            if re.search(pattern, content, re.MULTILINE):
+            # Match function DEFINITION (function name followed by arguments and opening brace).
+            pattern = rf"\b{re.escape(best_api.name)}\s*\([^;{{]*\)\s*\{{"
+            if re.search(pattern, content, re.DOTALL | re.MULTILINE):
                 candidates_by_def.append(p)
         # Prefer name-matched file, then definition-matched.
-        best_match = (candidates_by_name or candidates_by_def or [None])[0]
-        if best_match:
-            return str(best_match)
+        best_candidates = candidates_by_name or candidates_by_def
+        if best_candidates:
+            return str(best_candidates[0])
 
     # ── Strategy 2: Fallback — scan .c files directly ────────────────────
     best_path: Path | None = None
@@ -407,7 +547,7 @@ def _find_best_source_for_synthesis(workdir: Path) -> str | None:
     source_exts = {".c", ".cpp", ".cc", ".cxx"}
     skip_dirs = {"test", "tests", "examples", "docs", "third_party", "vendor", ".git"}
 
-    _HIGH_VALUE_NAMES = {
+    high_value_names = {
         "inflate", "deflate", "decompress", "compress", "decode", "parse",
         "read", "unpack", "deserialize", "load", "import", "extract",
         "process", "handle", "dispatch", "recv", "input",
@@ -427,7 +567,7 @@ def _find_best_source_for_synthesis(workdir: Path) -> str | None:
             continue
         score = eps[0].score
         stem = p.stem.lower()
-        if any(name in stem for name in _HIGH_VALUE_NAMES):
+        if any(name in stem for name in high_value_names):
             score += 0.5
         if len(eps) >= 3:
             score += 0.2
@@ -440,13 +580,84 @@ def _find_best_source_for_synthesis(workdir: Path) -> str | None:
     return None
 
 
-# ── Harness Compilation ──────────────────────────────────────────────────────
+def _rank_and_select_libraries(
+    target_dir: Path,
+    target_name: str | None = None,
+) -> tuple[list[str], set[Path]]:
+    """Enumerate and rank built libraries (.a and .so) for harness linking.
+
+    Scores candidate libraries based on:
+    - Exact match against target_name stem (e.g. libfoo.a or foo.a for target 'foo') -> +100
+    - Substring match with target_name -> +50
+    - Library file size (larger libraries generally contain the main codebase)
+
+    Returns:
+        tuple of (ordered list of library file paths as strings, set of directory Paths containing .so files for RPATH).
+    """
+    candidates: list[Path] = []
+    skip_keywords = ("test", "tests", "example", "examples", "cmakefiles", "fuzz", "benchmark", "benchmarks")
+
+    for ext in ("*.a", "*.so", "*.so.*"):
+        for lib_file in target_dir.rglob(ext):
+            if not lib_file.is_file():
+                continue
+            try:
+                rel_parts = [part.lower() for part in lib_file.relative_to(target_dir).parts]
+                rel_str = "/".join(rel_parts)
+            except ValueError:
+                rel_parts = [part.lower() for part in lib_file.parts]
+                rel_str = lib_file.name.lower()
+            if any(skip in rel_str for skip in skip_keywords):
+                continue
+            if lib_file not in candidates:
+                candidates.append(lib_file)
+
+    if not candidates:
+        return [], set()
+
+    scored: list[tuple[float, int, Path]] = []
+    norm_target = target_name.lower().strip() if target_name else ""
+    norm_target_clean = norm_target.removeprefix("lib").removesuffix(".git") if norm_target else ""
+
+    for lib in candidates:
+        score = 0.0
+        try:
+            size = lib.stat().st_size
+        except OSError:
+            size = 0
+
+        stem = lib.stem.lower()
+        stem_clean = stem.removeprefix("lib")
+
+        if norm_target_clean:
+            if stem == norm_target or stem_clean == norm_target_clean or stem == f"lib{norm_target_clean}":
+                score += 100.0
+            elif norm_target_clean in stem or stem_clean in norm_target_clean:
+                score += 50.0
+
+        size_mb = size / (1024 * 1024)
+        score += min(20.0, size_mb)
+
+        scored.append((score, size, lib))
+
+    # Sort descending by score, then by size descending
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+
+    ranked_libs = [item[2] for item in scored]
+    rpath_dirs: set[Path] = {
+        lib.parent.resolve()
+        for lib in ranked_libs
+        if ".so" in lib.name
+    }
+
+    return [str(p) for p in ranked_libs], rpath_dirs
 
 
 async def _compile_harness(
     harness_source: Path,
     workdir: Path,
     sanitizers: str,
+    target_name: str | None = None,
 ) -> Path | None:
     """Compile an existing harness source with sanitizer instrumentation.
 
@@ -470,21 +681,32 @@ async def _compile_harness(
         if "CMakeFiles" not in str(hdir):
             include_dirs.add(hdir)
 
-    # Discover static libraries (.a) and object files to link against.
-    link_libs: list[str] = []
-    for lib_file in workdir.rglob("*.a"):
-        # Skip test/example libraries.
-        if any(skip in str(lib_file) for skip in ("test", "example", "CMakeFiles")):
-            continue
-        link_libs.append(str(lib_file))
-    # If no .a found, try linking .o files from build directory.
+    # Discover static libraries (.a) and shared libraries (.so) to link against.
+    link_libs, rpath_dirs = _rank_and_select_libraries(workdir, target_name)
+
+    # If no libraries found, try linking non-test .o files from build directory.
     if not link_libs:
         build_dir = workdir / "build"
         if build_dir.exists():
-            obj_files = list(build_dir.rglob("*.o"))
-            # Only link if reasonable number of objects (not hundreds).
+            obj_files = [
+                o for o in build_dir.rglob("*.o")
+                if not any(skip in str(o).lower() for skip in ("test", "example", "main", "unity", "fuzz"))
+            ]
             if 0 < len(obj_files) <= 50:
                 link_libs.extend(str(o) for o in obj_files)
+    # If still no object files or static libs, link source files directly
+    if not link_libs:
+        src_files = [
+            str(f)
+            for f in list(workdir.rglob("*.c")) + list(workdir.rglob("*.cpp")) + list(workdir.rglob("*.cc"))
+            if f.resolve() != harness_source.resolve()
+            and "test" not in str(f).lower()
+            and "fuzz" not in str(f).lower()
+            and "example" not in str(f).lower()
+            and "build" not in str(f).lower()
+        ]
+        if src_files:
+            link_libs.extend(src_files)
 
     cmd = [
         "clang++",
@@ -497,8 +719,12 @@ async def _compile_harness(
         cmd.append("-DHAVE_CONFIG_H")
     for inc in include_dirs:
         cmd.append(f"-I{inc}")
+    for rd in sorted(rpath_dirs):
+        cmd.append(f"-Wl,-rpath,{rd.resolve()}")
     cmd.extend(["-o", str(binary_path), str(harness_source)])
     cmd.extend(link_libs)
+    # Common system libs that targets often need (after .a files for link order).
+    cmd.extend(["-lm", "-lz", "-lbz2", "-llzma", "-lssl", "-lcrypto", "-lxml2", "-lpthread"])
     # Common system libs that targets often need (after .a files for link order).
     cmd.extend(["-lm", "-lz", "-lbz2", "-llzma", "-lssl", "-lcrypto", "-lxml2", "-lpthread"])
 
@@ -510,7 +736,7 @@ async def _compile_harness(
     )
     try:
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         return None
 
@@ -648,3 +874,6 @@ def _find_usage_example(workdir: Path, source_path: Path) -> str:
                     )
 
     return ""
+
+
+__all__ = ["setup_target"]

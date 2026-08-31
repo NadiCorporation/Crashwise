@@ -21,7 +21,7 @@ Resilience:
 
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import time
 from typing import Any
 
@@ -67,10 +67,8 @@ async def _reset_pool() -> None:
     """Close and reset the connection pool for reconnection."""
     global _pool
     if _pool is not None:
-        try:
+        with contextlib.suppress(Exception):
             await _pool.close()
-        except Exception:
-            pass
         _pool = None
 
 
@@ -198,36 +196,69 @@ async def is_stack_hash_known(
     *,
     ttl: int = 86_400,
 ) -> bool:
-    """Check if a stack hash has been seen before for this campaign.
+    """Read-only membership check for a stack hash in the dedup set.
 
-    Uses a Redis Set for O(1) membership testing.
-
-    Parameters
-    ----------
-    campaign_id:
-        Campaign identifier.
-    stack_hash:
-        SHA256 stack trace hash.
-    ttl:
-        Expiration for the dedup set (seconds).
-
-    Returns
-    -------
-    ``True`` if the hash was already in the set (duplicate).
+    This is a pure query (no side effects). Use :func:`claim_stack_hash`
+    for the check-and-reserve semantics required by the persistence path,
+    and :func:`release_stack_hash` to roll a claim back on failure.
     """
     if not stack_hash or not await _check_enabled():
         return False
 
     pool = _get_pool()
     key = f"crashwise:dedup:{campaign_id}"
-    was_member = await pool.sismember(key, stack_hash)
-    if was_member:
+    return bool(await pool.sismember(key, stack_hash))
+
+
+async def claim_stack_hash(
+    campaign_id: str,
+    stack_hash: str,
+    *,
+    ttl: int = 86_400,
+) -> bool:
+    """Atomically reserve a stack hash in the dedup set.
+
+    ``SADD`` is atomic and returns the number of elements actually added,
+    so a concurrent claim of the same hash is guaranteed to observe the
+    other one as already-present. Returns ``True`` when the hash was newly
+    claimed (i.e. first time seen), ``False`` when it was already present
+    (duplicate). When Redis is disabled the claim is skipped and ``True``
+    is returned, leaving the database unique constraint as the fallback.
+
+    Callers MUST call :func:`release_stack_hash` if the subsequent DB
+    write fails, otherwise the hash would remain reserved and the crash
+    would be permanently deduplicated away.
+    """
+    if not stack_hash or not await _check_enabled():
         return True
 
-    # Add it now so future calls see it.
-    await pool.sadd(key, stack_hash)
-    await pool.expire(key, ttl)
-    return False
+    pool = _get_pool()
+    key = f"crashwise:dedup:{campaign_id}"
+    added = await pool.sadd(key, stack_hash)
+    if added:
+        await pool.expire(key, ttl)
+    return bool(added)
+
+
+async def release_stack_hash(campaign_id: str, stack_hash: str) -> None:
+    """Undo a prior :func:`claim_stack_hash` reservation.
+
+    Called when the persistence step that follows a successful claim
+    fails, so the crash is not permanently dropped from the dedup set.
+    """
+    if not stack_hash or not await _check_enabled():
+        return
+
+    pool = _get_pool()
+    key = f"crashwise:dedup:{campaign_id}"
+    try:
+        await pool.srem(key, stack_hash)  # type: ignore[misc]  # redis-py union
+    except Exception as exc:
+        log.warning(
+            "redis.release_stack_hash_failed",
+            campaign_id=campaign_id,
+            error=str(exc)[:100],
+        )
 
 
 async def clear_dedup_cache(campaign_id: str) -> None:
@@ -406,10 +437,8 @@ async def clear_mab_state(campaign_id: str) -> None:
         return
     pool = _get_pool()
     key = f"crashwise:mab:{campaign_id}"
-    try:
+    with contextlib.suppress(Exception):
         await pool.delete(key)
-    except Exception:
-        pass
 
 
 # ── MAB database fallback ────────────────────────────────────────────────────
@@ -418,8 +447,9 @@ async def clear_mab_state(campaign_id: str) -> None:
 async def _save_campaign_state_to_db(campaign_id: str, state_json: str) -> None:
     """Persist campaign state to the database (primary source of truth)."""
     try:
-        from crashwise.core.database import get_session
         from sqlalchemy import text
+
+        from crashwise.core.database import get_session
 
         async with get_session() as session:
             await session.execute(
@@ -444,8 +474,9 @@ async def _load_campaign_state_from_db(campaign_id: str) -> dict[str, Any] | Non
     try:
         import json
 
-        from crashwise.core.database import get_session
         from sqlalchemy import text
+
+        from crashwise.core.database import get_session
 
         async with get_session() as session:
             result = await session.execute(
@@ -466,8 +497,9 @@ async def _load_campaign_state_from_db(campaign_id: str) -> dict[str, Any] | Non
 async def _save_mab_state_to_db(campaign_id: str, mab_state_json: str) -> None:
     """Persist MAB state to the database as a fallback when Redis is down."""
     try:
-        from crashwise.core.database import get_session
         from sqlalchemy import text
+
+        from crashwise.core.database import get_session
 
         async with get_session() as session:
             # Use a simple key-value approach via raw SQL to avoid new models.
@@ -493,8 +525,9 @@ async def _save_mab_state_to_db(campaign_id: str, mab_state_json: str) -> None:
 async def _load_mab_state_from_db(campaign_id: str) -> str | None:
     """Load MAB state from the database fallback."""
     try:
-        from crashwise.core.database import get_session
         from sqlalchemy import text
+
+        from crashwise.core.database import get_session
 
         async with get_session() as session:
             result = await session.execute(
@@ -514,17 +547,19 @@ async def _load_mab_state_from_db(campaign_id: str) -> str | None:
 
 
 __all__ = [
-    "incr_exec_counter",
-    "get_exec_counter",
-    "incr_crash_counter",
-    "get_crash_counter",
-    "is_stack_hash_known",
+    "claim_stack_hash",
     "clear_dedup_cache",
-    "heartbeat",
-    "list_active_workers",
-    "set_campaign_state",
-    "get_campaign_state",
-    "save_mab_state",
-    "load_mab_state",
     "clear_mab_state",
+    "get_campaign_state",
+    "get_crash_counter",
+    "get_exec_counter",
+    "heartbeat",
+    "incr_crash_counter",
+    "incr_exec_counter",
+    "is_stack_hash_known",
+    "list_active_workers",
+    "load_mab_state",
+    "release_stack_hash",
+    "save_mab_state",
+    "set_campaign_state",
 ]

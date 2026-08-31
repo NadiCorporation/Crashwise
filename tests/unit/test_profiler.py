@@ -21,18 +21,18 @@ from crashwise.agents.research.profiler import (
 )
 from crashwise.core.models import (
     DangerousFunction,
+    ExecutionBackend,
+    FuzzerType,
+    FuzzJob,
     ProfileTargetInput,
     ProfileTargetOutput,
     TargetDomain,
     TargetProfile,
 )
 from crashwise.execution.dispatcher import (
-    ExecutionConfig,
     apply_profile_to_job,
     dispatch,
 )
-from crashwise.core.models import ExecutionBackend, FuzzJob, FuzzerType
-
 
 # ── File Collection ──────────────────────────────────────────────────────────
 
@@ -149,7 +149,7 @@ def test_recommend_config_network() -> None:
 def test_recommend_config_aggressive() -> None:
     dangers = [DangerousFunction.MEMCPY, DangerousFunction.STRCPY, DangerousFunction.MALLOC,
                DangerousFunction.REALLOC, DangerousFunction.FREE, DangerousFunction.SPRINTF]
-    sanitizers, strategy = _recommend_config(
+    _sanitizers, strategy = _recommend_config(
         TargetDomain.IMAGE_PROCESSING,
         dangers,
         has_custom_allocator=False,

@@ -94,10 +94,8 @@ async def run_worker(
         from crashwise.core.redis import heartbeat
 
         while not stop_event.is_set():
-            try:
+            with contextlib.suppress(Exception):
                 await heartbeat()
-            except Exception:
-                pass
             await asyncio.sleep(30)
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop())

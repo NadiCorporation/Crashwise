@@ -20,6 +20,8 @@ from temporalio.worker import Worker
 
 from crashwise.core.models import (
     CrashSeverity,
+    ExecuteFuzzingInput,
+    ExecuteFuzzingOutput,
     FuzzerType,
     FuzzingInput,
     FuzzingOutput,
@@ -41,17 +43,86 @@ def _fast_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _fast_simulator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the wall-clock simulator with an instant stub.
+
+    The legacy simulator drives its loop off ``time.monotonic()``, so even
+    with a compressed heartbeat it would sleep for the full
+    ``timeout_seconds`` (10s) per iteration. We stub it to return a
+    zero-crash result immediately so the workflow resolves in milliseconds.
+    """
+
+    async def _fake_simulated_execute(
+        payload: ExecuteFuzzingInput,
+        logs_path: Path,
+        crashes_dir: Path,
+    ) -> ExecuteFuzzingOutput:
+        return ExecuteFuzzingOutput(
+            logs_path=logs_path,
+            crashes_dir=crashes_dir,
+            crash_count=0,
+            executions=1_000,
+            duration_seconds=0.001,
+        )
+
+    monkeypatch.setattr(_EF_MODULE, "_simulated_execute", _fake_simulated_execute)
+
+
+@pytest.fixture(autouse=True)
 def _mock_clone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Mock git clone so workflow tests don't need network access."""
     from crashwise.orchestration.activities.setup_target import setup_target  # noqa: F401
 
     st_module = sys.modules["crashwise.orchestration.activities.setup_target"]
 
-    async def _fake_clone(repo_url: str, branch: str | None, workdir: Path) -> str:
+    async def _fake_clone(
+        repo_url: str,
+        branch: str | None,
+        workdir: Path,
+        clone_depth: int = 1,
+        *args: object,
+        **kwargs: object,
+    ) -> str:
         (workdir / "main.c").write_text("int main() { return 0; }\n")
         return "abc123deadbeef"
 
     monkeypatch.setattr(st_module, "_clone_repo", _fake_clone)
+
+
+@pytest.fixture(autouse=True)
+def _mock_build_and_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Mock the healing build, sandbox container, and harness synthesis.
+
+    The workflow's adaptive-build stage (and its legacy ``setup_target``
+    fallback) would otherwise spawn a live Docker container and drive an
+    LLM agent — both unavailable in the unit-test sandbox and the source
+    of the suite hang. We short-circuit them so the workflow resolves in
+    milliseconds:
+
+    * ``OpenHandsSandbox.allocate`` raises ``openhands-sdk is not
+      installed`` — the same permanent failure the activity maps to a
+      non-retryable ``HealingBuildError``, forcing the workflow's legacy
+      ``setup_target`` fallback.
+    * ``setup_target._build_target`` becomes a no-op (no live shell build).
+    * ``setup_target._run_harness_synthesis`` returns ``None`` (no LLM).
+    """
+    from crashwise.agents.healing.tools import OpenHandsSandbox
+
+    async def _fake_allocate(**kwargs: object) -> object:
+        raise RuntimeError("openhands-sdk is not installed")
+
+    monkeypatch.setattr(OpenHandsSandbox, "allocate", staticmethod(_fake_allocate))
+
+    st_module = sys.modules["crashwise.orchestration.activities.setup_target"]
+
+    async def _fake_build(workdir: Path, sanitizers: str) -> None:
+        return None
+
+    async def _fake_run_harness_synthesis(**kwargs: object) -> Path | None:
+        return None
+
+    monkeypatch.setattr(st_module, "_build_target", _fake_build)
+    monkeypatch.setattr(st_module, "_run_harness_synthesis", _fake_run_harness_synthesis)
 
 
 async def _run_main(client: Client, task_queue: str, payload: FuzzingInput) -> FuzzingOutput:

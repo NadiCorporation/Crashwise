@@ -42,8 +42,12 @@ log = get_logger(__name__)
 _BUILD_SYSTEMS: dict[str, tuple[str, str]] = {
     "CMakeLists.txt": ("cmake", 'cmake -B {output_dir} -S . && cmake --build {output_dir}'),
     "Makefile": ("make", "make -j$(nproc)"),
-    "meson.build": ("meson", "meson setup {output_dir} && meson compile -C {output_dir}"),
+    "meson.build": ("meson", "meson setup {output_dir} --wrap-mode=nofallback && meson compile -C {output_dir}"),
     "BUILD.bazel": ("bazel", "bazel build //..."),
+    "BUILD": ("bazel", "bazel build //..."),
+    "WORKSPACE.bazel": ("bazel", "bazel build //..."),
+    "WORKSPACE": ("bazel", "bazel build //..."),
+    "MODULE.bazel": ("bazel", "bazel build //..."),
     "Cargo.toml": ("cargo", "cargo build --release"),
     "go.mod": ("go", "go build ./..."),
     "setup.py": ("custom", "python setup.py build"),

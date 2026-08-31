@@ -14,7 +14,9 @@ log = get_logger(__name__)
 async def update_campaign_status(payload: dict) -> None:
     """Update campaign status and optional run_count in the DB."""
     from uuid import UUID
+
     from sqlalchemy import update
+
     from crashwise.core.database import Campaign
 
     campaign_id = payload["campaign_id"]

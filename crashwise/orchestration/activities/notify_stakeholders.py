@@ -12,7 +12,7 @@ from __future__ import annotations
 from temporalio import activity
 
 from crashwise.core.logging import get_logger
-from crashwise.core.notifications import NotificationConfig, NotificationRouter
+from crashwise.core.notifications import NotificationRouter
 
 log = get_logger(__name__)
 

@@ -33,6 +33,7 @@ class BuildPaths:
             args.append(str(lib))
         for ld in self.lib_dirs:
             args.append(f"-L{ld}")
+            args.append(f"-Wl,-rpath,{ld.resolve()}")
         return args
 
 
@@ -69,9 +70,8 @@ def resolve_build_paths(workdir: Path) -> BuildPaths:
 
     # Discover shared libraries (.so).
     for lib in workdir.rglob("*.so*"):
-        if not any(skip in str(lib) for skip in skip_patterns):
-            if lib.parent not in paths.lib_dirs:
-                paths.lib_dirs.append(lib.parent)
+        if not any(skip in str(lib) for skip in skip_patterns) and lib.parent not in paths.lib_dirs:
+            paths.lib_dirs.append(lib.parent)
 
     log.info(
         "build_resolver.resolved",
@@ -110,8 +110,7 @@ def diagnose_compile_error(stderr: str, workdir: Path) -> list[str]:
             fixes.append(f"-I{found}")
 
     # Undefined references: "undefined reference to `compress'"
-    for m in re.finditer(r"undefined reference to [`'](\w+)'", stderr):
-        func_name = m.group(1)
+    for _m in re.finditer(r"undefined reference to [`'](\w+)'", stderr):
         # Search for .a files that might contain this symbol.
         for lib in workdir.rglob("*.a"):
             if "CMakeFiles" not in str(lib) and str(lib) not in fixes:
@@ -132,4 +131,4 @@ def diagnose_compile_error(stderr: str, workdir: Path) -> list[str]:
     return fixes
 
 
-__all__ = ["BuildPaths", "resolve_build_paths", "find_missing_header", "diagnose_compile_error"]
+__all__ = ["BuildPaths", "diagnose_compile_error", "find_missing_header", "resolve_build_paths"]

@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 import time
 from pathlib import Path
+from uuid import UUID
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -122,13 +123,19 @@ async def _real_execute(
 
     # The harness binary lives next to the workdir; fall back gracefully.
     harness_path = payload.harness_path or (payload.workdir / "harness")
-    corpus_dir = payload.corpus_dir or (payload.workdir / "corpus")
+    # Seed the fuzzer from the previous iteration's preserved coverage
+    # frontier when one exists; otherwise fall back to the original seed
+    # corpus. This keeps multi-iteration campaigns building on prior
+    # discoveries instead of restarting from the initial seeds each loop.
+    preserved_dir = payload.workdir / "corpus_preserved"
+    if preserved_dir.exists() and any(p.is_file() for p in preserved_dir.rglob("*")):
+        corpus_dir = preserved_dir
+    else:
+        corpus_dir = payload.corpus_dir or (payload.workdir / "corpus")
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
     # Guard: if harness_path doesn't exist or is a directory, we can't fuzz.
     if not harness_path.is_file():
-        from temporalio.exceptions import ApplicationError
-
         raise ApplicationError(
             f"NoHarnessBinary: harness not found or not a file: {harness_path}",
             non_retryable=True,
@@ -141,6 +148,7 @@ async def _real_execute(
         harness_path=harness_path,
         corpus_dir=corpus_dir,
         output_dir=crashes_dir.parent,
+        crashes_dir=crashes_dir,
         timeout_seconds=payload.timeout_seconds,
         cpu_limit=2.0,
         memory_limit_mb=2048,
@@ -155,6 +163,12 @@ async def _real_execute(
     last_coverage = 0
     last_exec_per_sec = 0.0
     crash_count_observed = 0
+
+    # Resource monitoring state
+    peak_memory_mb = 0.0
+    peak_cpu_percent = 0.0
+    resource_check_interval = 10.0  # Check every 10 seconds
+    last_resource_check = 0.0
 
     try:
         await mgr.start(job)
@@ -233,6 +247,61 @@ async def _real_execute(
                     sum(1 for p in crashes_dir.iterdir() if p.is_file()),
                 )
 
+            # Resource monitoring - check CPU and memory usage periodically
+            if elapsed - last_resource_check >= resource_check_interval:
+                try:
+                    stats = await mgr.stats(job_id)
+                    if stats:
+                        # Parse CPU percent (e.g., "50.00%" -> 50.0)
+                        cpu_str = stats.get("cpu_percent", "0%")
+                        cpu_percent = 0.0
+                        if cpu_str and cpu_str != "N/A":
+                            with contextlib.suppress(ValueError):
+                                cpu_percent = float(cpu_str.rstrip("%"))
+
+                        # Parse memory (e.g., "100MiB / 2048MiB" -> 100.0)
+                        mem_str = stats.get("memory", "0MiB")
+                        memory_mb = 0.0
+                        if mem_str and mem_str != "N/A":
+                            try:
+                                # Extract the first number before "/"
+                                mem_part = mem_str.split("/")[0].strip()
+                                # Remove unit suffix and convert to MB
+                                if "GiB" in mem_part:
+                                    memory_mb = float(mem_part.replace("GiB", "").strip()) * 1024
+                                elif "MiB" in mem_part:
+                                    memory_mb = float(mem_part.replace("MiB", "").strip())
+                                elif "KiB" in mem_part:
+                                    memory_mb = float(mem_part.replace("KiB", "").strip()) / 1024
+                            except (ValueError, IndexError):
+                                pass
+
+                        peak_cpu_percent = max(peak_cpu_percent, cpu_percent)
+                        peak_memory_mb = max(peak_memory_mb, memory_mb)
+
+                        # Log warning if resource usage is high
+                        if cpu_percent > 90.0:
+                            log.warning(
+                                "execute_fuzzing.high_cpu_usage",
+                                job_id=job_id,
+                                cpu_percent=round(cpu_percent, 1),
+                                memory_mb=round(memory_mb, 1),
+                            )
+                        if memory_mb > 1800.0:  # 90% of 2048MB limit
+                            log.warning(
+                                "execute_fuzzing.high_memory_usage",
+                                job_id=job_id,
+                                cpu_percent=round(cpu_percent, 1),
+                                memory_mb=round(memory_mb, 1),
+                            )
+                except Exception as stats_exc:
+                    log.debug(
+                        "execute_fuzzing.stats_failed",
+                        job_id=job_id,
+                        error=str(stats_exc),
+                    )
+                last_resource_check = elapsed
+
             activity.heartbeat(
                 {
                     "elapsed_seconds": round(elapsed, 2),
@@ -241,16 +310,30 @@ async def _real_execute(
                     "exec_per_sec": last_exec_per_sec,
                     "crashes": crash_count_observed,
                     "fuzzer": payload.fuzzer_type.value,
+                    "peak_cpu_percent": round(peak_cpu_percent, 1),
+                    "peak_memory_mb": round(peak_memory_mb, 1),
                 }
             )
 
             if not alive:
-                # libFuzzer/AFL exits immediately on the first crash.
-                log.info(
-                    "execute_fuzzing.container_exited",
-                    job_id=job_id,
-                    elapsed=round(elapsed, 2),
-                )
+                # Container exited early - capture diagnostics
+                try:
+                    exit_code = await mgr.get_exit_code(job_id)
+                    stderr_output = await mgr.logs(job_id, tail=50, stderr=True)
+                    log.warning(
+                        "execute_fuzzing.container_exited_early",
+                        job_id=job_id,
+                        elapsed=round(elapsed, 2),
+                        exit_code=exit_code,
+                        stderr_preview=stderr_output[:500] if stderr_output else "",
+                    )
+                except Exception as diag_exc:
+                    log.warning(
+                        "execute_fuzzing.container_exited_diagnostics_failed",
+                        job_id=job_id,
+                        elapsed=round(elapsed, 2),
+                        diagnostic_error=str(diag_exc),
+                    )
                 break
 
         # Normal completion — stop, harvest, then remove. §1.3 ordering.
@@ -307,6 +390,8 @@ async def _real_execute(
         duration_seconds=round(duration, 3),
         coverage_edges=last_coverage,
         coverage_data_path=_collect_coverage_data(crashes_dir.parent, payload),
+        peak_cpu_percent=round(peak_cpu_percent, 1),
+        peak_memory_mb=round(peak_memory_mb, 1),
     )
 
     log.info(
@@ -317,6 +402,8 @@ async def _real_execute(
         coverage=last_coverage,
         crashes=output.crash_count,
         duration_seconds=output.duration_seconds,
+        peak_cpu_percent=output.peak_cpu_percent,
+        peak_memory_mb=output.peak_memory_mb,
     )
 
     # Persist run stats and propagate to Redis + R2.
@@ -325,7 +412,9 @@ async def _real_execute(
         "_real_execute must be invoked with a campaign_id"
     )
     campaign_id = payload.campaign_id
-    await _persist_run(payload, output)
+    run_id = await _persist_run(payload, output)
+    if run_id is not None:
+        output.run_id = str(run_id)
     from crashwise.core.redis import incr_exec_counter
 
     await incr_exec_counter(campaign_id, count=output.executions)
@@ -396,28 +485,34 @@ async def _simulated_execute(
         crash_count=0,
         executions=executions,
         duration_seconds=round(duration, 3),
+        peak_cpu_percent=0.0,
+        peak_memory_mb=0.0,
     )
 
 
 async def _persist_run(
     payload: ExecuteFuzzingInput,
     output: ExecuteFuzzingOutput,
-) -> None:
-    """Write fuzzing run stats to the DB."""
+) -> UUID | None:
+    """Write fuzzing run stats to the DB.
+
+    Returns the newly created :class:`FuzzingRun` UUID so the workflow can
+    link discovered crashes back to the run that produced them. Returns
+    ``None`` when no campaign_id is set or the write fails.
+    """
     from datetime import UTC, datetime
-    from uuid import UUID
 
     from crashwise.core.database import FuzzingRun, get_session
 
     if payload.campaign_id is None:
-        return
+        return None
     try:
         async with get_session() as session:
             run = FuzzingRun(
                 campaign_id=UUID(payload.campaign_id),
                 iteration=payload.iteration,
-                started_at=datetime.utcnow(),
-                finished_at=datetime.utcnow(),
+                started_at=datetime.now(tz=UTC).replace(tzinfo=None),
+                finished_at=datetime.now(tz=UTC).replace(tzinfo=None),
                 executions=output.executions,
                 duration_seconds=output.duration_seconds,
                 coverage_edges=output.coverage_edges,
@@ -430,9 +525,12 @@ async def _persist_run(
                 campaign_id=payload.campaign_id,
                 iteration=payload.iteration,
                 executions=output.executions,
+                run_id=str(run.id),
             )
+            return run.id
     except Exception:
         log.warning("execute_fuzzing.db_persist_failed", exc_info=True)
+        return None
 
 
 def _simulated_execs_per_tick(fuzzer: FuzzerType) -> int:
@@ -486,7 +584,6 @@ def _collect_coverage_data(output_dir: Path, payload: ExecuteFuzzingInput) -> Pa
         llvm_cov_path = output_dir / "coverage_llvm.json"
         profdata = output_dir / "default.profdata"
         harness = payload.harness_path or (payload.workdir / "harness")
-        import shlex
         import subprocess
         # Merge raw profile data.
         try:
@@ -539,10 +636,8 @@ def _collect_coverage_data(output_dir: Path, payload: ExecuteFuzzingInput) -> Pa
             for sline in result.stdout.decode("utf-8", errors="replace").splitlines():
                 if ":" in sline:
                     parts = sline.rsplit(":", 1)
-                    try:
+                    with contextlib.suppress(ValueError):
                         covered_lines.setdefault(parts[0], set()).add(int(parts[1]))
-                    except ValueError:
-                        pass
             for fname, lnums in covered_lines.items():
                 lines.append(f"SF:{fname}")
                 for ln in sorted(lnums):

@@ -10,6 +10,7 @@ established by ``setup_target`` so all artefacts stay sandboxed.
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import time
 from collections.abc import Sequence
@@ -156,10 +157,10 @@ async def compile_harness(
 class SanityResult:
     """Result of the fast-fail sanity check."""
 
-    __slots__ = ("passed", "edges_hit", "crashed_immediately", "output")
+    __slots__ = ("crashed_immediately", "edges_hit", "output", "passed")
 
     def __init__(self, *, passed: bool, edges_hit: int = 0,
-                 crashed_immediately: bool = False, output: str = ""):
+                 crashed_immediately: bool = False, output: str = "") -> None:
         self.passed = passed
         self.edges_hit = edges_hit
         self.crashed_immediately = crashed_immediately
@@ -203,18 +204,27 @@ async def sanity_check(
         "-handle_abrt=0",
     ]
 
+    env = dict(os.environ)
+    env["ASAN_OPTIONS"] = "abort_on_error=0:detect_leaks=0"
+    ld_paths = [str(binary_path.parent)]
+    if binary_path.parent.parent.exists():
+        for p in binary_path.parent.parent.rglob("*.so"):
+            ld_paths.append(str(p.parent))
+    current_ld = env.get("LD_LIBRARY_PATH", "")
+    env["LD_LIBRARY_PATH"] = ":".join(list(dict.fromkeys(ld_paths)) + ([current_ld] if current_ld else []))
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env={"ASAN_OPTIONS": "abort_on_error=0:detect_leaks=0"},
+            env=env,
         )
         try:
             stdout_bytes, _ = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout + 5.0
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             stdout_bytes = b""
@@ -263,4 +273,4 @@ async def sanity_check(
     )
 
 
-__all__ = ["compile_harness", "sanity_check", "SanityResult"]
+__all__ = ["SanityResult", "compile_harness", "sanity_check"]

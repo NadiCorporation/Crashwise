@@ -15,10 +15,11 @@ serialised workflow histories remain replayable.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-import time
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
@@ -56,10 +57,13 @@ class WorkflowStage(StrEnum):
     PENDING = "pending"
     SEEDING = "seeding"
     SETUP = "setup"
+    HEALING_BUILD = "healing_build"
     EXECUTING = "executing"
     TRIAGE = "triage"
+    HEALING_REPAIR = "healing_repair"
     COMPLETED = "completed"
     FAILED = "failed"
+    FAILED_COMPILATION = "failed_compilation"
 
 
 # ── Base ─────────────────────────────────────────────────────────────────────
@@ -99,7 +103,10 @@ class FuzzingInput(_StrictModel):
         activities will log their results to the persistence layer.
     """
 
-    target_repo: HttpUrl = Field(..., description="Git URL of target project")
+    target_repo: str = Field(..., min_length=1, max_length=1024, description="Git URL or directory path of target project")
+    target_name: str | None = Field(default=None, max_length=128, description="Target name or identifier")
+    target_subdir: str | None = Field(default=None, max_length=512, description="Monorepo subdirectory path")
+    target_clone_depth: int = Field(default=1, ge=0, description="Git clone depth (0 for full clone)")
     fuzzer_type: FuzzerType = Field(default=FuzzerType.LIBFUZZER)
     timeout_seconds: int = Field(default=600, ge=10, le=86_400)
 
@@ -108,6 +115,15 @@ class FuzzingInput(_StrictModel):
     sanitizers: str = Field(default="address,undefined")
     max_iterations: int = Field(default=5, ge=1, le=20)
     campaign_id: str | None = Field(default=None, max_length=36)
+    custom_fuzzer_flags: str | None = Field(default=None, description="Custom AFL++ or libFuzzer flags")
+
+    # Dynamic LLM controls per campaign
+    llm_model: str | None = Field(default=None, description="Model identifier override (e.g. deepseek-chat, gpt-4o)")
+    llm_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    llm_base_url: str | None = Field(default=None, description="Custom OpenAI-compatible base URL")
+    llm_api_key: str | None = Field(default=None, description="API key for the selected model")
+    reasoning_effort: str | None = Field(default=None, description="Reasoning effort ('low', 'medium', 'high')")
+    max_synth_retries: int = Field(default=4, ge=0, le=10, description="Max harness synthesis retry attempts")
 
     # Phase 21 — opt-in autonomous strategy switching and harness evolution.
     # Both default False so existing tests / smoke runs are unaffected.
@@ -119,6 +135,20 @@ class FuzzingInput(_StrictModel):
         default=False,
         description="Phase 18 harness evolution — implies enable_mab",
     )
+    mab_algorithm: str = Field(
+        default="thompson",
+        description="Bandit exploration algorithm: 'thompson' or 'ucb1'",
+    )
+    mab_exploration_ratio: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Exploration vs exploitation ratio for strategy switching",
+    )
+    mab_weights: dict[str, float] | None = Field(
+        default=None,
+        description="Optional initial weights / priors for bandit arms",
+    )
     pivot_check_interval_iterations: int = Field(
         default=1,
         ge=1,
@@ -129,10 +159,28 @@ class FuzzingInput(_StrictModel):
         default=10,
         ge=1,
         le=50,
+    )
+
+    # Phase 22 — CrashWise Healing Engine (openhands-sdk + LangGraph).
+    # When enabled, the workflow drives the adaptive build loop in place
+    # of the legacy ``setup_target`` activity and routes every unique
+    # crash through the autonomous repair agent before persistence.
+    enable_self_healing: bool = Field(
+        default=False,
         description=(
-            "Hard cap on harness-evolution attempts per campaign. "
-            "Prevents runaway LLM spend when the model keeps emitting "
-            "the same fallback template against a structural blocker."
+            "Phase 22 self-healing toggle — when True the workflow uses "
+            "``run_autonomous_repair_activity`` to attempt an automated "
+            "patch for each unique crash before persisting it."
+        ),
+    )
+    healing_max_attempts: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description=(
+            "Per-mission cap on LangGraph agent iterations inside the "
+            "healing engine. Mirrors ``DEFAULT_MAX_ATTEMPTS`` and bounds "
+            "API spend on stuck repairs."
         ),
     )
 
@@ -165,6 +213,40 @@ class FuzzingOutput(_StrictModel):
     finished_at: datetime
     summary: str = Field(default="")
 
+    # Phase 22 — CrashWise Healing Engine telemetry.
+    total_patches_generated: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Number of unique crashes for which the autonomous repair "
+            "agent produced a verified patch during this campaign."
+        ),
+    )
+    build_attempts: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "LangGraph agent iterations consumed by the adaptive build "
+            "stage. Useful for tracking LLM spend across campaigns."
+        ),
+    )
+    build_succeeded: bool = Field(
+        default=True,
+        description=(
+            "False when the adaptive build activity returned "
+            "``is_successful=False`` and the campaign exited via "
+            "``WorkflowStage.FAILED_COMPILATION``."
+        ),
+    )
+    healing_workspace_path: str = Field(
+        default="",
+        description=(
+            "Absolute path of the openhands-sdk workspace that hosted "
+            "the build (and any subsequent repair) for this campaign. "
+            "Empty string when self-healing was disabled."
+        ),
+    )
+
     @classmethod
     def now(cls) -> datetime:
         """Helper for callers wanting a coherent UTC timestamp."""
@@ -175,13 +257,22 @@ class FuzzingOutput(_StrictModel):
 class SetupTargetInput(_StrictModel):
     """Input to the ``setup_target`` activity."""
 
-    target_repo: HttpUrl
+    target_repo: str = Field(..., min_length=1, max_length=1024, description="Git URL or directory path of target project")
+    target_name: str | None = Field(default=None, max_length=128, description="Target name or identifier")
+    target_subdir: str | None = Field(default=None, max_length=512, description="Monorepo subdirectory path")
+    target_clone_depth: int = Field(default=1, ge=0, description="Git clone depth (0 for full clone)")
     target_branch: str | None = None
     sanitizers: str = "address,undefined"
     target_source_path: str | None = None
     synthesize_harness: bool = False
     max_synth_retries: int = Field(default=4, ge=0, le=10)
     fuzzer_type: str = "libfuzzer"
+    custom_fuzzer_flags: str | None = None
+    llm_model: str | None = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_temperature: float | None = None
+    reasoning_effort: str | None = None
 
 
 class SetupTargetOutput(_StrictModel):
@@ -190,6 +281,32 @@ class SetupTargetOutput(_StrictModel):
     workdir: Path = Field(..., description="Local checkout directory")
     commit_sha: str = Field(..., min_length=7, max_length=64)
     harness_path: Path | None = None
+
+
+class SynthesizeHarnessInput(_StrictModel):
+    """Input to the ``synthesize_harness`` activity."""
+
+    workspace_path: Path = Field(..., description="Root directory of target repository")
+    source_file_path: Path | None = Field(default=None, description="Explicit source file if specified")
+    fuzzer_type: str = Field(default="libfuzzer", description="Fuzzer engine format")
+    max_retries: int = Field(default=4, ge=0, le=10)
+    campaign_id: str | None = None
+    llm_model: str | None = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_temperature: float | None = None
+    reasoning_effort: str | None = None
+
+
+class SynthesizeHarnessOutput(_StrictModel):
+    """Result of the ``synthesize_harness`` activity."""
+
+    success: bool = Field(default=False)
+    harness_path: Path | None = None
+    binary_path: Path | None = None
+    source_file_used: Path | None = None
+    retry_count: int = Field(default=0, ge=0)
+    error_message: str = ""
 
 
 class ExecuteFuzzingInput(_StrictModel):
@@ -203,6 +320,7 @@ class ExecuteFuzzingInput(_StrictModel):
     corpus_dir: Path | None = None
     campaign_id: str | None = Field(default=None, max_length=36)
     iteration: int = Field(default=0, ge=0)
+    custom_fuzzer_flags: str | None = None
 
 
 class ExecuteFuzzingOutput(_StrictModel):
@@ -213,10 +331,23 @@ class ExecuteFuzzingOutput(_StrictModel):
     crash_count: int = Field(default=0, ge=0)
     executions: int = Field(default=0, ge=0, description="Total fuzzer iterations")
     duration_seconds: float = Field(default=0.0, ge=0.0)
-    coverage_edges: int = Field(default=0, ge=0, description="Edges discovered during this iteration")
+    coverage_edges: int = Field(
+        default=0, ge=0, description="Edges discovered during this iteration"
+    )
     coverage_data_path: Path | None = Field(
         default=None,
         description="Path to raw coverage data file (AFL plot_data or sancov output)",
+    )
+    peak_cpu_percent: float = Field(
+        default=0.0, ge=0.0, description="Peak CPU usage percentage during fuzzing"
+    )
+    peak_memory_mb: float = Field(
+        default=0.0, ge=0.0, description="Peak memory usage in MB during fuzzing"
+    )
+    run_id: str | None = Field(
+        default=None,
+        max_length=36,
+        description="UUID of the FuzzingRun row persisted for this iteration.",
     )
 
 
@@ -243,6 +374,62 @@ class TriageInput(_StrictModel):
     crashes_dir: Path
     crash_count: int = Field(default=0, ge=0)
     campaign_id: str | None = Field(default=None, max_length=36)
+    defer_persistence: bool = Field(
+        default=False,
+        description=(
+            "When True the activity classifies + deduplicates crashes "
+            "but skips its inline DB write. The workflow takes over "
+            "persistence so it can interleave the autonomous repair "
+            "step (Phase 22 healing engine) on each unique crash."
+        ),
+    )
+
+
+class TriagedCrashRef(_StrictModel):
+    """Workflow-visible reference for a unique, triaged crash.
+
+    Returned by ``triage_results`` (in :attr:`TriageOutput.unique_crashes`)
+    so the workflow can iterate over each net-new crash and call the
+    autonomous repair activity *before* persistence. Carries everything
+    the repair agent and the persistence activity need — there is no
+    second activity round-trip required to fetch the ASAN log or stack
+    trace.
+    """
+
+    crash_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=512,
+        description="Stable identifier (typically the fuzzer's crash filename).",
+    )
+    stack_hash: str = Field(
+        default="",
+        max_length=128,
+        description="Truncated SHA256 over the normalised stack-frame names.",
+    )
+    asan_log: str = Field(
+        default="",
+        max_length=65_536,
+        description=(
+            "Full ASAN/KASAN block (or raw fuzzer stderr when ASAN is "
+            "absent). Fed to ``run_autonomous_repair_activity`` as the "
+            "crash_context."
+        ),
+    )
+    crash_file_path: str = Field(
+        default="",
+        max_length=512,
+        description="Absolute path to the on-disk crasher seed.",
+    )
+    bug_type: str = Field(
+        default="unknown",
+        max_length=64,
+        description="Classified bug class (heap-buffer-overflow, UAF, ...).",
+    )
+    severity: CrashSeverity = Field(default=CrashSeverity.UNKNOWN)
+    signal: str = Field(default="", max_length=32)
+    stack_trace: str = Field(default="", max_length=8_192)
+    root_cause: str = Field(default="", max_length=4_096)
 
 
 class TriageOutput(_StrictModel):
@@ -251,6 +438,54 @@ class TriageOutput(_StrictModel):
     severity: CrashSeverity = CrashSeverity.UNKNOWN
     summary: str = ""
     triaged_crash_count: int = Field(default=0, ge=0)
+    unique_crashes: list[TriagedCrashRef] = Field(
+        default_factory=list,
+        description=(
+            "Deduplicated, ready-for-repair crash references. Populated "
+            "regardless of ``defer_persistence`` so callers can always "
+            "see what the activity decided was unique."
+        ),
+    )
+
+
+class PersistTriagedCrashInput(_StrictModel):
+    """Input to the ``persist_triaged_crash`` activity (Phase 22).
+
+    Carries a single triaged crash plus the optional verified patch the
+    healing engine produced, so the activity can perform Redis dedup
+    and the SQL write in one atomic call.
+    """
+
+    campaign_id: str = Field(..., min_length=1, max_length=36)
+    crash: TriagedCrashRef
+    patch: str = Field(default="", max_length=16_384)
+    patch_summary: str = Field(default="", max_length=4_096)
+    healing_attempts: int = Field(default=0, ge=0)
+    run_id: str | None = Field(
+        default=None,
+        max_length=36,
+        description="UUID of the FuzzingRun row to link this crash to.",
+    )
+
+
+class PersistTriagedCrashOutput(_StrictModel):
+    """Result of a single :func:`persist_triaged_crash` invocation."""
+
+    persisted: bool = Field(
+        default=False,
+        description=(
+            "True when a new Crash row was committed. False when the "
+            "stack hash was already known to Redis (duplicate skip)."
+        ),
+    )
+    crash_uuid: str | None = Field(
+        default=None,
+        description="DB-assigned UUID of the new Crash row (None when skipped).",
+    )
+    duplicate: bool = Field(
+        default=False,
+        description="True when Redis fast-path dedup short-circuited the write.",
+    )
 
 
 class ExecutionBackend(StrEnum):
@@ -298,6 +533,7 @@ class FuzzJob(_StrictModel):
     harness_path: Path
     corpus_dir: Path
     output_dir: Path
+    crashes_dir: Path | None = None
     timeout_seconds: int = Field(default=600, ge=10, le=86_400)
     cpu_limit: float = Field(default=2.0, ge=0.1)
     memory_limit_mb: int = Field(default=2048, ge=256)
@@ -423,12 +659,21 @@ class FuzzingCampaignState(_StrictModel):
     mutation_hint: str = ""
     crash_count: int = Field(default=0, ge=0)
     consecutive_plateau_count: int = Field(
-        default=0, ge=0,
+        default=0,
+        ge=0,
         description="Consecutive iterations with < 1% edge growth. Stall triggers at threshold.",
     )
     last_coverage_data_path: Path | None = Field(
         default=None,
         description="Path to the most recent raw coverage data (AFL plot_data/showmap output).",
+    )
+    last_stall_reasons: list[str] = Field(
+        default_factory=list,
+        description="Stall reasons from the most recent analyze_campaign call. Consumed by agentic_enrich.",
+    )
+    iteration_history: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Historical metrics per iteration for the agentic feedback analyzer.",
     )
 
 
@@ -498,14 +743,29 @@ class ExploitGenInput(_StrictModel):
         Path within the repo to the vulnerable source file.
     vulnerable_function:
         Name of the function containing the bug.
+    crash_file_path:
+        Path to the minimized crash input file triggering the bug.
+    target_headers:
+        List of target header files or include directives to `#include`.
+    target_include_dirs:
+        List of include directory paths (`-I...`).
+    target_libs:
+        List of target static or shared libraries (`.a`, `.so`, or `-l...`).
+    link_flags:
+        Additional compiler/linker flags.
     """
 
-    crash_id: str = Field(..., min_length=1, max_length=36)
-    crash_context: str = Field(..., min_length=1, max_length=32768)
+    crash_id: str = Field(..., min_length=1, max_length=512)
+    crash_context: str = Field(..., min_length=1, max_length=65536)
     bug_type: str = Field(default="unknown", max_length=64)
     target_repo: str = Field(default="", max_length=512)
     target_source_path: str = Field(default="", max_length=512)
     vulnerable_function: str = Field(default="", max_length=256)
+    crash_file_path: str = Field(default="", max_length=512)
+    target_headers: list[str] = Field(default_factory=list)
+    target_include_dirs: list[str] = Field(default_factory=list)
+    target_libs: list[str] = Field(default_factory=list)
+    link_flags: list[str] = Field(default_factory=list)
 
 
 class ExploitGenOutput(_StrictModel):
@@ -527,6 +787,14 @@ class ExploitGenOutput(_StrictModel):
         Suggested ``gcc`` / ``clang`` invocation.
     notes:
         Human-readable notes from the architect agent.
+    target_linked:
+        Whether the generated reproducer links against target headers/libraries.
+    crash_file_path:
+        Path to the crash input file used by the reproducer.
+    target_headers:
+        List of target headers included in the reproducer.
+    target_libs:
+        List of target libraries linked against.
     """
 
     poc_code: str = Field(default="", max_length=65536)
@@ -536,6 +804,10 @@ class ExploitGenOutput(_StrictModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     compilation_command: str = Field(default="", max_length=1024)
     notes: str = Field(default="", max_length=4096)
+    target_linked: bool = Field(default=True)
+    crash_file_path: str = Field(default="", max_length=512)
+    target_headers: list[str] = Field(default_factory=list)
+    target_libs: list[str] = Field(default_factory=list)
 
 
 class PocVerifyInput(_StrictModel):
@@ -555,16 +827,34 @@ class PocVerifyInput(_StrictModel):
         The signal the PoC should trigger (e.g. ``SIGSEGV``).
     expected_asan_pattern:
         Substring expected in ASAN output (e.g. ``heap-buffer-overflow``).
+    crash_file_path:
+        Path to minimized crash input file passed as argv[1].
+    target_workdir:
+        Working directory containing target build artifacts.
+    target_include_dirs:
+        Include directories for target headers.
+    target_link_libs:
+        Target archive/shared library paths (`.a`/`.so`) or flags (`-l...`).
+    link_flags:
+        Additional linker flags.
+    expected_function:
+        Expected function name in frame #0 of ASan stack trace.
     timeout_seconds:
         Wall-clock cap for compilation + execution.
     """
 
-    crash_id: str = Field(..., min_length=1, max_length=36)
+    crash_id: str = Field(..., min_length=1, max_length=512)
     poc_code: str = Field(..., min_length=1, max_length=65536)
     compilation_command: str = Field(default="", max_length=1024)
     target_repo: str = Field(default="", max_length=512)
     expected_signal: str = Field(default="SIGSEGV", max_length=32)
     expected_asan_pattern: str = Field(default="", max_length=128)
+    crash_file_path: str = Field(default="", max_length=512)
+    target_workdir: str = Field(default="", max_length=512)
+    target_include_dirs: list[str] = Field(default_factory=list)
+    target_link_libs: list[str] = Field(default_factory=list)
+    link_flags: list[str] = Field(default_factory=list)
+    expected_function: str = Field(default="", max_length=256)
     timeout_seconds: int = Field(default=60, ge=10, le=600)
 
 
@@ -587,6 +877,14 @@ class PocVerifyOutput(_StrictModel):
         The signal that actually terminated the process.
     notes:
         Human-readable summary of the verification.
+    asan_class_matched:
+        Whether the ASan error class matched the expected class.
+    function_matched:
+        Whether the crashing function in frame #0 matched expected_function.
+    target_linked:
+        Whether the verification linked against target artifacts.
+    reproduction_fidelity:
+        Fidelity score (0.0 - 1.0) of crash reproduction.
     """
 
     compiled: bool = False
@@ -596,6 +894,74 @@ class PocVerifyOutput(_StrictModel):
     stderr: str = Field(default="", max_length=8192)
     signal_received: str = Field(default="", max_length=32)
     notes: str = Field(default="", max_length=4096)
+    asan_class_matched: bool = False
+    function_matched: bool = False
+    target_linked: bool = False
+    reproduction_fidelity: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+# ── Structured Finding Reporting ─────────────────────────────────────────────
+class FindingReproductionMetadata(_StrictModel):
+    """Metadata regarding reproducer generation and verification fidelity."""
+
+    target_linked: bool = Field(default=False)
+    reproduced: bool = Field(default=False)
+    asan_matched: bool = Field(default=False)
+    function_matched: bool = Field(default=False)
+    reproducer_code: str = Field(default="", max_length=65536)
+    compilation_command: str = Field(default="", max_length=1024)
+    fidelity_score: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class FindingReport(_StrictModel):
+    """Structured report per finding with reproducibility and severity metrics.
+
+    Attributes
+    ----------
+    crash_id:
+        Identifier of the crash.
+    bug_class:
+        Classified bug category (e.g. ``heap-buffer-overflow``).
+    affected_function:
+        Name of vulnerable function (from frame #0).
+    source_location:
+        Location in source code (`file:line`).
+    crash_input_hash:
+        SHA256 hex digest of minimized crash input file.
+    severity_score:
+        Numeric score 0.0 - 10.0.
+    severity_level:
+        CrashSeverity level (CRITICAL, HIGH, MEDIUM, LOW).
+    primitive:
+        Memory safety primitive (e.g. ``write-what-where``, ``use-after-free``).
+    reproduction:
+        Reproduction metadata.
+    root_cause:
+        Technical root cause summary.
+    suggested_patch:
+        Suggested patch diff or code.
+    target_name:
+        Target project name.
+    target_repo:
+        Target repository URL.
+    created_at:
+        Timestamp when the finding was generated.
+    """
+
+    crash_id: str = Field(..., min_length=1, max_length=512)
+    bug_class: str = Field(..., min_length=1, max_length=128)
+    affected_function: str = Field(default="", max_length=256)
+    source_location: str = Field(default="", max_length=512)
+    crash_input_hash: str = Field(default="", max_length=64)
+    severity_score: float = Field(default=0.0, ge=0.0, le=10.0)
+    severity_level: CrashSeverity = Field(default=CrashSeverity.UNKNOWN)
+    primitive: str = Field(default="unknown", max_length=128)
+    reproduction: FindingReproductionMetadata = Field(default_factory=FindingReproductionMetadata)
+    root_cause: str = Field(default="", max_length=4096)
+    suggested_patch: str = Field(default="", max_length=16384)
+    target_name: str = Field(default="", max_length=128)
+    target_repo: str = Field(default="", max_length=512)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 # ── Target Profiling ─────────────────────────────────────────────────────────
@@ -644,7 +1010,7 @@ class TargetProfile(_StrictModel):
     domain:
         High-level domain classification (e.g. ``image_processing``).
     complexity_score:
-        Cyclomatic-complexity-derived score 0.0–10.0.
+        Cyclomatic-complexity-derived score 0.0-10.0.
     call_graph_depth:
         Maximum depth of the call graph from public entry points.
     attack_surface:
@@ -697,6 +1063,10 @@ class ProfileTargetInput(_StrictModel):
     workdir: Path = Field(..., description="Path to the cloned target repository")
     source_paths: list[Path] = Field(default_factory=list, description="Specific files to analyse")
     max_files: int = Field(default=50, ge=1, le=500, description="Cap on files to scan")
+    enable_semantic_profiling: bool = Field(
+        default=True,
+        description="Enable LLM-powered semantic analysis to enrich the regex-based profile",
+    )
 
 
 class ProfileTargetOutput(_StrictModel):
@@ -820,9 +1190,7 @@ class MabState(_StrictModel):
         growth = (last_cov - first_cov) / first_cov
         global_plateau = growth < threshold
         # Also check: every arm must have at least one trial in this window.
-        total_trials_recent = sum(
-            self.trials.get(a.arm_id, 0) for a in self.arms
-        )
+        total_trials_recent = sum(self.trials.get(a.arm_id, 0) for a in self.arms)
         return global_plateau and total_trials_recent > 0
 
 
@@ -888,6 +1256,10 @@ class CoverageBlocker(_StrictModel):
     expected_value: str = Field(default="", max_length=256)
     distance_from_entry: int = Field(default=0, ge=0)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    checksum_algorithm: str = Field(default="", max_length=64)
+    checksum_offset: int = Field(default=0, ge=0)
+    checksum_endianness: str = Field(default="little", max_length=16)
+    payload_offset: int = Field(default=0, ge=0)
 
 
 class CoverageAnalysis(_StrictModel):
@@ -1017,3 +1389,58 @@ class HotSwapOutput(_StrictModel):
     stdout: str = Field(default="", max_length=8192)
     stderr: str = Field(default="", max_length=8192)
     notes: str = Field(default="", max_length=4096)
+
+
+__all__ = [
+    "AnalyzeProgressInput",
+    "BlockerType",
+    "CampaignStatus",
+    "CoverageAnalysis",
+    "CoverageBlocker",
+    "CoverageReport",
+    "CrashSeverity",
+    "DangerousFunction",
+    "EvolveHarnessInput",
+    "EvolveHarnessOutput",
+    "ExecuteFuzzingInput",
+    "ExecuteFuzzingOutput",
+    "ExecutionBackend",
+    "ExploitGenInput",
+    "ExploitGenOutput",
+    "ExploitabilityScore",
+    "FindingReport",
+    "FindingReproductionMetadata",
+    "FuzzJob",
+    "FuzzerType",
+    "FuzzingCampaignState",
+    "FuzzingInput",
+    "FuzzingOutput",
+    "HotSwapInput",
+    "HotSwapOutput",
+    "MabState",
+    "PersistTriagedCrashInput",
+    "PersistTriagedCrashOutput",
+    "PivotStrategyInput",
+    "PivotStrategyOutput",
+    "PocVerifyInput",
+    "PocVerifyOutput",
+    "ProfileTargetInput",
+    "ProfileTargetOutput",
+    "SeedCorpusInput",
+    "SeedMetadata",
+    "SeedSource",
+    "SetupTargetInput",
+    "SetupTargetOutput",
+    "StrategyArm",
+    "SynthesizeHarnessInput",
+    "SynthesizeHarnessOutput",
+    "TargetDomain",
+    "TargetProfile",
+    "TriageInput",
+    "TriageOutput",
+    "TriagedCrashRef",
+    "VerificationStatus",
+    "VerifyPatchInput",
+    "VerifyPatchOutput",
+    "WorkflowStage",
+]

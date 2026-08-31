@@ -15,7 +15,6 @@ from uuid import UUID
 
 from temporalio import activity
 
-from crashwise.agents.feedback.verifier import VerificationResult, verify_patch
 from crashwise.agents.harness_synth.compiler import compile_harness
 from crashwise.core.database import Crash, get_session
 from crashwise.core.logging import get_logger
@@ -43,7 +42,7 @@ async def apply_patch(
         repo=repo_url,
     )
 
-    from crashwise.agents.feedback.verifier import _clone_repo, _apply_patch
+    from crashwise.agents.feedback.verifier import _apply_patch, _clone_repo
 
     try:
         workdir = await _clone_repo(repo_url)
@@ -71,7 +70,6 @@ async def build_patched(
     -------
     dict with keys ``success`` (bool), ``binary_path`` (str), ``stdout``, ``stderr``.
     """
-    info = activity.info()
     log.info("build_patched.start", workdir=workdir, harness=harness_path)
 
     wd = Path(workdir)
@@ -124,7 +122,6 @@ async def verify_with_seed(
     -------
     dict with keys ``crash_reproduced`` (bool), ``stdout``, ``stderr``.
     """
-    info = activity.info()
     log.info(
         "verify_with_seed.start",
         binary=binary_path,
@@ -163,7 +160,6 @@ async def update_verification_status(
     stderr: str,
 ) -> None:
     """Persist the verification outcome to the DB."""
-    info = activity.info()
     log.info(
         "update_verification_status.start",
         crash_id=crash_id,
@@ -177,7 +173,7 @@ async def update_verification_status(
                 crash.verification_status = status
                 crash.verification_stdout = stdout[:8192]
                 crash.verification_stderr = stderr[:8192]
-                crash.verified_at = datetime.now(tz=UTC)
+                crash.verified_at = datetime.now(tz=UTC).replace(tzinfo=None)
                 await session.commit()
                 log.info("update_verification_status.complete", crash_id=crash_id)
             else:
@@ -189,6 +185,6 @@ async def update_verification_status(
 __all__ = [
     "apply_patch",
     "build_patched",
-    "verify_with_seed",
     "update_verification_status",
+    "verify_with_seed",
 ]

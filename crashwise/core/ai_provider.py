@@ -351,7 +351,8 @@ class OpenAICompatibleProvider(BaseInference):
 def get_provider() -> BaseInference:
     """Return the configured inference provider.
 
-    Falls back to :class:`_NullProvider` when no provider is configured.
+    Falls back to OpenAI-compatible provider if OpenAI/DeepSeek keys are present,
+    or :class:`_NullProvider` when no provider is configured.
     """
     settings = get_settings()
     provider_name = (settings.ai_provider or "").lower().strip()
@@ -367,7 +368,7 @@ def get_provider() -> BaseInference:
             )
             return OpenAICompatibleProvider(
                 base_url=ollama_url,
-                model=settings.ai_model or "llama3.1:8b",
+                model=settings.ai_model or settings.crashwise_llm_model or "llama3.1:8b",
                 api_key=settings.ai_api_key,
             )
         log.info("ai_provider.ollama", model=settings.ai_model)
@@ -376,13 +377,18 @@ def get_provider() -> BaseInference:
             model=settings.ai_model or "llama3.1:8b",
         )
 
-    if provider_name == "openai_compatible":
-        base_url = getattr(settings, "ollama_url", "")
-        log.info("ai_provider.openai_compatible", model=settings.ai_model, base_url=base_url)
+    if provider_name in ("openai_compatible", "openai", "deepseek"):
+        base_url = settings.openai_api_base or getattr(settings, "ollama_url", "")
+        if not base_url and provider_name == "deepseek":
+            base_url = "https://api.deepseek.com"
+        elif not base_url and provider_name == "openai":
+            base_url = "https://api.openai.com/v1"
+        api_key = settings.ai_api_key or (settings.openai_api_key.get_secret_value() if settings.openai_api_key else None)
+        log.info("ai_provider.openai_compatible", model=settings.ai_model or settings.crashwise_llm_model, base_url=base_url)
         return OpenAICompatibleProvider(
-            base_url=base_url,
-            model=settings.ai_model or "llama3.1:8b",
-            api_key=settings.ai_api_key,
+            base_url=base_url or "https://api.openai.com/v1",
+            model=settings.ai_model or settings.crashwise_llm_model or "deepseek-chat",
+            api_key=api_key,
         )
 
     if provider_name == "venice":
@@ -394,6 +400,18 @@ def get_provider() -> BaseInference:
         return VeniceProvider(
             api_key=api_key,
             model=settings.ai_model or "llama-3.3-70b",
+        )
+
+    # Automatic fallback: if OPENAI_API_KEY or OPENAI_API_BASE is present, use OpenAICompatibleProvider
+    if settings.openai_api_key or settings.openai_api_base:
+        api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else settings.ai_api_key
+        base_url = settings.openai_api_base or "https://api.openai.com/v1"
+        model = settings.ai_model or settings.crashwise_llm_model
+        log.info("ai_provider.auto_openai_compatible", model=model, base_url=base_url)
+        return OpenAICompatibleProvider(
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
         )
 
     if provider_name:

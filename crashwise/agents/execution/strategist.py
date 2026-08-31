@@ -256,10 +256,8 @@ async def evaluate_and_pivot(
         )
 
     # 4. Plateau detected — select new arm.
-    if algorithm == "ucb1":
-        new_arm_id = _ucb1_select(state)
-    else:
-        new_arm_id = _thompson_sample(state)
+    new_arm_id = _ucb1_select(state) if algorithm == "ucb1" else _thompson_sample(state)
+
 
     if new_arm_id == current_arm:
         # Same arm won — stay the course but log it.

@@ -16,7 +16,6 @@ from crashwise.agents.harness_synth.evolution import (
     _extract_target_call,
     _parse_magic_bytes,
     _parse_min_length,
-    _template_evolve,
     evolve_harness,
 )
 from crashwise.agents.research.coverage_analyzer import (
@@ -35,10 +34,8 @@ from crashwise.core.models import (
     EvolveHarnessOutput,
     HotSwapInput,
     HotSwapOutput,
-    MabState,
 )
 from crashwise.orchestration.activities.hot_swap_harness import hot_swap_harness
-
 
 # ── Coverage Analysis ────────────────────────────────────────────────────────
 
