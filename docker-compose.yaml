@@ -1,0 +1,25 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# CrashWise — Standalone Engine Docker Compose (Operation Megabits)
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  crashwise:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crashwise-engine
+    ports:
+      - "${CRASHWISE_API_PORT:-8000}:8000"
+    environment:
+      - CRASHWISE_WORKDIR=/tmp/crashwise
+      - CRASHWISE_API_HOST=0.0.0.0
+      - CRASHWISE_API_PORT=8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - CRASHWISE_LLM_PROVIDER=${CRASHWISE_LLM_PROVIDER:-deepseek}
+      - CRASHWISE_LLM_MODEL=${CRASHWISE_LLM_MODEL:-deepseek-chat}
+    volumes:
+      - crashwise_data:/tmp/crashwise
+    restart: unless-stopped
+
+volumes:
+  crashwise_data:

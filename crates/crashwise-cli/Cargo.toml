@@ -1,0 +1,28 @@
+[package]
+name = "crashwise-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "crashwise"
+path = "src/main.rs"
+
+[dependencies]
+crashwise-core = { workspace = true }
+crashwise-ast = { workspace = true }
+crashwise-build = { workspace = true }
+crashwise-agent = { workspace = true }
+crashwise-engine = { workspace = true }
+crashwise-triage = { workspace = true }
+crashwise-server = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+indicatif = { workspace = true }
+console = { workspace = true }
+anyhow = { workspace = true }
+tempfile = { workspace = true }
+which = "6.0"

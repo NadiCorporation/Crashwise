@@ -1,0 +1,64 @@
+[workspace]
+members = [
+    "crates/crashwise-core",
+    "crates/crashwise-ast",
+    "crates/crashwise-build",
+    "crates/crashwise-agent",
+    "crates/crashwise-engine",
+    "crates/crashwise-triage",
+    "crates/crashwise-server",
+    "crates/crashwise-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0-dev"
+edition = "2021"
+authors = ["Yahya Toubali", "CrashWise Contributors"]
+license = "MIT"
+repository = "https://github.com/NadiCorporation/Crashwise"
+
+[workspace.dependencies]
+# Serialization & Data
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Async & Runtime
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Error Handling & Logging
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# CLI & UX
+clap = { version = "4.5", features = ["derive", "env"] }
+indicatif = { version = "0.17", features = ["tokio"] }
+console = "0.15"
+
+# System, FS & Process
+nix = { version = "0.29", features = ["process", "signal", "user", "sched", "mount"] }
+tempfile = "3.12"
+walkdir = "2.5"
+regex = "1.10"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# HTTP & API
+reqwest = { version = "0.12", features = ["json", "stream"] }
+axum = { version = "0.7", features = ["ws", "macros"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
+
+# Internal crates
+crashwise-core = { path = "crates/crashwise-core" }
+crashwise-ast = { path = "crates/crashwise-ast" }
+crashwise-build = { path = "crates/crashwise-build" }
+crashwise-agent = { path = "crates/crashwise-agent" }
+crashwise-engine = { path = "crates/crashwise-engine" }
+crashwise-triage = { path = "crates/crashwise-triage" }
+crashwise-server = { path = "crates/crashwise-server" }

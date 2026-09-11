@@ -1,0 +1,17 @@
+[package]
+name = "crashwise-triage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+crashwise-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+regex = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+md-5 = "0.10"

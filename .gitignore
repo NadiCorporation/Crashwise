@@ -1,0 +1,25 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# SQLite & Runtime
+*.db
+*.db-shm
+*.db-wal
+/tmp/crashwise
+
+# Next.js & Frontend
+web/.next/
+web/out/
+web/node_modules/
+node_modules/
+
+# Environment & Secrets
+.env
+.env.local
+
+# IDE & OS
+.DS_Store
+.vscode/
+.idea/

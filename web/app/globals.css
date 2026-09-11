@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0d1117;
+  --foreground: #c9d1d9;
+  --muted: #161b22;
+  --muted-foreground: #8b949e;
+  --border: #30363d;
+  --accent-green: #3fb950;
+  --accent-red: #f85149;
+  --accent-orange: #d29922;
+  --accent-blue: #58a6ff;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "JetBrains Mono", "SF Mono", "Fira Code", ui-monospace, monospace;
+  font-size: 13px;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--background); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
