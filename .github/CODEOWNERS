@@ -1,0 +1,11 @@
+# Global workspace owners
+* @yahyatoubali @NadiCorporation
+
+# Crates & Engine Core
+/crates/ @yahyatoubali
+/crates/crashwise-engine/ @yahyatoubali
+/crates/crashwise-ast/ @yahyatoubali
+/crates/crashwise-triage/ @yahyatoubali
+
+# Web Command Center
+/web/ @yahyatoubali

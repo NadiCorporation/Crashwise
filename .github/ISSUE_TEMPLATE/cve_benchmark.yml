@@ -1,0 +1,40 @@
+name: "🎯 Benchmark Target Proposal"
+description: Propose a new real-world C/C++ target codebase or historical CVE for benchmark validation
+title: "[Benchmark]: Add target "
+labels: ["benchmark", "target-validation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help us expand our real-world benchmark suite (`crashwise benchmark`).
+  - type: input
+    id: target_repo
+    attributes:
+      label: Target Repository URL
+      placeholder: "https://github.com/libjpeg-turbo/libjpeg-turbo"
+    validations:
+      required: true
+  - type: input
+    id: cve_id
+    attributes:
+      label: Target CVE or Vulnerability Type
+      placeholder: "e.g. CVE-2021-46822 (Heap buffer overflow in get_sos)"
+    validations:
+      required: true
+  - type: dropdown
+    id: build_system
+    attributes:
+      label: Target Build System
+      options:
+        - "CMake"
+        - "Meson"
+        - "Make / Autotools"
+        - "Single File Amalgamation"
+        - "Other"
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Target Details & Seed Inputs
+      description: Provide details on typical input formats, public API entry points, or known seed files.

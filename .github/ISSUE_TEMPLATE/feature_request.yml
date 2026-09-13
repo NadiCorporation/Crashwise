@@ -1,0 +1,46 @@
+name: "💡 Feature Request"
+description: Propose a new feature, architecture upgrade, or fuzzer enhancement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We welcome proposals for extending CrashWise! Check our [ROADMAP.md](https://github.com/NadiCorporation/Crashwise/blob/master/ROADMAP.md) before submitting.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: Is your feature request related to a problem? What limitation does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution you'd like to see implemented across CrashWise crates.
+    validations:
+      required: true
+  - type: dropdown
+    id: target_crate
+    attributes:
+      label: Primary Affected Crate
+      description: Which crate in the workspace would primarily house this feature?
+      options:
+        - "crashwise-core (Database, models, configuration)"
+        - "crashwise-ast (Tree-sitter AST parsing, callgraphs)"
+        - "crashwise-build (Compiler drivers, build detection)"
+        - "crashwise-agent (LLM client, harness synthesis, feedback)"
+        - "crashwise-engine (In-process LibAFL runner, sandboxing)"
+        - "crashwise-triage (ASan parser, PoC generation, patch verifier)"
+        - "crashwise-server (Axum daemon, REST API, SSE)"
+        - "crashwise-cli (CLI interface, benchmarks)"
+        - "web (Next.js Command Center)"
+        - "Multiple / Whole Workspace"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you've considered.

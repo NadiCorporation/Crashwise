@@ -1,8 +1,8 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # CrashWise — Automated Release Pipeline
 #
-# Triggers on git tags starting with 'v' (e.g. v1.0.0).
-# Builds Docker image, pushes to GHCR, creates GitHub Release with notes.
+# Triggers on git tags starting with 'v' (e.g. v0.2.0-alpha).
+# Builds binary assets, builds multi-arch Docker image, and creates GitHub Release.
 # ──────────────────────────────────────────────────────────────────────────────
 
 name: Release
@@ -18,13 +18,54 @@ permissions:
 
 jobs:
   # ════════════════════════════════════════════════════════════════════════════
-  # Build & Push Docker Image
+  # Build Standalone Linux x86_64 Binary
+  # ════════════════════════════════════════════════════════════════════════════
+  build-binary:
+    name: Build Standalone Binary (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install LLVM & Clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake make meson
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Release Binary
+        run: cargo build --release --bin crashwise
+
+      - name: Package Binary Artifact
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          mkdir -p dist/crashwise-$VERSION
+          cp target/release/crashwise dist/crashwise-$VERSION/
+          cp LICENSE README.md dist/crashwise-$VERSION/
+          cd dist
+          tar -czvf crashwise-$VERSION-x86_64-unknown-linux-gnu.tar.gz crashwise-$VERSION/
+          sha256sum crashwise-$VERSION-x86_64-unknown-linux-gnu.tar.gz > crashwise-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binary
+          path: dist/crashwise-*
+          retention-days: 1
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Build & Push Docker Image to GHCR
   # ════════════════════════════════════════════════════════════════════════════
   docker:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
@@ -57,28 +98,33 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
 
   # ════════════════════════════════════════════════════════════════════════════
-  # Create GitHub Release
+  # Create GitHub Release with Attached Assets
   # ════════════════════════════════════════════════════════════════════════════
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: docker
+    needs: [build-binary, docker]
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download Binary Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binary
+          path: dist
 
       - name: Generate release notes
         id: notes
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          # Extract the section for this version from CHANGELOG.md
           awk "/^## \[$VERSION\]/ {flag=1; next} /^## \[/ {flag=0} flag" CHANGELOG.md > RELEASE_NOTES.md || true
           if [ ! -s RELEASE_NOTES.md ]; then
-            echo "No changelog section found for $VERSION" > RELEASE_NOTES.md
+            echo "Release notes for $VERSION - CrashWise Autonomous 0-Day Discovery Engine" > RELEASE_NOTES.md
           fi
 
       - name: Create Release
@@ -87,8 +133,9 @@ jobs:
           name: CrashWise ${{ steps.notes.outputs.version }}
           body_path: RELEASE_NOTES.md
           draft: false
-          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') || contains(github.ref, '-dev') }}
           files: |
+            dist/*
             LICENSE
             CHANGELOG.md
         env:

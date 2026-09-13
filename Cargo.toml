@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0-dev"
+version = "0.2.0-alpha"
 edition = "2021"
 authors = ["Yahya Toubali", "CrashWise Contributors"]
 license = "MIT"

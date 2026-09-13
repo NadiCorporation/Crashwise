@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Disclosure
+    url: https://github.com/NadiCorporation/Crashwise/blob/master/SECURITY.md
+    about: Please report security vulnerabilities confidentially according to our security policy.
+  - name: Technical Roadmap & Vision
+    url: https://github.com/NadiCorporation/Crashwise/blob/master/ROADMAP.md
+    about: Review our planned milestones and architecture targets.
