@@ -3,19 +3,15 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FuzzerEngine {
+    #[default]
     Libfuzzer,
     Aflpp,
     Honggfuzz,
 }
 
-impl Default for FuzzerEngine {
-    fn default() -> Self {
-        Self::Libfuzzer
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -106,3 +102,22 @@ pub struct TelemetrySnapshot {
     pub uptime_seconds: u64,
     pub timestamp: DateTime<Utc>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentFeedbackRecord {
+    pub id: Uuid,
+    pub campaign_id: Option<Uuid>,
+    pub target_name: String,
+    pub feedback_type: String, // "compiler_error" | "resolved_fix" | "coverage_token" | "harness_exemplar"
+    pub compiler_diagnostic: Option<String>,
+    pub error_category: Option<String>,
+    pub original_code: Option<String>,
+    pub resolved_code: Option<String>,
+    pub coverage_tokens: Option<Vec<String>>,
+    pub success_count: u32,
+    pub failure_count: u32,
+    pub score: f32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+

@@ -69,3 +69,30 @@ pub fn detect_build_system(dir: &Path) -> Option<DetectedBuildSystem> {
 
     None
 }
+
+pub fn detect_single_file_target(dir: &Path) -> Option<PathBuf> {
+    for known in &["sqlite3.c", "cJSON.c", "target.c", "main.c"] {
+        let p = dir.join(known);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut c_files = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "c") {
+                let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                if stem != "test" && !stem.starts_with("CMake") {
+                    c_files.push(path);
+                }
+            }
+        }
+        if c_files.len() == 1 {
+            return Some(c_files.remove(0));
+        }
+    }
+
+    None
+}

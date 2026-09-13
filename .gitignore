@@ -23,3 +23,10 @@ node_modules/
 .DS_Store
 .vscode/
 .idea/
+
+# Swarm & Agent Artifacts
+.agents/
+ORIGINAL_REQUEST.md
+TEST_INFRA.md
+TEST_READY.md
+

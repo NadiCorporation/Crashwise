@@ -18,3 +18,5 @@ reqwest = { workspace = true }
 async-trait = { workspace = true }
 tempfile = { workspace = true }
 regex = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }

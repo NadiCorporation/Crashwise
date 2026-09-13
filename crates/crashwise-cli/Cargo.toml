@@ -5,6 +5,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[lib]
+name = "crashwise_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "crashwise"
 path = "src/main.rs"
@@ -26,3 +30,7 @@ console = { workspace = true }
 anyhow = { workspace = true }
 tempfile = { workspace = true }
 which = "6.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }

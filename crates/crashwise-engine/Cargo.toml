@@ -15,3 +15,15 @@ tokio = { workspace = true }
 nix = { workspace = true }
 walkdir = { workspace = true }
 tempfile = { workspace = true }
+libafl = "0.16.1"
+libafl_bolts = "0.16.1"
+memmap2 = "0.9"
+libloading = "0.8"
+libc = "0.2"
+uuid = { workspace = true }
+
+[dev-dependencies]
+serial_test = "4.0"
+
+
+

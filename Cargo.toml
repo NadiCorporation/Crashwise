@@ -8,6 +8,7 @@ members = [
     "crates/crashwise-triage",
     "crates/crashwise-server",
     "crates/crashwise-cli",
+    "tests",
 ]
 resolver = "2"
 

@@ -45,4 +45,28 @@ impl CorpusManager {
         }
         Ok(count)
     }
+
+    /// Synchronously load all seed files into memory.
+    pub fn load_seeds_sync(&self) -> std::io::Result<Vec<Vec<u8>>> {
+        let mut seeds = Vec::new();
+        if self.corpus_dir.exists() {
+            for entry in std::fs::read_dir(&self.corpus_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_file() {
+                    seeds.push(std::fs::read(path)?);
+                }
+            }
+        }
+        Ok(seeds)
+    }
+
+    /// Synchronously save a new seed to the corpus directory.
+    pub fn save_seed_sync(&self, filename: &str, data: &[u8]) -> std::io::Result<PathBuf> {
+        std::fs::create_dir_all(&self.corpus_dir)?;
+        let path = self.corpus_dir.join(filename);
+        std::fs::write(&path, data)?;
+        Ok(path)
+    }
 }
+

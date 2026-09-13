@@ -1,0 +1,27 @@
+[package]
+name = "crashwise-e2e-tests"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+crashwise-core = { workspace = true }
+crashwise-build = { workspace = true }
+crashwise-agent = { workspace = true }
+crashwise-engine = { workspace = true }
+crashwise-triage = { workspace = true }
+crashwise-server = { workspace = true }
+tokio = { workspace = true }
+tempfile = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+rusqlite = { version = "0.31", features = ["bundled", "chrono", "uuid"] }
+regex = { workspace = true }
+tree-sitter = "0.22"
+tree-sitter-c = "0.21"
+walkdir = { workspace = true }
+
+[[test]]
+name = "e2e_test_suite"
+path = "e2e_tests.rs"

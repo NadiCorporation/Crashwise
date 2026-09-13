@@ -31,11 +31,17 @@ impl SanityGate {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("AddressSanitizer") || stderr.contains("SEGV") {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let combined = format!("{stderr}\n{stdout}");
+            if combined.contains("AddressSanitizer") || combined.contains("SEGV") {
                 return Err(CrashwiseError::HarnessError(format!(
                     "Harness crashed during 5-second sanity run:\n{stderr}"
                 )));
             }
+            return Err(CrashwiseError::HarnessError(format!(
+                "Harness execution failed during sanity run (exit code {:?}):\n{stderr}",
+                output.status.code()
+            )));
         }
 
         info!("Harness passed sanity gate verification cleanly");
