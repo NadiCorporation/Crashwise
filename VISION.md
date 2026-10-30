@@ -45,7 +45,7 @@ Our goal is to build an **autonomous, end-to-end security engine** that, in its 
    A vulnerability report is only valid if CrashWise can reproduce it with an executable Proof-of-Concept (`poc.c`). A patch is only valid if CrashWise can recompile the target and prove the crashing input no longer triggers a memory violation while preserving existing unit test passes.
 
 3. **Zero-Friction Single Binary**:
-   Security tooling should not require hours of environment configuration. That is the direction, not the current claim: the current workspace is an 8-crate Rust workspace plus a Next.js web centre, with README prerequisites of Rust 1.80+, clang 16+, cmake/make/meson, and Node.js for the web centre, and a full run needs an LLM API key. A single standalone binary running out of the box is a future packaging goal, not the current distribution.
+   Security tooling should not require hours of environment configuration. That is the direction, not the current claim: the current workspace is 8 production crates plus the e2e tests package, plus a Next.js web centre, with README prerequisites of Rust 1.80+, clang 16+, cmake/make/meson, and Node.js for the web centre, and a full run needs an LLM API key. A single standalone binary running out of the box is a future packaging goal, not the current distribution.
 
 ---
 
