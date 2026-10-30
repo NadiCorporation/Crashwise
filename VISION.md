@@ -15,7 +15,7 @@ Every day, billions of lines of code are written across critical infrastructure,
 
 **CrashWise exists to bridge this gap.**
 
-Our goal is to build an **autonomous, end-to-end security engine** that takes any codebase (C/C++, Rust, Go), understands its internal architecture, autonomously synthesizes self-correcting harnesses, executes high-throughput fuzzing, deduces root causes, and generates regression-verified patches without human intervention.
+Our goal is to build an **autonomous, end-to-end security engine** that, in its current version, targets C/C++ libraries — the AST phase uses tree-sitter-c and tree-sitter-cpp only — understands its internal architecture, autonomously synthesizes self-correcting harnesses, executes high-throughput fuzzing, deduces root causes, and generates regression-verified patches. Rust and Go support, if added later, is a separate milestone, not a current claim. A report only counts if it is verified with a reproducible Proof-of-Concept, as stated in §2 below; a full run needs the prerequisites in the README, including an LLM API key.
 
 ---
 
@@ -45,7 +45,7 @@ Our goal is to build an **autonomous, end-to-end security engine** that takes an
    A vulnerability report is only valid if CrashWise can reproduce it with an executable Proof-of-Concept (`poc.c`). A patch is only valid if CrashWise can recompile the target and prove the crashing input no longer triggers a memory violation while preserving existing unit test passes.
 
 3. **Zero-Friction Single Binary**:
-   Security tooling should not require hours of environment configuration. CrashWise compiles into a single, standalone binary with embedded SQLite storage and rootless sandboxing, running out of the box on any modern Linux system.
+   Security tooling should not require hours of environment configuration. That is the direction, not the current claim: the current workspace is an 8-crate Rust workspace plus a Next.js web centre, with README prerequisites of Rust 1.80+, clang 16+, cmake/make/meson, and Node.js for the web centre, and a full run needs an LLM API key. A single standalone binary running out of the box is a future packaging goal, not the current distribution.
 
 ---
 
