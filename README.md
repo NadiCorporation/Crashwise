@@ -172,6 +172,8 @@ cargo test -p crashwise-e2e-tests --test e2e_test_suite
 | **Tier 5** | White-Box Adversarial Stress (Shm saturation, Seccomp BPF, crash signals) | 38 tests | **PASSED** |
 | **Total** | **Comprehensive Full Workspace Test Suite** | **481 tests** | **100% PASS** |
 
+> Method note — repo claims, not yet independently re-run: the test counts above (357 unit + 124 integration = 481), the 10,146.3 execs/sec single-core throughput, the 81.82% first-attempt harness compilation rate (9/11 targets, a small sample), and the 100% GCC oracle fidelity figure are taken from the repo's CHANGELOG at v0.2.0-alpha. They are internally consistent, but they have not been re-run from a clean checkout in this truth pass. Treat them as claims to be reproduced in the benchmark milestone, with command, target version, time, and result recorded, before repeating them as verified results.
+
 ---
 
 ## 6. Project Documentation
