@@ -46,7 +46,7 @@ FUZZ_START=$(date +%s)
 # libFuzzer exits non-zero on a crash, which is the expected result
 # here, so temporarily disable `set -e` for this step.
 set +e
-"$OUT/harness" "$OUT/corpus" "$OUT/work" -max_total_time=60 > "$OUT/fuzz.log" 2>&1
+"$OUT/harness" "$OUT/corpus" -artifact_prefix="$OUT/work/" -max_total_time=60 > "$OUT/fuzz.log" 2>&1
 FUZZ_STATUS=$?
 set -e
 FUZZ_END=$(date +%s)
