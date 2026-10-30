@@ -8,6 +8,8 @@ Thank you for contributing to CrashWise! We are building an open-source, autonom
 
 You can contribute across any of our 6 core engineering tracks:
 
+> Current vs proposed: the tracks below mix what exists today with what is proposed. Current, in this repo: C/C++ AST via tree-sitter-c/cpp, CMake/Meson/Make/Autotools builds, LibAFL in-process fuzzing with a rootless sandbox, ASan triage, and the Next.js web centre. Proposed, not yet verified in code: Rust and Go target support, Bazel monorepo executors, and Cargo crate builds. Please label new work as current or proposed in your PR, and do not present a proposed track as already implemented.
+
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        CrashWise Contributor Tracks                    │
