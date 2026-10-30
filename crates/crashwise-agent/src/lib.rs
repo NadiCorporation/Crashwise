@@ -1,6 +1,7 @@
 pub mod exemplar_retriever;
 pub mod harness_synth;
 pub mod llm;
+pub mod r#loop;
 pub mod sanity_gate;
 
 pub use exemplar_retriever::ExemplarRetriever;
