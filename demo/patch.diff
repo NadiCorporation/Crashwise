@@ -1,0 +1,16 @@
+--- a/vuln.c
++++ b/vuln.c
+@@ -5,7 +5,8 @@
+ void parse(const unsigned char *data, size_t len) {
+     char buf[16];
+     if (len > 0 && data[0] == 'C') {
+-        /* VULNERABLE: no bounds check on len. */
+-        memcpy(buf, data, len);
++        /* Fixed: never copy more than the buffer holds. */
++        size_t n = len < sizeof(buf) ? len : sizeof(buf);
++        memcpy(buf, data, n);
+     }
+     /* Touch the buffer so the copy is not optimised away. */
+     volatile char sink = buf[0];
+     (void)sink;
+ }
