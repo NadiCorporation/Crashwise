@@ -17,7 +17,7 @@ Include:
 - Impact assessment
 - Suggested fix (if any)
 
-Response time: 48 hours. Coordinated disclosure timeline negotiated per report.
+Response time: best effort. CrashWise is pre-alpha research software with one maintainer, so no fixed response time is promised. Coordinated disclosure timeline is negotiated per report.
 
 ---
 
@@ -25,61 +25,48 @@ Response time: 48 hours. Coordinated disclosure timeline negotiated per report.
 
 | Version | Supported |
 |---|---|
-| 1.3.x (current) | Yes |
-| 1.2.x | Yes |
-| 1.1.x | Security fixes only |
-| < 1.1 | No |
+| 0.2.0-alpha (current, pre-release) | Best effort |
+| Earlier versions | No |
+
+There is no 1.x release yet, and no security-fix backport promise for older versions.
 
 ---
 
-## Threat Model
+## Threat Model — current Rust implementation
 
-CrashWise processes **untrusted input** at multiple layers:
+CrashWise processes **untrusted input** at multiple layers. The description below follows the Rust workspace at commit a5a8718, verified against the code, not against legacy documentation.
 
-| Layer | Untrusted Source | Mitigation |
+| Layer | Untrusted Source | Mitigation in current design |
 |---|---|---|
-| Target repository | Malicious `CMakeLists.txt`, `Makefile`, source code | Build runs in worker process (not sandboxed — see below) |
+| Target repository | Malicious `CMakeLists.txt`, `Makefile`, source code | Build input is untrusted. See the build-step boundary below. |
 | Monorepo scoping | Malicious `target_subdir` path | Strict path resolution & directory traversal sanitization |
-| LLM output | Harness code, compilation commands | Regex validator → `clang -fsyntax-only` → compiler allowlist → Docker sandbox |
+| LLM output | Harness code, compilation commands | Validate before execution: syntax check, compiler allowlist, no shell execution of unvalidated commands |
 | Operator signals | `inject_seed` payload | Filename sanitization, base64 validation, size caps, path containment |
-| Crash data | ASAN output, GDB backtraces | Wrapped in `<UNTRUSTED_TARGET_SOURCE>` markers in LLM prompts |
+| Crash data | ASan output, backtraces | Treat as untrusted target data in prompts and reports |
 
-### Known architectural boundaries
+### Known architectural boundaries, verified in code
 
-**The worker host is a trust boundary.** The `setup_target` activity executes the target's build system (`cmake`, `make`) on the worker host without sandboxing. A malicious target repository can execute arbitrary code during the build step. Mitigations:
+**The build step is not sandboxed in the current code.** `crates/crashwise-build/src/builder.rs` runs `cmake`, `meson`, `make` and `clang` directly as host processes, with no sandbox wrapper. A malicious target repository can therefore execute arbitrary code during the build step. Mitigations, as operator practice, not as code guarantees:
 
-- Run workers in disposable VMs or containers with limited network access
-- Do not run workers on machines with access to production credentials
-- Use `--network none` on the worker container if running CrashWise itself in Docker
+- Run builds only in disposable containers or VMs with limited network access
+- Do not run builds on machines with access to production credentials
+- Do not run CrashWise against a target you do not own or have explicit authorisation to audit
 
-**The fuzzer sandbox is hardened.** Once built, the fuzzer binary runs inside Docker with:
-- `--init` (Tini as PID 1 to clean up zombie/defunct child processes)
-- `--network none` (complete network isolation)
-- `--read-only` (immutable root filesystem)
-- `--cap-drop ALL` (AFL++ gets `SYS_PTRACE` only for forkserver)
-- `--pids-limit 1024` (fork-bomb protection)
-- Size-capped tmpfs on `/tmp` and `/dev/shm`
-- No shell access
+**The fuzzing step is sandboxed, rootless, in-process — not Docker, not AFL++ forkserver.** `crates/crashwise-engine/src/sandbox.rs` implements a 4-tier rootless Linux sandbox, applied by `crates/crashwise-engine/src/libafl_runner.rs` to the fuzzing worker: cgroups v2 resource limits, Linux namespaces (user, PID, network, mount, IPC), Seccomp BPF syscall filtering, and POSIX rlimits. The fuzzer itself is LibAFL in-process (`libafl` 0.16.1 in `crates/crashwise-engine/Cargo.toml`), not an AFL++ forkserver.
 
-**LLM-generated code is validated before execution.** The pipeline:
-1. Regex blocklist (fork, exec, system, socket, ptrace, asm)
-2. `clang -fsyntax-only -Werror`
-3. Compiler binary must be in the allowlist
-4. `shlex.split` parsing — no `shell=True`
-5. Compiled binary runs only inside the Docker sandbox
+**LLM-generated code is validated before execution.** Harness code is checked before it is compiled or run, and compiled code runs only inside the fuzzing sandbox described above.
 
 ---
 
 ## Secure Configuration
 
-- Store API keys in `.env` files with `chmod 600`
-- Use `pydantic.SecretStr` for all secret fields (keys are never logged)
-- Set `REDIS_URL` with authentication in production
-- Set `DATABASE_URL` with TLS for PostgreSQL connections
-- Enable R2/S3 storage to avoid crash data accumulating on worker filesystems
+- Store API keys in `.env` files with `chmod 600`. Never commit a real key.
+- Use the `.env.example` variables (workdir, timeouts, API host/port, LLM provider/model) as the configuration reference for this version.
+- Run CrashWise only against software you own or have explicit authorisation to audit, in sandboxed testing.
+- This Rust workspace does not use Python, pydantic, Redis, PostgreSQL, R2/S3, or `uv`. Do not re-add those as configuration requirements unless the code that uses them is also added, with a code pointer.
 
 ---
 
 ## Dependencies
 
-CrashWise pins all direct dependencies. Run `uv lock --check` to verify lockfile integrity. Report suspicious dependency behavior to the security contact above.
+CrashWise pins its Rust dependencies in `Cargo.toml` / `Cargo.lock`. Report suspicious dependency behavior to the security contact above.
